@@ -19,7 +19,8 @@
     "db:down": "docker compose -p grantdesk -f supabase/docker-compose.yml down",
     "db:migrate": "node scripts/migrate.mjs",
     "db:status": "node scripts/migrate.mjs --status",
-    "eval:profile": "bun run tests/evals/profile-extraction.eval.ts"
+    "eval:profile": "bun run tests/evals/profile-extraction.eval.ts",
+    "ingest": "bun run scripts/ingest.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.58.0",
@@ -28,6 +29,7 @@
     "@tanstack/react-start": "^1.132.41",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "exceljs": "^4.4.0",
     "lucide-react": "^0.545.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
