@@ -18,7 +18,8 @@
     "db:up": "docker compose -p grantdesk -f supabase/docker-compose.yml up -d",
     "db:down": "docker compose -p grantdesk -f supabase/docker-compose.yml down",
     "db:migrate": "node scripts/migrate.mjs",
-    "db:status": "node scripts/migrate.mjs --status"
+    "db:status": "node scripts/migrate.mjs --status",
+    "eval:profile": "bun run tests/evals/profile-extraction.eval.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.58.0",
