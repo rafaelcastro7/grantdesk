@@ -1,0 +1,10 @@
+# Normalize to LF in the repository regardless of platform. Without this, a
+# `git checkout` on Windows rewrites every file to CRLF and Prettier then flags
+# all of them — which cost the predecessor a full lint run of 1,814 phantom
+# errors after an unrelated file restore.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.zip binary
+*.docx binary
