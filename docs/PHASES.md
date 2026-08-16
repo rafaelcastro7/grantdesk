@@ -93,6 +93,22 @@ costs a forward pass per candidate) and real BM25 via a Postgres extension
 **Done when:** a proposal drafts end to end against a real call's requirements
 and reused answers appear in the draft.
 
+**Closed.** `bun run eval:drafting` measures the properties that matter without
+a judge, by checking the text itself: 100% of drafts retrieved the stored
+answer, kept its distinctive fact, stayed inside the funder's word limit, and
+contained no number that did not trace back to a supplied fact. Reuse is by
+meaning, not by label — an answer stored as "Track record and past projects" is
+found when the funder asks for "Organizational Capacity", which a text match
+never would.
+
+Two findings changed the design. Most catalog call URLs are JavaScript shells —
+fetching a Grants.gov opportunity page returns none of its own requirements —
+while the full description came down through the API during ingestion and is
+already in our table, so requirements are read from held text first and the URL
+only as a fallback. And funders publish their conditions on the web but keep the
+section list in the application form, so the consultant can add a heading by
+hand; without that the page is correct and useless.
+
 ---
 
 ## Phase 5 — Submit and track

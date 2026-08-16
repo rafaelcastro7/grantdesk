@@ -15,6 +15,7 @@ import { Route as CatalogRouteImport } from './routes/catalog'
 import { Route as ClientsIndexRouteImport } from './routes/clients.index'
 import { Route as ClientsClientIdRouteImport } from './routes/clients.$clientId'
 import { Route as ClientsClientIdMatchesRouteImport } from './routes/clients_.$clientId.matches'
+import { Route as ClientsClientIdProposalsGrantIdRouteImport } from './routes/clients_.$clientId.proposals.$grantId'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -46,6 +47,12 @@ const ClientsClientIdMatchesRoute = ClientsClientIdMatchesRouteImport.update({
   path: '/clients/$clientId/matches',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ClientsClientIdProposalsGrantIdRoute =
+  ClientsClientIdProposalsGrantIdRouteImport.update({
+    id: '/clients_/$clientId/proposals/$grantId',
+    path: '/clients/$clientId/proposals/$grantId',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -54,6 +61,7 @@ export interface FileRoutesByFullPath {
   '/clients/$clientId': typeof ClientsClientIdRoute
   '/clients/': typeof ClientsIndexRoute
   '/clients/$clientId/matches': typeof ClientsClientIdMatchesRoute
+  '/clients/$clientId/proposals/$grantId': typeof ClientsClientIdProposalsGrantIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -62,6 +70,7 @@ export interface FileRoutesByTo {
   '/clients/$clientId': typeof ClientsClientIdRoute
   '/clients': typeof ClientsIndexRoute
   '/clients/$clientId/matches': typeof ClientsClientIdMatchesRoute
+  '/clients/$clientId/proposals/$grantId': typeof ClientsClientIdProposalsGrantIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -71,6 +80,7 @@ export interface FileRoutesById {
   '/clients/$clientId': typeof ClientsClientIdRoute
   '/clients/': typeof ClientsIndexRoute
   '/clients_/$clientId/matches': typeof ClientsClientIdMatchesRoute
+  '/clients_/$clientId/proposals/$grantId': typeof ClientsClientIdProposalsGrantIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -81,6 +91,7 @@ export interface FileRouteTypes {
     | '/clients/$clientId'
     | '/clients/'
     | '/clients/$clientId/matches'
+    | '/clients/$clientId/proposals/$grantId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -89,6 +100,7 @@ export interface FileRouteTypes {
     | '/clients/$clientId'
     | '/clients'
     | '/clients/$clientId/matches'
+    | '/clients/$clientId/proposals/$grantId'
   id:
     | '__root__'
     | '/'
@@ -97,6 +109,7 @@ export interface FileRouteTypes {
     | '/clients/$clientId'
     | '/clients/'
     | '/clients_/$clientId/matches'
+    | '/clients_/$clientId/proposals/$grantId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -106,6 +119,7 @@ export interface RootRouteChildren {
   ClientsClientIdRoute: typeof ClientsClientIdRoute
   ClientsIndexRoute: typeof ClientsIndexRoute
   ClientsClientIdMatchesRoute: typeof ClientsClientIdMatchesRoute
+  ClientsClientIdProposalsGrantIdRoute: typeof ClientsClientIdProposalsGrantIdRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -152,6 +166,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ClientsClientIdMatchesRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/clients_/$clientId/proposals/$grantId': {
+      id: '/clients_/$clientId/proposals/$grantId'
+      path: '/clients/$clientId/proposals/$grantId'
+      fullPath: '/clients/$clientId/proposals/$grantId'
+      preLoaderRoute: typeof ClientsClientIdProposalsGrantIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -162,6 +183,7 @@ const rootRouteChildren: RootRouteChildren = {
   ClientsClientIdRoute: ClientsClientIdRoute,
   ClientsIndexRoute: ClientsIndexRoute,
   ClientsClientIdMatchesRoute: ClientsClientIdMatchesRoute,
+  ClientsClientIdProposalsGrantIdRoute: ClientsClientIdProposalsGrantIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

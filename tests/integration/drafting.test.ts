@@ -1,0 +1,263 @@
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { draftSection, findReusableAnswers, saveAnswer } from "../../src/server/draft";
+import { sourceHash } from "../../src/server/ingest";
+
+/**
+ * Phase 4's claim: a proposal drafts against a real call's requirements, and
+ * what the consultant already wrote gets reused.
+ *
+ * The split matters. *Whether reuse happens* is decidable and lives here — an
+ * answer stored under one funder's wording must be found when a different
+ * funder asks the same thing in different words. *How good the resulting prose
+ * is* is a distribution, and lives in tests/evals/drafting.eval.ts.
+ */
+
+const URL = process.env.SUPABASE_URL ?? "http://localhost:15535";
+const ANON = process.env.SUPABASE_ANON_KEY ?? "";
+const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
+
+const stamp = Date.now();
+const SOURCE_KEY = `test-source-draft-${stamp}`;
+const CREDS = { email: `draft-${stamp}@grantdesk.test`, password: "GrantDesk-Test-2026!" };
+
+/** A fact no model would produce on its own, so its presence proves reuse. */
+const DISTINCTIVE = "the Wentworth Ravine restoration, completed in 2019 with 312 volunteers";
+
+const admin = createClient(URL, SERVICE_KEY, {
+  auth: { persistSession: false, autoRefreshToken: false },
+});
+
+let consultant: SupabaseClient;
+let clientId: string;
+let grantId: string;
+let proposalId: string;
+let requirementId: string;
+
+beforeAll(async () => {
+  expect(ANON, "SUPABASE_ANON_KEY must be set — is .env loaded?").not.toBe("");
+
+  consultant = createClient(URL, ANON, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+  const { error: signUpError } = await consultant.auth.signUp(CREDS);
+  if (signUpError && !/already registered/i.test(signUpError.message)) throw signUpError;
+  const { data: session, error: signInError } = await consultant.auth.signInWithPassword(CREDS);
+  if (signInError) throw signInError;
+
+  const { data: client, error: clientError } = await consultant
+    .from("clients")
+    .insert({ consultant_id: session.user!.id, name: `Ravine Keepers ${stamp}`, country: "CA" })
+    .select("id")
+    .single();
+  if (clientError) throw clientError;
+  clientId = client.id as string;
+
+  const { error: profileError } = await consultant.from("client_profiles").upsert({
+    client_id: clientId,
+    sectors: ["environment", "community"],
+    jurisdictions: ["CA-ON"],
+    stage: "nonprofit",
+    annual_budget: 450_000,
+    capabilities: "We restore urban ravines and run volunteer planting days.",
+    beneficiaries: "residents of low-income neighbourhoods",
+  });
+  if (profileError) throw profileError;
+
+  const { data: funder } = await admin
+    .from("funders")
+    .upsert(
+      { name: `Draft Fixture Funder ${stamp}`, country: "CA", source_key: SOURCE_KEY },
+      { onConflict: "name,country" },
+    )
+    .select("id")
+    .single();
+
+  const { data: grant, error: grantError } = await admin
+    .from("grants")
+    .upsert(
+      {
+        funder_id: funder!.id,
+        title: "Urban Greening Fund",
+        summary: "Supports nonprofits restoring green space in cities.",
+        url: "https://example.org/urban-greening",
+        country: "CA",
+        currency: "CAD",
+        deadline: "2099-12-31",
+        language: "en",
+        source_key: SOURCE_KEY,
+        source_hash: sourceHash(SOURCE_KEY, "urban-greening"),
+        last_seen_at: new Date().toISOString(),
+      },
+      { onConflict: "source_hash" },
+    )
+    .select("id")
+    .single();
+  if (grantError) throw grantError;
+  grantId = grant.id as string;
+
+  // The funder's own wording, deliberately different from how the stored
+  // answer below is labelled.
+  const { data: requirement, error: requirementError } = await consultant
+    .from("requirements")
+    .upsert(
+      {
+        grant_id: grantId,
+        label: "Organizational Capacity",
+        detail: "Demonstrate your ability to deliver projects of this size.",
+        kind: "section",
+        word_limit: 300,
+        evaluation_note: "Scored on evidence of comparable completed work.",
+        source_quote: "Applicants must demonstrate organizational capacity.",
+        sort_order: 0,
+      },
+      { onConflict: "grant_id, label" },
+    )
+    .select("id")
+    .single();
+  if (requirementError) throw requirementError;
+  requirementId = requirement.id as string;
+
+  const { data: proposal, error: proposalError } = await consultant
+    .from("proposals")
+    .upsert({ client_id: clientId, grant_id: grantId }, { onConflict: "client_id, grant_id" })
+    .select("id")
+    .single();
+  if (proposalError) throw proposalError;
+  proposalId = proposal.id as string;
+}, 120_000);
+
+afterAll(async () => {
+  await admin.from("grants").delete().eq("source_key", SOURCE_KEY);
+  await admin.from("funders").delete().eq("source_key", SOURCE_KEY);
+  await admin.from("clients").delete().eq("id", clientId);
+});
+
+describe("the answer library", () => {
+  it("finds a stored answer when a funder asks the same thing in different words", async () => {
+    // Stored as "Track record and past projects"; the call asks for
+    // "Organizational Capacity". A label match finds nothing here, which is
+    // exactly why reuse is by meaning.
+    await saveAnswer(
+      consultant,
+      clientId,
+      "Track record and past projects",
+      `Since 2011 we have delivered eleven restoration projects, including ${DISTINCTIVE}.`,
+    );
+
+    const found = await findReusableAnswers(consultant, clientId, {
+      id: requirementId,
+      label: "Organizational Capacity",
+      detail: "Demonstrate your ability to deliver projects of this size.",
+      wordLimit: 300,
+      evaluationNote: null,
+      sourceQuote: null,
+    });
+
+    expect(found.length).toBeGreaterThan(0);
+    expect(found[0]!.content).toContain("Wentworth Ravine");
+  }, 60_000);
+
+  it("does not surface one client's answer in another client's proposal", async () => {
+    const { data: other } = await consultant
+      .from("clients")
+      .insert({
+        consultant_id: (await consultant.auth.getUser()).data.user!.id,
+        name: `Unrelated ${stamp}`,
+        country: "CA",
+      })
+      .select("id")
+      .single();
+
+    const found = await findReusableAnswers(consultant, (other as { id: string }).id, {
+      id: requirementId,
+      label: "Organizational Capacity",
+      detail: null,
+      wordLimit: null,
+      evaluationNote: null,
+      sourceQuote: null,
+    });
+
+    // A consultant's whole business depends on this never happening.
+    expect(found).toEqual([]);
+    await consultant
+      .from("clients")
+      .delete()
+      .eq("id", (other as { id: string }).id);
+  }, 60_000);
+});
+
+describe("drafting", () => {
+  it("drafts against the requirement and records what it reused", async () => {
+    const result = await draftSection(consultant, clientId, {
+      id: requirementId,
+      label: "Organizational Capacity",
+      detail: "Demonstrate your ability to deliver projects of this size.",
+      wordLimit: 300,
+      evaluationNote: "Scored on evidence of comparable completed work.",
+      sourceQuote: "Applicants must demonstrate organizational capacity.",
+    });
+
+    expect(result.content.length).toBeGreaterThan(100);
+    expect(result.wordCount).toBeGreaterThan(20);
+    // Provenance: a draft nobody can attribute has to be re-verified from
+    // scratch, which costs more than writing it did.
+    expect(result.draftedBy).toMatch(/\w+\/\w+/);
+    expect(result.reusedAnswers.length).toBeGreaterThan(0);
+  }, 180_000);
+
+  it("refuses to draft for a client it knows nothing about", async () => {
+    const { data: blank } = await consultant
+      .from("clients")
+      .insert({
+        consultant_id: (await consultant.auth.getUser()).data.user!.id,
+        name: `Blank ${stamp}`,
+        country: "CA",
+      })
+      .select("id")
+      .single();
+
+    // Drafting from an empty profile produces confident text about an
+    // organization we know nothing about — the most damaging thing this
+    // product could hand a consultant.
+    await expect(
+      draftSection(consultant, (blank as { id: string }).id, {
+        id: requirementId,
+        label: "Organizational Capacity",
+        detail: null,
+        wordLimit: null,
+        evaluationNote: null,
+        sourceQuote: null,
+      }),
+    ).rejects.toThrow("no_profile");
+
+    await consultant
+      .from("clients")
+      .delete()
+      .eq("id", (blank as { id: string }).id);
+  }, 60_000);
+
+  it("stores the section against its requirement, with its provenance", async () => {
+    const { error } = await consultant.from("proposal_sections").upsert(
+      {
+        proposal_id: proposalId,
+        requirement_id: requirementId,
+        heading: "Organizational Capacity",
+        content: "Drafted content.",
+        word_count: 2,
+        drafted_by: "test/fixture",
+        sort_order: 0,
+      },
+      { onConflict: "proposal_id, requirement_id" },
+    );
+    expect(error).toBeNull();
+
+    const { count } = await consultant
+      .from("proposal_sections")
+      .select("id", { count: "exact", head: true })
+      .eq("proposal_id", proposalId)
+      .eq("requirement_id", requirementId);
+    // Re-drafting must replace the section, not append a second copy of it.
+    expect(count).toBe(1);
+  });
+});

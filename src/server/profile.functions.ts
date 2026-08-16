@@ -10,7 +10,7 @@ import { extractProfileFromUrl } from "./extract-profile";
  * somewhere easier to get wrong.
  */
 export const extractProfile = createServerFn({ method: "POST" })
-  .inputValidator(
+  .validator(
     z.object({
       url: z
         .string()

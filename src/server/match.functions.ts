@@ -26,7 +26,7 @@ function callerClient(accessToken: string) {
 }
 
 export const findMatches = createServerFn({ method: "POST" })
-  .inputValidator(
+  .validator(
     z.object({
       clientId: z.string().uuid(),
       accessToken: z.string().min(10, "Your session expired. Sign in again."),

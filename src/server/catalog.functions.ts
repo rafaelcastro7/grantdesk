@@ -14,7 +14,7 @@ import { coverageByMarket, type MarketCoverage, type SourceHealth } from "@/lib/
  * a healthy quiet source from a broken one.
  */
 export const getCoverage = createServerFn({ method: "GET" })
-  .inputValidator(z.object({}))
+  .validator(z.object({}))
   .handler(async (): Promise<{ coverage: MarketCoverage[]; totalGrants: number }> => {
     const env = serverEnv();
     const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {

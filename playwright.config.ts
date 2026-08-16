@@ -23,7 +23,13 @@ export default defineConfig({
   webServer: {
     command: "bun run dev",
     url: "http://localhost:5180",
-    reuseExistingServer: true,
+    // Never reuse a server this run did not start. A dev server left running
+    // from an earlier session answered "every provider failed" for a request
+    // that works perfectly against a fresh one, and the suite spent a full run
+    // reporting a defect that did not exist — worse than being slow to start.
+    // If a dev server is already up, Playwright says so plainly, and a clear
+    // instruction beats a phantom failure.
+    reuseExistingServer: false,
     timeout: 120_000,
   },
 });

@@ -207,7 +207,7 @@ function MatchesPage() {
             {open && (
               <ul className="mt-3 flex flex-col gap-px overflow-hidden rounded-md border border-[var(--color-rule)] bg-[var(--color-rule)]">
                 {rows.map((row) => (
-                  <MatchCard key={row.id} row={row} />
+                  <MatchCard key={row.id} row={row} clientId={clientId} />
                 ))}
               </ul>
             )}
@@ -234,7 +234,7 @@ function money(row: NonNullable<MatchRow["grants"]>): string | null {
   return null;
 }
 
-function MatchCard({ row }: { row: MatchRow }) {
+function MatchCard({ row, clientId }: { row: MatchRow; clientId: string }) {
   const grant = row.grants;
   if (!grant) return null;
 
@@ -272,6 +272,19 @@ function MatchCard({ row }: { row: MatchRow }) {
       </p>
 
       {deciding && <p className="mt-2 text-sm">{deciding.detail}</p>}
+
+      {/* Only where applying is actually possible. Offering to draft against a
+          call the rules just ruled out would undo the verdict one line above. */}
+      {row.verdict === "eligible" && (
+        <Link
+          to="/clients/$clientId/proposals/$grantId"
+          params={{ clientId, grantId: grant.id }}
+          data-testid="to-proposal"
+          className="mt-2 inline-block text-sm font-medium text-[var(--color-accent)]"
+        >
+          Draft this application →
+        </Link>
+      )}
 
       <details className="mt-2">
         <summary className="cursor-pointer text-xs text-[var(--color-ink-soft)]">
