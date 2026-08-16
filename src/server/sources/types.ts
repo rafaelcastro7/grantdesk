@@ -29,6 +29,15 @@ export type SourceGrant = {
   amountMax?: number | null;
   deadline?: string | null;
   language?: string;
+  /**
+   * Canonical applicant types (src/lib/applicant-types.ts). An empty array
+   * means the source published no machine-readable list — which the rules
+   * engine must be able to tell apart from "open to nobody", so adapters never
+   * fill this in by inference.
+   */
+  eligibleApplicantTypes?: readonly string[];
+  /** The funder's own eligibility sentence, quoted rather than paraphrased. */
+  eligibilityNote?: string | null;
   /** Stable across re-runs; this is what makes ingestion idempotent. */
   externalId: string;
 };

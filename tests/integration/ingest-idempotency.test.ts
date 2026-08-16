@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { runSource } from "../../src/server/ingest";
 import { sourceHash } from "../../src/server/ingest";
 import type { SourceAdapter } from "../../src/server/sources";
@@ -72,6 +72,18 @@ const countGrants = async () => {
 
 beforeAll(() => {
   expect(SERVICE_KEY, "SUPABASE_SERVICE_ROLE_KEY must be set — is .env loaded?").not.toBe("");
+});
+
+/**
+ * The catalog is shared reference data, and the coverage page counts it in
+ * front of the user. Fixture rows left behind by a test run therefore show up
+ * as real grants in a real market — which is exactly the overstatement this
+ * project exists to stop doing. Clean up after ourselves.
+ */
+afterAll(async () => {
+  await admin.from("grants").delete().like("source_key", "test-source-%");
+  await admin.from("funders").delete().like("source_key", "test-source-%");
+  await admin.from("source_runs").delete().like("source_key", "test-source-%");
 });
 
 describe("running a source twice", () => {

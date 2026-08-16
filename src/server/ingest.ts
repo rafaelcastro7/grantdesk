@@ -101,6 +101,8 @@ export async function runSource(
         amount_max: grant.amountMax ?? null,
         deadline: grant.deadline ?? null,
         language: grant.language ?? "en",
+        eligible_applicant_types: grant.eligibleApplicantTypes ?? [],
+        eligibility_note: grant.eligibilityNote ?? null,
         source_key: adapter.key,
         source_hash: sourceHash(adapter.key, grant.externalId),
         last_seen_at: new Date().toISOString(),

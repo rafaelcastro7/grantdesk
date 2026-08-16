@@ -1,3 +1,5 @@
+import { fromGrantsGovCodes } from "@/lib/applicant-types";
+import { htmlToText } from "@/lib/html-text";
 import type { SourceAdapter, SourceFunder, SourceGrant } from "./types";
 
 /**
@@ -10,7 +12,16 @@ import type { SourceAdapter, SourceFunder, SourceGrant } from "./types";
  */
 
 const SEARCH2_URL = "https://api.grants.gov/v1/api/search2";
+const FETCH_URL = "https://api.grants.gov/v1/api/fetchOpportunity";
 const PAGE_SIZE = 500;
+/**
+ * Search2 returns titles and dates only. Everything matching actually needs —
+ * the description that lexical and vector retrieval read, the award range, and
+ * the structured applicant types the eligibility gate decides on — lives one
+ * request deeper. Details are therefore fetched per opportunity, bounded by
+ * this many in flight so a full run does not hammer a public API.
+ */
+const DETAIL_CONCURRENCY = 8;
 
 type OppHit = {
   id?: string;
@@ -57,6 +68,90 @@ async function fetchPage(startRecordNum: number) {
   return { hits: body.data?.oppHits ?? [], hitCount: body.data?.hitCount ?? 0 };
 }
 
+export type OppDetail = {
+  summary: string | null;
+  eligibilityNote: string | null;
+  eligibleApplicantTypes: string[];
+  amountMin: number | null;
+  amountMax: number | null;
+};
+
+/** Award figures arrive as strings, and "none" is a real value in this feed. */
+export function parseAmount(raw: unknown): number | null {
+  if (typeof raw === "number") return Number.isFinite(raw) ? raw : null;
+  if (typeof raw !== "string") return null;
+  const cleaned = raw.replace(/[$,\s]/g, "");
+  if (!/^\d+(\.\d+)?$/.test(cleaned)) return null;
+  const value = Number(cleaned);
+  return value > 0 ? value : null;
+}
+
+export function readDetail(body: unknown): OppDetail {
+  // Posted opportunities carry a `synopsis`; forecasted ones carry a `forecast`
+  // with the same fields under a different description key. Reading only the
+  // first silently dropped the description and applicant list for every
+  // forecasted call — a third of the feed, and precisely the third a consultant
+  // most wants early warning of.
+  const data = (body as { data?: Record<string, unknown> })?.data ?? {};
+  const detail = ((data.synopsis ?? data.forecast ?? {}) as Record<string, unknown>) || {};
+  const applicantTypes = (detail.applicantTypes ?? []) as Array<{ id?: string }>;
+  const description = detail.synopsisDesc ?? detail.forecastDesc ?? "";
+
+  return {
+    // The description is HTML in this feed; the tsvector and the embedding both
+    // want prose, and a consultant reading the card wants it even more.
+    summary: htmlToText(String(description)).slice(0, 4000) || null,
+    eligibilityNote:
+      htmlToText(String(detail.applicantEligibilityDesc ?? "")).slice(0, 2000) || null,
+    eligibleApplicantTypes: fromGrantsGovCodes(
+      applicantTypes.map((t) => String(t?.id ?? "")).filter(Boolean),
+    ),
+    amountMin: parseAmount(detail.awardFloor),
+    amountMax: parseAmount(detail.awardCeiling),
+  };
+}
+
+const EMPTY_DETAIL: OppDetail = {
+  summary: null,
+  eligibilityNote: null,
+  eligibleApplicantTypes: [],
+  amountMin: null,
+  amountMax: null,
+};
+
+async function fetchDetail(opportunityId: string): Promise<OppDetail> {
+  try {
+    const response = await fetch(FETCH_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ opportunityId }),
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!response.ok) return EMPTY_DETAIL;
+    return readDetail(await response.json());
+  } catch {
+    // One unreadable detail must not lose the opportunity itself. The grant
+    // still lands with its title and deadline, and its applicant list stays
+    // empty — which the rules engine reports as unverified rather than open.
+    return EMPTY_DETAIL;
+  }
+}
+
+/** Bounded fan-out: a worker pool, so a 2000-opportunity run stays polite. */
+async function fetchDetails(ids: string[]): Promise<Map<string, OppDetail>> {
+  const out = new Map<string, OppDetail>();
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(DETAIL_CONCURRENCY, ids.length) }, async () => {
+      for (let i = next++; i < ids.length; i = next++) {
+        const id = ids[i];
+        if (id) out.set(id, await fetchDetail(id));
+      }
+    }),
+  );
+  return out;
+}
+
 export const grantsGov: SourceAdapter = {
   key: "grants-gov",
   label: "Grants.gov",
@@ -77,12 +172,14 @@ export const grantsGov: SourceAdapter = {
       start += page.hits.length;
     }
 
-    const usable = hits.filter((h) => h.title && h.agency).slice(0, limit);
+    const usable = hits.filter((h) => h.title && h.agency && h.id).slice(0, limit);
+    const details = await fetchDetails(usable.map((h) => h.id!));
 
     const funders = new Map<string, SourceFunder>();
     const grants: SourceGrant[] = [];
 
     for (const hit of usable) {
+      const detail = details.get(hit.id!) ?? EMPTY_DETAIL;
       const name = hit.agency!;
       if (!funders.has(name)) {
         funders.set(name, {
@@ -100,13 +197,16 @@ export const grantsGov: SourceAdapter = {
         funderName: name,
         funderCountry: "US",
         title: hit.title!.slice(0, 500),
-        url: hit.id
-          ? `https://www.grants.gov/search-results-detail/${hit.id}`
-          : "https://www.grants.gov",
+        summary: detail.summary,
+        url: `https://www.grants.gov/search-results-detail/${hit.id}`,
         country: "US",
         currency: "USD",
+        amountMin: detail.amountMin,
+        amountMax: detail.amountMax,
         deadline: parseCloseDate(hit.closeDate),
         language: "en",
+        eligibleApplicantTypes: detail.eligibleApplicantTypes,
+        eligibilityNote: detail.eligibilityNote,
         externalId: `grants-gov:${hit.number || hit.id}`,
       });
     }

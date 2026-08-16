@@ -18,7 +18,7 @@ export const PHASES: readonly Phase[] = [
   { id: "0", title: "Foundation: isolated stack, schema, client isolation", status: "done" },
   { id: "1", title: "A client profile in ten minutes", status: "done" },
   { id: "2", title: "Catalog and honest coverage", status: "done" },
-  { id: "3", title: "Verified matches", status: "pending" },
+  { id: "3", title: "Verified matches", status: "done" },
   { id: "4", title: "Requirement-driven drafting", status: "pending" },
   { id: "5", title: "Submit and track", status: "pending" },
 ];

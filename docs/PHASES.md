@@ -62,6 +62,20 @@ importer is idempotent, and the UI states coverage per market truthfully.
 grant restricted to a jurisdiction the client is not in comes back ineligible
 with a stated reason.
 
+**Closed.** `bun run eval:match` runs in CI and exits non-zero if hybrid
+retrieval fails to beat the keyword baseline. Measured on the labelled corpus:
+precision@5 24% → 60% (the corpus ceiling), recall 33% → 100%, lexical traps in
+the top 5 six → one. Four verdict tests in `tests/integration/match-verdicts`
+prove a grant restricted elsewhere comes back ineligible with the rule and both
+jurisdictions named. See ADR-0004.
+
+Two things changed shape while building it. Rules return pass/fail/**unknown**
+rather than a boolean, because "the funder did not publish enough to decide" is
+the answer this product most needs to be able to give. And the profile became
+editable by hand — the gap prompt was asking a question the UI gave no way to
+answer, and extraction alone leaves the consultant stranded whenever a website
+does not cooperate.
+
 Deferred until measured on our own corpus, not adopted on benchmark reputation:
 cross-encoder reranking (large reported gains but on unrelated domains, and it
 costs a forward pass per candidate) and real BM25 via a Postgres extension
