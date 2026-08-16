@@ -21,7 +21,14 @@ plugins:
     config:
       origins: ["http://localhost:5180"]
       methods: [GET, POST, PATCH, PUT, DELETE, OPTIONS]
-      headers: [Accept, Authorization, Content-Type, apikey, x-client-info, Prefer, Range]
+      # No explicit `headers` list on purpose. Kong then echoes whatever the
+      # preflight asked for, which is the only maintainable answer here:
+      # supabase-js sends x-supabase-api-version, accept-profile, x-retry-count
+      # and adds more over time, and each omission surfaces in the browser only
+      # as "Failed to fetch" — a message that names nothing. Enumerating them
+      # is a standing invitation to a confusing outage after a client upgrade.
+      #
+      # Origin stays pinned to the app, so this widens headers, not access.
       exposed_headers: [Content-Range, Content-Profile]
       credentials: true
       max_age: 3600
