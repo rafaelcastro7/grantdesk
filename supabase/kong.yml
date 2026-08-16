@@ -1,0 +1,63 @@
+_format_version: "3.0"
+
+# Keys are signed with this stack's own JWT secret, so they are not
+# interchangeable with any other local Supabase stack on this machine.
+consumers:
+  - username: anon
+    keyauth_credentials:
+      - key: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6ImdyYW50ZGVzayIsImF1ZCI6ImF1dGhlbnRpY2F0ZWQiLCJpYXQiOjE3ODY4OTIwNTksImV4cCI6MTk0NDU3MjA1OX0.1eCTOEHNfb4q3La4FkiHvM-GkPhgGyExNpbVqnisEPA
+  - username: service_role
+    keyauth_credentials:
+      - key: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoic2VydmljZV9yb2xlIiwiaXNzIjoiZ3JhbnRkZXNrIiwiYXVkIjoiYXV0aGVudGljYXRlZCIsImlhdCI6MTc4Njg5MjA1OSwiZXhwIjoxOTQ0NTcyMDU5fQ.SoXMHJ_82G1q86cvg5nvgVV4zMwwbwoEqwZUyuZakC4
+
+acls:
+  - consumer: anon
+    group: anon
+  - consumer: service_role
+    group: admin
+
+plugins:
+  - name: cors
+    config:
+      origins: ["http://localhost:5180"]
+      methods: [GET, POST, PATCH, PUT, DELETE, OPTIONS]
+      headers: [Accept, Authorization, Content-Type, apikey, x-client-info, Prefer, Range]
+      exposed_headers: [Content-Range, Content-Profile]
+      credentials: true
+      max_age: 3600
+
+services:
+  - name: auth
+    url: http://auth:9999/
+    routes:
+      - name: auth_v1_open
+        strip_path: true
+        paths: ["/auth/v1/verify", "/auth/v1/callback", "/auth/v1/authorize"]
+      - name: auth_v1
+        strip_path: true
+        paths: ["/auth/v1/"]
+    plugins:
+      - name: key-auth
+        config:
+          hide_credentials: false
+          key_names: [apikey]
+      - name: acl
+        config:
+          hide_groups_header: true
+          allow: [anon, admin]
+
+  - name: rest
+    url: http://rest:3000/
+    routes:
+      - name: rest_v1
+        strip_path: true
+        paths: ["/rest/v1/"]
+    plugins:
+      - name: key-auth
+        config:
+          hide_credentials: true
+          key_names: [apikey]
+      - name: acl
+        config:
+          hide_groups_header: true
+          allow: [anon, admin]

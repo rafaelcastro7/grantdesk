@@ -1,0 +1,103 @@
+# GrantDesk local stack — deliberately isolated from any other Supabase stack
+# on this machine (see ADR-0001). Distinct ports, distinct JWT secret, and a
+# distinct compose project name (`-p grantdesk`, set in package.json) so the
+# volumes never collide.
+#
+#   Postgres  :15532      gateway (Kong) :15535
+#   GoTrue    :15533      PostgREST      :15534
+#
+# Up:   bun run db:up
+# Down: bun run db:down
+
+x-db-password: &db-password grantdesk-local-postgres-password
+x-jwt-secret: &jwt-secret grantdesk-local-dev-jwt-secret-not-for-production-2026
+
+services:
+  # pgvector image directly rather than a custom build: Phase 0 needs vector
+  # search, not pg_cron, and every avoided Dockerfile is one less thing that
+  # breaks on an upgrade.
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: grantdesk-db
+    restart: unless-stopped
+    ports:
+      - "15532:5432"
+    environment:
+      POSTGRES_PASSWORD: *db-password
+      POSTGRES_DB: postgres
+    volumes:
+      - ./init:/docker-entrypoint-initdb.d:ro
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  auth:
+    image: supabase/gotrue:v2.158.1
+    container_name: grantdesk-auth
+    restart: unless-stopped
+    ports:
+      - "15533:9999"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      API_EXTERNAL_URL: http://localhost:15535
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: 9999
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: postgres://postgres:grantdesk-local-postgres-password@db:5432/postgres?search_path=auth
+      GOTRUE_SITE_URL: http://localhost:5180
+      GOTRUE_URI_ALLOW_LIST: ""
+      GOTRUE_DISABLE_SIGNUP: "false"
+      GOTRUE_EXTERNAL_EMAIL_ENABLED: "true"
+      GOTRUE_MAILER_AUTOCONFIRM: "true"
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
+      GOTRUE_JWT_EXP: 3600
+      GOTRUE_JWT_AUD: authenticated
+      GOTRUE_JWT_DEFAULT_ROLE: anon
+      GOTRUE_JWT_ADMIN_ROLES: service_role
+      GOTRUE_JWT_ISSUER: grantdesk
+      GOTRUE_JWT_SECRET: *jwt-secret
+      APP_NAME: GrantDesk
+
+  rest:
+    image: postgrest/postgrest:v12.2.3
+    container_name: grantdesk-rest
+    restart: unless-stopped
+    ports:
+      - "15534:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGRST_DB_URI: postgres://postgres:grantdesk-local-postgres-password@db:5432/postgres
+      PGRST_DB_SCHEMAS: public
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_JWT_SECRET: *jwt-secret
+      PGRST_JWT_AUD: authenticated
+      PGRST_DB_USE_LEGACY_GUCS: "false"
+
+  kong:
+    image: kong:3.9
+    container_name: grantdesk-kong
+    restart: unless-stopped
+    ports:
+      - "15535:8000"
+    depends_on:
+      rest:
+        condition: service_started
+      auth:
+        condition: service_started
+    volumes:
+      - ./kong.yml:/var/lib/kong/kong.yml:ro
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /var/lib/kong/kong.yml
+      KONG_DNS_RESOLVER: 127.0.0.11
+
+volumes:
+  db-data:
+    name: grantdesk-db-data

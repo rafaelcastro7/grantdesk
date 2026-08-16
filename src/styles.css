@@ -1,0 +1,47 @@
+@import "tailwindcss";
+
+@theme {
+  /* Neutrals biased toward the accent rather than pure grey, so surfaces read
+     as chosen. Ink is near-black with a slight cool cast. */
+  --color-ink: oklch(0.19 0.014 240);
+  --color-ink-soft: oklch(0.46 0.018 240);
+  --color-paper: oklch(0.985 0.003 240);
+  --color-surface: oklch(1 0 0);
+  --color-rule: oklch(0.91 0.008 240);
+
+  /* One accent, used sparingly. */
+  --color-accent: oklch(0.52 0.13 240);
+  --color-accent-soft: oklch(0.95 0.02 240);
+
+  /* Verdict colours are semantic and deliberately separate from the accent:
+     an eligible/ineligible decision must never be confused with brand. */
+  --color-eligible: oklch(0.53 0.12 155);
+  --color-ineligible: oklch(0.55 0.15 25);
+  --color-needs-input: oklch(0.62 0.12 75);
+}
+
+:root {
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  @theme {
+    --color-ink: oklch(0.94 0.008 240);
+    --color-ink-soft: oklch(0.72 0.014 240);
+    --color-paper: oklch(0.17 0.012 240);
+    --color-surface: oklch(0.21 0.014 240);
+    --color-rule: oklch(0.3 0.016 240);
+    --color-accent: oklch(0.72 0.12 240);
+    --color-accent-soft: oklch(0.27 0.03 240);
+  }
+}
+
+body {
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family:
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    sans-serif;
+}

@@ -1,0 +1,22 @@
+node_modules/
+dist/
+.output/
+.tanstack/
+*.log
+
+# Secrets. .env.example is the template; never commit a real one.
+.env
+.env.*
+!.env.example
+
+# Test output
+test-results/
+playwright-report/
+coverage/
+
+# Downloaded open-data caches — every importer re-fetches what is missing.
+data/cache/
+
+# OS / editor
+.DS_Store
+Thumbs.db
