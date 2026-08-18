@@ -16,6 +16,14 @@
  * deliberate lexical traps each arm let through. The traps matter most — they
  * are the false positives that teach a consultant to stop trusting the page.
  *
+ * One caveat, stated rather than hidden: the corpus is loaded into the live
+ * catalog and each arm's candidate pool is capped before results are filtered
+ * back down to it, so which *non-relevant* rows reach the top five shifts as
+ * the surrounding catalog grows. Precision and recall have been stable across
+ * runs; the trap count has moved (1 to 3 for the hybrid arm after a
+ * re-ingestion). The comparison stays sound because both arms face the same
+ * catalog in the same run, but the absolute numbers are not a fixed benchmark.
+ *
  * Usage: bun run eval:match
  */
 

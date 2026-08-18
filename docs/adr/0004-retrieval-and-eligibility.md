@@ -86,6 +86,13 @@ P@5's ceiling on that corpus is 60% — each profile has only three relevant
 grants for five slots — so hybrid retrieval reaches the maximum achievable
 precision while the baseline reaches 40% of it.
 
+The trap count is the least stable of the three numbers: the corpus is loaded
+into the live catalog and each arm's candidate pool is capped before results are
+filtered back to it, so which non-relevant rows reach the top five shifts as the
+catalog grows (1 to 3 for the hybrid arm after a re-ingestion). Precision and
+recall have held. The comparison is sound because both arms face the same
+catalog in the same run, but these are not fixed benchmark figures.
+
 The corpus is hand-written rather than sampled from the live catalog, and
 labelled by hand rather than by a model. A model-judged eval measures the judge
 as much as the retriever: the score moves when the judge changes and nobody can
