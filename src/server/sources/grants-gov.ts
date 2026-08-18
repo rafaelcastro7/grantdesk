@@ -30,6 +30,8 @@ type OppHit = {
   agency?: string;
   agencyCode?: string;
   closeDate?: string;
+  /** Assistance Listing (formerly CFDA) numbers — the key prior awards are indexed under. */
+  cfdaList?: string[];
 };
 
 /** Grants.gov returns US-format dates; anything else becomes null, not a guess. */
@@ -207,6 +209,7 @@ export const grantsGov: SourceAdapter = {
         language: "en",
         eligibleApplicantTypes: detail.eligibleApplicantTypes,
         eligibilityNote: detail.eligibilityNote,
+        assistanceListings: (hit.cfdaList ?? []).map((code) => String(code).trim()).filter(Boolean),
         externalId: `grants-gov:${hit.number || hit.id}`,
       });
     }

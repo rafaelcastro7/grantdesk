@@ -38,6 +38,12 @@ export type SourceGrant = {
   eligibleApplicantTypes?: readonly string[];
   /** The funder's own eligibility sentence, quoted rather than paraphrased. */
   eligibilityNote?: string | null;
+  /**
+   * Assistance Listing (formerly CFDA) numbers, for sources that publish them.
+   * This is the key USAspending indexes prior awards under, so it is what makes
+   * "who won this before" answerable at all.
+   */
+  assistanceListings?: readonly string[];
   /** Stable across re-runs; this is what makes ingestion idempotent. */
   externalId: string;
 };

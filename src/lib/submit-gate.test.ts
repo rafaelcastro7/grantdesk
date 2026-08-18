@@ -1,0 +1,134 @@
+import { describe, expect, it } from "vitest";
+import { assessSubmission, countGaps, type SubmitCandidate } from "./submit-gate";
+
+const TODAY = new Date("2026-08-16T12:00:00Z");
+
+function candidate(over: Partial<SubmitCandidate> = {}): SubmitCandidate {
+  return {
+    verdict: "eligible",
+    deadline: "2026-12-01",
+    sections: [
+      { label: "Project Description", content: "A complete answer.", wordLimit: 500, wordCount: 3 },
+    ],
+    conditions: [],
+    humanReviewed: true,
+    alreadySubmitted: false,
+    today: TODAY,
+    ...over,
+  };
+}
+
+const keys = (c: SubmitCandidate) => assessSubmission(c).blockers.map((b) => b.key);
+
+describe("a ready application", () => {
+  it("has nothing blocking it", () => {
+    const result = assessSubmission(candidate());
+    expect(result.blockers).toEqual([]);
+    expect(result.canSubmit).toBe(true);
+  });
+});
+
+describe("hard blockers", () => {
+  it("refuses a call the rules ruled this client out of", () => {
+    const result = assessSubmission(candidate({ verdict: "ineligible" }));
+    expect(result.canSubmit).toBe(false);
+    expect(result.canOverride).toBe(false);
+  });
+
+  it("refuses a closed call", () => {
+    expect(keys(candidate({ deadline: "2026-01-01" }))).toContain("closed");
+  });
+
+  it("names the section that has not been written", () => {
+    const result = assessSubmission(
+      candidate({
+        sections: [{ label: "Budget Narrative", content: "   ", wordLimit: null, wordCount: 0 }],
+      }),
+    );
+    expect(result.blockers[0]!.detail).toContain("Budget Narrative");
+  });
+
+  it("refuses a draft that still admits a missing fact", () => {
+    // Otherwise "[NEED: number of participants]" reaches the funder verbatim.
+    const result = assessSubmission(
+      candidate({
+        sections: [
+          {
+            label: "Impact",
+            content: "We served [NEED: how many] people in [NEED: which year].",
+            wordLimit: null,
+            wordCount: 8,
+          },
+        ],
+      }),
+    );
+    expect(result.canSubmit).toBe(false);
+    expect(result.blockers.find((b) => b.key === "unfilled_gaps")!.detail).toContain(
+      "2 marked gaps",
+    );
+  });
+
+  it("refuses when a condition the call rejects without is unconfirmed", () => {
+    const result = assessSubmission(
+      candidate({
+        conditions: [
+          { label: "Audited financial statements", isCritical: true, acknowledged: false },
+        ],
+      }),
+    );
+    expect(result.blockers.find((b) => b.key === "unmet_conditions")!.detail).toContain(
+      "Audited financial statements",
+    );
+  });
+
+  it("ignores a non-critical condition", () => {
+    expect(
+      keys(
+        candidate({
+          conditions: [{ label: "Optional letter", isCritical: false, acknowledged: false }],
+        }),
+      ),
+    ).not.toContain("unmet_conditions");
+  });
+
+  it("never lets a machine decide the application was reviewed", () => {
+    // This is the line where a person takes responsibility for everything above.
+    const result = assessSubmission(candidate({ humanReviewed: false }));
+    expect(result.canSubmit).toBe(false);
+    expect(result.canOverride).toBe(false);
+    expect(result.blockers.find((b) => b.key === "not_reviewed")).toBeTruthy();
+  });
+
+  it("refuses to record a second submission for the same application", () => {
+    expect(keys(candidate({ alreadySubmitted: true }))).toContain("already_submitted");
+  });
+});
+
+describe("soft blockers", () => {
+  it("lets the consultant override an unsettled eligibility verdict", () => {
+    const result = assessSubmission(candidate({ verdict: null }));
+    expect(result.canSubmit).toBe(false);
+    // Their client, their call — but they are told what they are overriding.
+    expect(result.canOverride).toBe(true);
+  });
+
+  it("states an over-limit section without enforcing it", () => {
+    // Some funders truncate and some reject; we cannot know which, so we say
+    // it rather than decide it.
+    const result = assessSubmission(
+      candidate({
+        sections: [{ label: "Summary", content: "words", wordLimit: 100, wordCount: 140 }],
+      }),
+    );
+    expect(result.canOverride).toBe(true);
+    expect(result.blockers[0]!.detail).toContain("40 words over");
+  });
+});
+
+describe("countGaps", () => {
+  it("counts only real markers", () => {
+    expect(countGaps("We need [NEED: a number] and [NEED: a date].")).toBe(2);
+    expect(countGaps("We need nothing.")).toBe(0);
+    expect(countGaps(null)).toBe(0);
+  });
+});

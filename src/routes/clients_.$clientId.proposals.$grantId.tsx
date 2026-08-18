@@ -8,6 +8,9 @@ import {
   readRequirements,
   saveToAnswerLibrary,
 } from "@/server/proposal.functions";
+import { checkReadiness, getPastAwards, submitProposal } from "@/server/submit.functions";
+import type { Blocker } from "@/lib/submit-gate";
+import type { PastAwardsResult } from "@/server/past-awards";
 
 export const Route = createFileRoute("/clients_/$clientId/proposals/$grantId")({
   component: ProposalPage,
@@ -52,6 +55,9 @@ function ProposalPage() {
   const runRead = useServerFn(readRequirements);
   const runDraft = useServerFn(draftProposalSection);
   const runSaveAnswer = useServerFn(saveToAnswerLibrary);
+  const runReadiness = useServerFn(checkReadiness);
+  const runSubmit = useServerFn(submitProposal);
+  const runPastAwards = useServerFn(getPastAwards);
 
   const [grant, setGrant] = useState<{
     title: string;
@@ -61,6 +67,14 @@ function ProposalPage() {
   const [proposalId, setProposalId] = useState<string | null>(null);
   const [requirements, setRequirements] = useState<Requirement[] | null>(null);
   const [sections, setSections] = useState<Record<string, Section>>({});
+  const [acknowledged, setAcknowledged] = useState<Set<string>>(new Set());
+  const [submission, setSubmission] = useState<{
+    submitted_at: string;
+    outcome: string | null;
+    confirmation_number: string | null;
+  } | null>(null);
+  const [blockers, setBlockers] = useState<Blocker[] | null>(null);
+  const [awards, setAwards] = useState<PastAwardsResult | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
@@ -119,6 +133,21 @@ function ProposalPage() {
       if (section.requirement_id) byRequirement[section.requirement_id] = section;
     }
     setSections(byRequirement);
+
+    const { data: acks } = await supabase()
+      .from("requirement_acknowledgements")
+      .select("requirement_id")
+      .eq("proposal_id", id);
+    setAcknowledged(
+      new Set(((acks ?? []) as Array<{ requirement_id: string }>).map((a) => a.requirement_id)),
+    );
+
+    const { data: sent } = await supabase()
+      .from("submissions")
+      .select("submitted_at, outcome, confirmation_number")
+      .eq("proposal_id", id)
+      .maybeSingle();
+    setSubmission(sent as typeof submission);
   }, [clientId, grantId]);
 
   useEffect(() => {
@@ -176,6 +205,117 @@ function ProposalPage() {
       if (insertError) throw insertError;
       form.reset();
       await load();
+    } catch (caught) {
+      setError(errorMessage(caught));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  /**
+   * A condition only the consultant can clear — audited statements, a signed
+   * letter. The software cannot verify it, so it records that a person said
+   * they have it, and who.
+   */
+  async function acknowledge(requirement: Requirement, has: boolean) {
+    if (!proposalId) return;
+    setError(null);
+
+    // Flipped locally first. The write is a round-trip to Postgres, and a
+    // checkbox that stays where it was for half a second reads as broken —
+    // people click it again, which is how a confirmation gets toggled back off
+    // without anyone noticing. Reverted below if the write actually fails.
+    const optimistic = new Set(acknowledged);
+    if (has) optimistic.add(requirement.id);
+    else optimistic.delete(requirement.id);
+    setAcknowledged(optimistic);
+
+    // Cleared here, synchronously, and not after the write returns. Doing it
+    // afterwards let a slow acknowledgement wipe the results of a readiness
+    // check the consultant had already asked for since — the checklist simply
+    // vanished, with no way to tell why.
+    setBlockers(null);
+
+    try {
+      if (has) {
+        const { data: user } = await supabase().auth.getUser();
+        const { error: ackError } = await supabase().from("requirement_acknowledgements").upsert(
+          {
+            proposal_id: proposalId,
+            requirement_id: requirement.id,
+            acknowledged_by: user.user!.id,
+          },
+          { onConflict: "proposal_id, requirement_id" },
+        );
+        if (ackError) throw ackError;
+      } else {
+        await supabase()
+          .from("requirement_acknowledgements")
+          .delete()
+          .eq("proposal_id", proposalId)
+          .eq("requirement_id", requirement.id);
+      }
+      // Deliberately no reload on success. Reloading replaced the local set
+      // with a snapshot taken before this write landed, so ticking several
+      // conditions quickly un-ticked the earlier ones in front of the
+      // consultant — the write had succeeded and the screen said otherwise.
+    } catch (caught) {
+      // On failure the server is the authority, so re-read. A confirmation that
+      // looks recorded but is not is the one failure this screen exists to
+      // prevent.
+      await load();
+      setError(errorMessage(caught));
+    }
+  }
+
+  async function refreshReadiness() {
+    if (!proposalId) return;
+    setBusy("readiness");
+    setError(null);
+    try {
+      const result = await runReadiness({ data: { proposalId, accessToken: await token() } });
+      if (!result.ok) throw new Error(result.error);
+      setBlockers(result.blockers);
+    } catch (caught) {
+      setError(errorMessage(caught));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function send(override: boolean) {
+    if (!proposalId) return;
+    setBusy("submit");
+    setError(null);
+    setNote(null);
+    try {
+      const result = await runSubmit({
+        data: { proposalId, overrideSoftBlockers: override, accessToken: await token() },
+      });
+      if (!result.ok) {
+        if (result.blockers) setBlockers(result.blockers);
+        throw new Error(result.error);
+      }
+      setNote(
+        result.overrode > 0
+          ? `Recorded as submitted, over ${result.overrode} stated warning${result.overrode === 1 ? "" : "s"}. What you were told is stored with it.`
+          : "Recorded as submitted.",
+      );
+      await load();
+    } catch (caught) {
+      setError(errorMessage(caught));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function loadAwards() {
+    setBusy("awards");
+    setError(null);
+    try {
+      const result = await runPastAwards({ data: { grantId, accessToken: await token() } });
+      if (!result.ok) throw new Error(result.error);
+      setAwards(result.result);
     } catch (caught) {
       setError(errorMessage(caught));
     } finally {
@@ -291,12 +431,64 @@ function ProposalPage() {
               ? "Re-read the call"
               : "Read what this call requires"}
         </button>
+        <button
+          type="button"
+          onClick={loadAwards}
+          disabled={busy !== null}
+          data-testid="past-awards"
+          className="rounded-md border border-[var(--color-rule)] px-4 py-2 text-sm font-medium disabled:opacity-50"
+        >
+          {busy === "awards" ? "Looking up…" : "Who has won this before"}
+        </button>
         {writable.length > 0 && (
           <span data-testid="draft-progress" className="text-sm text-[var(--color-ink-soft)]">
             {drafted} of {writable.length} sections drafted
           </span>
         )}
       </div>
+
+      {/* The first question a consultant asks about a call: does this funder
+          give to organizations like mine, or to hospitals and universities? */}
+      {awards && (
+        <section className="mt-6" data-testid="awards-panel">
+          {awards.known ? (
+            awards.awards.length > 0 ? (
+              <>
+                <p className="text-sm text-[var(--color-ink-soft)]">
+                  Largest recent awards under assistance listing {awards.listing}:
+                </p>
+                <ul className="mt-2 flex flex-col gap-px overflow-hidden rounded-md border border-[var(--color-rule)] bg-[var(--color-rule)]">
+                  {awards.awards.slice(0, 8).map((award) => (
+                    <li
+                      key={award.externalId}
+                      className="flex items-baseline justify-between gap-3 bg-[var(--color-surface)] px-4 py-2 text-sm"
+                    >
+                      <span>
+                        {award.recipientName}
+                        {award.location && (
+                          <span className="text-[var(--color-ink-soft)]"> · {award.location}</span>
+                        )}
+                      </span>
+                      <span className="shrink-0 font-mono text-xs tabular-nums text-[var(--color-ink-soft)]">
+                        {award.amount ? `$${Math.round(award.amount).toLocaleString()}` : "—"}
+                        {award.awardedOn && ` · ${award.awardedOn.slice(0, 4)}`}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            ) : (
+              <p className="text-sm text-[var(--color-ink-soft)]">
+                No awards are published under listing {awards.listing} yet.
+              </p>
+            )
+          ) : (
+            // Not an empty list: "nobody has ever won this" is a much stronger
+            // claim than "we cannot see it", and only one of them is true.
+            <p className="text-sm text-[var(--color-ink-soft)]">{awards.reason}</p>
+          )}
+        </section>
+      )}
 
       {note && <p className="mt-3 text-sm text-[var(--color-ink-soft)]">{note}</p>}
       {error && (
@@ -330,6 +522,20 @@ function ProposalPage() {
                 </div>
                 {requirement.detail && (
                   <p className="mt-1 text-sm text-[var(--color-ink-soft)]">{requirement.detail}</p>
+                )}
+                {/* Software cannot verify that audited statements exist. What it
+                    can do is refuse to call the application ready until a person
+                    says they have them — and record who said so. */}
+                {requirement.is_critical && (
+                  <label className="mt-2 flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={acknowledged.has(requirement.id)}
+                      onChange={(event) => acknowledge(requirement, event.target.checked)}
+                      disabled={!!submission}
+                    />
+                    I have this
+                  </label>
                 )}
               </li>
             ))}
@@ -400,6 +606,81 @@ function ProposalPage() {
               Add section
             </button>
           </form>
+        </section>
+      )}
+
+      {requirements !== null && requirements.length > 0 && (
+        <section className="mt-12 border-t border-[var(--color-rule)] pt-8" data-testid="send">
+          <h2 className="text-sm font-semibold">Ready to send?</h2>
+
+          {submission ? (
+            <p data-testid="submitted" className="mt-2 text-sm">
+              <span className="font-medium text-[var(--color-eligible)]">Submitted</span>{" "}
+              {new Date(submission.submitted_at).toLocaleDateString()} · {submission.outcome}
+              {submission.confirmation_number && ` · ref ${submission.confirmation_number}`}
+            </p>
+          ) : (
+            <>
+              <p className="mt-1 max-w-prose text-sm text-[var(--color-ink-soft)]">
+                Every check below is decided from what is in the application, not from an opinion
+                about it. The last one is you.
+              </p>
+
+              <div className="mt-4 flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  onClick={refreshReadiness}
+                  disabled={busy !== null}
+                  data-testid="check-readiness"
+                  className="rounded-md border border-[var(--color-rule)] px-4 py-2 text-sm font-medium disabled:opacity-50"
+                >
+                  {busy === "readiness" ? "Checking…" : "Check what is left"}
+                </button>
+
+                {blockers !== null && (
+                  <button
+                    type="button"
+                    onClick={() => send(blockers.some((b) => b.key !== "not_reviewed"))}
+                    disabled={
+                      busy !== null || blockers.some((b) => b.isHard && b.key !== "not_reviewed")
+                    }
+                    data-testid="submit-proposal"
+                    className="rounded-md bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+                  >
+                    {busy === "submit"
+                      ? "Recording…"
+                      : blockers.some((b) => b.key !== "not_reviewed")
+                        ? "I have read it — submit anyway"
+                        : "I have read it — record as submitted"}
+                  </button>
+                )}
+              </div>
+
+              {blockers !== null && (
+                <ul data-testid="blockers" className="mt-4 flex flex-col gap-2">
+                  {blockers.length === 0 && (
+                    <li className="text-sm text-[var(--color-eligible)]">
+                      Nothing is outstanding. Confirming above records the submission.
+                    </li>
+                  )}
+                  {blockers.map((blocker) => (
+                    <li key={blocker.key} className="flex gap-2 text-sm">
+                      <span
+                        className={
+                          blocker.isHard
+                            ? "text-[var(--color-ineligible)]"
+                            : "text-[var(--color-needs-input)]"
+                        }
+                      >
+                        {blocker.isHard ? "✗" : "!"}
+                      </span>
+                      <span>{blocker.detail}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </>
+          )}
         </section>
       )}
     </main>

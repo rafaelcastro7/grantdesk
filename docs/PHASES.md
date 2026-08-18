@@ -119,6 +119,24 @@ hand; without that the page is correct and useless.
 **Done when:** the full lifecycle passes in one e2e run and a submission is
 recorded.
 
+**Closed.** `tests/e2e/lifecycle.spec.ts` runs the whole product in one pass:
+sign up, add a client, fill the profile, match, read the call, draft against it,
+keep the answer, look up prior winners, clear the gate, record the submission,
+and see it on the desk.
+
+The gate returns named blockers rather than a readiness score, because a
+consultant needs to know what is unfinished, not that it is 78% done. Hard
+blockers cannot be overridden; soft ones can, and what the consultant was told
+is stored on the submission so "did we know?" stays answerable. The human
+confirmation is always the last outstanding item and is never satisfied
+automatically.
+
+"Who won this before" is answered from USAspending, keyed on the Assistance
+Listing number the call itself carries — 1661 of 1702 US calls now have one. For
+a Canadian call it says it does not know, rather than showing an empty list: no
+comparable award data is published there, and an empty list reads as "nobody has
+ever won this".
+
 ---
 
 ## Working method

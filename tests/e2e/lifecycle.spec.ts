@@ -1,21 +1,27 @@
 import { expect, test } from "@playwright/test";
 
 /**
- * Phase 4's gate: a consultant reads what a call requires, drafts against those
- * requirements, and keeps an answer for next time.
+ * The whole product, in one run: sign up, add a client, fill their profile,
+ * match, read what a call requires, draft against it, keep the answer, and
+ * record the submission.
  *
- * The section is added from the funder's form rather than relying on extraction
- * to produce a writable one. That is not a shortcut around the feature — it is
- * the common real case: most funders publish their conditions on the web and
- * keep the section list in the application form itself, so a product that only
- * works when the sections are machine-readable does not work.
+ * This is Phase 5's gate and it deliberately runs end to end rather than as
+ * five separate specs. Each step here works in isolation — that is what the
+ * other specs prove — and the thing this one is for is that they still work in
+ * sequence, with real data flowing between them.
+ *
+ * The section is added from the funder's form rather than waiting for
+ * extraction to produce a writable one. That is not a shortcut around the
+ * feature: most funders publish their conditions on the web and keep the
+ * section list in the application form itself, so a product that only works
+ * when the sections are machine-readable does not work.
  */
 
 const stamp = Date.now();
-const EMAIL = `proposal-${stamp}@grantdesk.test`;
+const EMAIL = `lifecycle-${stamp}@grantdesk.test`;
 const PASSWORD = "GrantDesk-E2E-2026!";
 
-test("a consultant drafts a section against a call and keeps it for reuse", async ({ page }) => {
+test("a consultant goes from a new client to a recorded submission", async ({ page }) => {
   const consoleErrors: string[] = [];
   page.on("pageerror", (error) => consoleErrors.push(error.message));
 
@@ -93,6 +99,54 @@ test("a consultant drafts a section against a call and keeps it for reuse", asyn
   await expect(page.getByText(/the next call that asks this will reuse it/)).toBeVisible({
     timeout: 60_000,
   });
+
+  // ── Who has won this before ───────────────────────────────────────────────
+  // Either real recipients, or a statement of why we cannot see them. An empty
+  // list would read as "nobody has ever won this", which is a far stronger
+  // claim than the data supports.
+  await page.getByTestId("past-awards").click();
+  await expect(page.getByTestId("awards-panel")).toBeVisible({ timeout: 60_000 });
+
+  // ── The submit gate ───────────────────────────────────────────────────────
+  const send = page.getByTestId("send");
+  await expect(send).toBeVisible();
+  await send.getByTestId("check-readiness").click();
+
+  const blockers = page.getByTestId("blockers");
+  await expect(blockers).toBeVisible({ timeout: 60_000 });
+  // The confirmation is always outstanding until a person gives it — the gate
+  // must never mark an application reviewed on its own.
+  await expect(blockers).toContainText("Nobody has confirmed they read this");
+
+  // Any condition the call rejects applications without has to be confirmed
+  // before the gate will pass, because software cannot verify it.
+  const conditionBoxes = page.getByTestId("conditions").getByRole("checkbox");
+  for (let i = 0; i < (await conditionBoxes.count()); i++) {
+    await conditionBoxes.nth(i).check();
+  }
+
+  await send.getByTestId("check-readiness").click();
+  await expect(blockers).not.toContainText("Confirm you have it", { timeout: 60_000 });
+
+  await send.getByTestId("submit-proposal").click();
+
+  const submitted = page.getByTestId("submitted");
+  const submitFailure = page.getByRole("alert");
+  await expect(submitted.or(submitFailure)).toBeVisible({ timeout: 60_000 });
+
+  if (await submitFailure.isVisible()) {
+    const message = (await submitFailure.textContent()) ?? "";
+    expect(message).not.toContain("[object Object]");
+    throw new Error(`submission was refused rather than recorded: ${message}`);
+  }
+  await expect(submitted).toContainText("Submitted");
+
+  // ── And it shows up on the desk ───────────────────────────────────────────
+  // The first question in the spec: what is due across all my clients. A
+  // submission that does not appear here is one the consultant will re-do.
+  await page.goto("/");
+  await expect(page.getByTestId("sent-list")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId("sent-list")).toContainText("awaiting");
 
   expect(consoleErrors, `page errors: ${consoleErrors.join("; ")}`).toEqual([]);
 });
