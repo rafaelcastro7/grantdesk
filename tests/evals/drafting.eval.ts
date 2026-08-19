@@ -157,6 +157,14 @@ console.log(`stored answer retrieved:          ${pct(retrieved)}`);
 console.log(`its distinctive fact survived:    ${pct(quoted)}`);
 console.log(`no fabricated numbers:            ${pct(clean)}`);
 
+// Which model actually wrote these. A run served by the local fallback is
+// measuring a different product from one served by the intended chain, and
+// comparing the two numbers as if they were the same is how a provider outage
+// gets recorded as a quality regression.
+const providers = [...new Set(results.map((r) => r.by))];
+console.log(`written by:                       ${providers.join(", ")}`);
+const degraded = results.filter((r) => r.by.startsWith("ollama"));
+
 await supabase.from("clients").delete().eq("id", clientId);
 
 // Retrieval is deterministic — it either found the answer or the embedding
@@ -164,6 +172,12 @@ await supabase.from("clients").delete().eq("id", clientId);
 // held to a floor rather than a point: a distribution that dips below these is
 // not usable output, whatever the mean says.
 const failures: string[] = [];
+if (degraded.length > 0) {
+  failures.push(
+    `${degraded.length} of ${results.length} drafts came from the local fallback — ` +
+      "this measures the floor, not the product. Fix the provider chain before trusting the rest.",
+  );
+}
 if (retrieved < 1) failures.push(`stored answer retrieved only ${pct(retrieved)} of the time`);
 if (clean < 1) failures.push(`fabricated numbers appeared in ${pct(1 - clean)} of drafts`);
 if (quoted < 0.67) failures.push(`the reused fact survived only ${pct(quoted)} of the time`);

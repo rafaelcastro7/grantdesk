@@ -67,7 +67,7 @@ jobs:
             curl -sf http://localhost:11434/api/tags > /dev/null && break
             sleep 1
           done
-          ollama pull nomic-embed-text
+          ollama pull bge-m3
 
       - name: Bring up the gateway and auth
         run: |

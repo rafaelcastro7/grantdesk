@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { callLlm } from "./llm";
-import { embedOne } from "./embed";
+import { ANSWER_EMBED_MODEL, embedOne } from "./embed";
 
 /**
  * Draft one section, against one requirement.
@@ -46,6 +46,14 @@ export type DraftResult = {
   wordCount: number;
   reusedAnswers: ReusedAnswer[];
   draftedBy: string;
+  /**
+   * What the chain tried before this answer. Empty on a healthy call.
+   *
+   * Carried up because a draft written by the local fallback is a different
+   * product from one written by the intended model, and for weeks nothing
+   * anywhere said which had happened.
+   */
+  attempts: string[];
 };
 
 export class NoProfileError extends Error {
@@ -72,7 +80,7 @@ export async function findReusableAnswers(
 
   let embedding: number[];
   try {
-    embedding = await embedOne(query);
+    embedding = await embedOne(query, ANSWER_EMBED_MODEL);
   } catch {
     // Reuse is an improvement, not a precondition. If the embedder is down the
     // section still drafts — from the profile alone, and the caller can see
@@ -232,6 +240,7 @@ export async function draftSection(
     wordCount: countWords(content),
     reusedAnswers: reused,
     draftedBy: `${response.provider}/${response.model}`,
+    attempts: response.attempts,
   };
 }
 
@@ -247,7 +256,7 @@ export async function saveAnswer(
 ): Promise<{ id: string }> {
   let embedding: number[] | null = null;
   try {
-    embedding = await embedOne(`${label}. ${content}`.slice(0, 4000));
+    embedding = await embedOne(`${label}. ${content}`.slice(0, 4000), ANSWER_EMBED_MODEL);
   } catch {
     // Storing it unembedded is still worth doing — it is visible in the library
     // and can be embedded on a later pass. Refusing to save it because a local

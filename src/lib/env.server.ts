@@ -13,7 +13,7 @@ const schema = z.object({
   SUPABASE_ANON_KEY: z.string().min(20),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(20),
   OLLAMA_BASE_URL: z.string().url().default("http://localhost:11434"),
-  OLLAMA_EMBED_MODEL: z.string().default("nomic-embed-text"),
+  OLLAMA_EMBED_MODEL: z.string().default("bge-m3"),
   CEREBRAS_API_KEY: z.string().optional(),
   GROQ_API_KEY: z.string().optional(),
   GOOGLE_AI_STUDIO_KEY: z.string().optional(),

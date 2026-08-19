@@ -115,6 +115,20 @@ list, Kong echoes the preflight and it stops happening.
   fresh extraction never replaces what the field shows, and the stale text gets
   saved back over the new profile.
 
+## The embedder is multilingual on purpose
+
+`bge-m3`, 1024 dimensions. It started as `nomic-embed-text` (768d) and the eval
+refuted the assumption behind that choice: an English model rated a relevant
+French call 0.5537 and an irrelevant one 0.4699 — a 0.084 gap that does not
+survive thousands of English documents competing for the same ranking. bge-m3
+separates them by 0.226. Cross-language recall went from 33% to what the eval
+now reports.
+
+Changing embedder changes the vector width, which means a migration and a full
+re-embed. Stored vectors are dropped rather than converted: there is no
+meaningful conversion between two models' spaces, and a half-migrated index
+returns confident nonsense instead of an error.
+
 ## Ingestion and external data
 
 - **Grants.gov Search2 returns titles only.** Descriptions, award ranges and

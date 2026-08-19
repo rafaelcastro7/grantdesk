@@ -45,7 +45,14 @@ export type EvalGrant = {
   /** Profile keys this grant is genuinely worth reading for. */
   relevantTo: string[];
   /** Why this row is in the corpus, so a future reader can judge the label. */
-  role: "vocabulary-gap" | "lexical-trap" | "plain-hit" | "distractor";
+  role: "vocabulary-gap" | "lexical-trap" | "plain-hit" | "distractor" | "cross-language";
+  /**
+   * The grant's own language. Lexical indexing is per language, so an English
+   * query cannot reach a French or Spanish row through the word side at all —
+   * these exist to test the claim in ADR-0004 that cross-language matching is
+   * the vector side's job. That claim was asserted and never measured.
+   */
+  language?: "en" | "fr" | "es";
 };
 
 export const EVAL_PROFILES: EvalProfile[] = [
@@ -256,6 +263,51 @@ export const EVAL_GRANTS: EvalGrant[] = [
     relevantTo: [],
     role: "distractor",
   },
+
+  // ── cross-language: relevant, and unreachable by any English word ─────────
+  // A consultant in Ontario should see a Quebec program that funds exactly
+  // what their client does. Nothing in these rows matches an English profile
+  // lexically, so anything found here was found by meaning.
+  {
+    externalId: "g-xlang-1",
+    title: "Programme de verdissement des milieux urbains",
+    summary:
+      "Soutien aux organismes sans but lucratif qui plantent des arbres, restaurent les ravins et rafraîchissent les quartiers défavorisés.",
+    country: "CA",
+    language: "fr",
+    relevantTo: ["greenspace"],
+    role: "cross-language",
+  },
+  {
+    externalId: "g-xlang-2",
+    title: "Fondo de artes juveniles en barrios",
+    summary:
+      "Apoya a organizaciones que ofrecen talleres de música y teatro para adolescentes fuera del horario escolar.",
+    country: "MX",
+    language: "es",
+    relevantTo: ["youtharts"],
+    role: "cross-language",
+  },
+  {
+    externalId: "g-xlang-3",
+    title: "Programme d'accès aux soins de première ligne",
+    summary:
+      "Finance les cliniques communautaires qui traitent des adultes sans assurance, selon un barème adapté au revenu.",
+    country: "CA",
+    language: "fr",
+    relevantTo: ["clinic"],
+    role: "cross-language",
+  },
+  {
+    externalId: "g-xlang-4",
+    title: "Programme de modernisation des ponts routiers",
+    summary:
+      "Aide financière aux municipalités pour la réfection structurale des tabliers de ponts sur le réseau routier.",
+    country: "CA",
+    language: "fr",
+    relevantTo: [],
+    role: "distractor",
+  },
 ];
 
 export const EVAL_SOURCE_KEY = "eval-retrieval-corpus";
@@ -263,4 +315,17 @@ export const EVAL_SOURCE_KEY = "eval-retrieval-corpus";
 /** How many relevant rows exist for a profile — the denominator for recall. */
 export function relevantCount(profileKey: string): number {
   return EVAL_GRANTS.filter((g) => g.relevantTo.includes(profileKey)).length;
+}
+
+/**
+ * Relevant rows written in a language the profile is not in.
+ *
+ * Reported separately because it measures a specific architectural claim
+ * rather than general quality: an English query cannot reach these through the
+ * lexical index at all, so recall here is recall of the vector side alone.
+ */
+export function crossLanguageCount(profileKey: string): number {
+  return EVAL_GRANTS.filter(
+    (g) => g.relevantTo.includes(profileKey) && (g.language ?? "en") !== "en",
+  ).length;
 }

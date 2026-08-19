@@ -30,6 +30,7 @@
 import { config } from "dotenv";
 import { createClient } from "@supabase/supabase-js";
 import {
+  crossLanguageCount,
   EVAL_GRANTS,
   EVAL_PROFILES,
   EVAL_SOURCE_KEY,
@@ -78,7 +79,10 @@ async function loadCorpus(): Promise<Map<string, string>> {
       summary: g.summary,
       url: `https://example.org/eval/${g.externalId}`,
       country: g.country,
-      language: "en",
+      // Its own language: the tsvector column is generated per language, so
+      // loading a French row as English would quietly hand the lexical side a
+      // match it could never make in production.
+      language: g.language ?? "en",
       status: "open",
       source_key: EVAL_SOURCE_KEY,
       source_hash: sourceHash(EVAL_SOURCE_KEY, g.externalId),
@@ -115,7 +119,7 @@ async function loadCorpus(): Promise<Map<string, string>> {
       grant_id: idByExternal.get(g.externalId)!,
       embedding: JSON.stringify(vectors[i]),
       content_hash: contentHash(texts[i]!),
-      model: "nomic-embed-text",
+      model: "bge-m3",
       updated_at: new Date().toISOString(),
     })),
     { onConflict: "grant_id" },
@@ -164,7 +168,14 @@ async function hybrid(profile: EvalProfile, corpus: Set<string>): Promise<string
 
 // ── Scoring ─────────────────────────────────────────────────────────────────
 
-type Score = { precisionAtK: number; recall: number; trapsInTopK: number; found: number };
+type Score = {
+  precisionAtK: number;
+  recall: number;
+  trapsInTopK: number;
+  found: number;
+  /** Recall over relevant rows written in another language. */
+  crossLanguageRecall: number;
+};
 
 function score(ranked: string[], profileKey: string, externalOf: Map<string, string>): Score {
   const grantOf = new Map(EVAL_GRANTS.map((g) => [g.externalId, g]));
@@ -178,11 +189,20 @@ function score(ranked: string[], profileKey: string, externalOf: Map<string, str
   const total = relevantCount(profileKey);
   const foundAll = labelled.filter((g) => g!.relevantTo.includes(profileKey)).length;
 
+  // An English query cannot reach these through the lexical index at all, so
+  // whatever is found here was found by meaning. This is the number that tests
+  // ADR-0004's claim rather than restating it.
+  const crossTotal = crossLanguageCount(profileKey);
+  const crossFound = labelled.filter(
+    (g) => g!.relevantTo.includes(profileKey) && (g!.language ?? "en") !== "en",
+  ).length;
+
   return {
     precisionAtK: topK.length === 0 ? 0 : hits / topK.length,
     recall: total === 0 ? 0 : foundAll / total,
     trapsInTopK: traps,
     found: labelled.length,
+    crossLanguageRecall: crossTotal === 0 ? 1 : crossFound / crossTotal,
   };
 }
 
@@ -210,12 +230,13 @@ for (const profile of EVAL_PROFILES) {
   });
 }
 
-console.log("profile        arm       P@5    recall  traps@5");
+console.log("profile        arm       P@5    recall  traps@5  x-lang");
 console.log("─".repeat(52));
 for (const row of rows) {
   console.log(
     `${row.profile.padEnd(14)} ${row.arm.padEnd(9)} ${pct(row.score.precisionAtK).padStart(4)}   ` +
-      `${pct(row.score.recall).padStart(5)}   ${row.score.trapsInTopK}`,
+      `${pct(row.score.recall).padStart(5)}   ${String(row.score.trapsInTopK).padEnd(7)}  ` +
+      `${pct(row.score.crossLanguageRecall)}`,
   );
 }
 
@@ -228,6 +249,8 @@ const baselineP = mean("baseline", (s) => s.precisionAtK);
 const hybridP = mean("hybrid", (s) => s.precisionAtK);
 const baselineR = mean("baseline", (s) => s.recall);
 const hybridR = mean("hybrid", (s) => s.recall);
+const baselineCross = mean("baseline", (s) => s.crossLanguageRecall);
+const hybridCross = mean("hybrid", (s) => s.crossLanguageRecall);
 const baselineTraps = rows
   .filter((r) => r.arm === "baseline")
   .reduce((a, r) => a + r.score.trapsInTopK, 0);
@@ -260,18 +283,27 @@ console.log(
 const improvedPrecision = hybridP > baselineP;
 const improvedRecall = hybridR > baselineR;
 const noWorseOnTraps = hybridTraps <= baselineTraps;
+// Held to a floor rather than a point: the corpus is small, and one missed row
+// out of three is a real regression while an exact figure would be noise.
+const findsAcrossLanguages = hybridCross >= 0.6;
 
 console.log();
 console.log(`precision improved: ${improvedPrecision ? "yes" : "NO"}`);
 console.log(`recall improved:    ${improvedRecall ? "yes" : "NO"}`);
 console.log(`traps no worse:     ${noWorseOnTraps ? "yes" : "NO"}`);
+console.log(`finds across languages: ${findsAcrossLanguages ? "yes" : "NO"}`);
+console.log();
+console.log(`cross-language recall — baseline ${pct(baselineCross)}, hybrid ${pct(hybridCross)}`);
+console.log("(A French or Spanish call cannot be reached by an English query through the");
+console.log(" lexical index at all, so this measures the vector side alone — the claim in");
+console.log(" ADR-0004 that cross-language matching is its job.)");
 
 // Fixture rows are catalog rows; leaving them behind would inflate the
 // coverage page with grants no funder ever published.
 await supabase.from("grants").delete().eq("source_key", EVAL_SOURCE_KEY);
 await supabase.from("funders").delete().eq("source_key", EVAL_SOURCE_KEY);
 
-if (!improvedPrecision || !improvedRecall || !noWorseOnTraps) {
+if (!improvedPrecision || !improvedRecall || !noWorseOnTraps || !findsAcrossLanguages) {
   console.error("\nFAILED: hybrid retrieval did not beat the keyword baseline.");
   process.exit(1);
 }

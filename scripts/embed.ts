@@ -41,7 +41,9 @@ try {
       `${result.considered} considered, ${Math.round((Date.now() - started) / 1000)}s`,
   );
 } catch (error) {
-  console.log(`FAILED  ${error instanceof Error ? error.message : String(error)}`);
-  console.error("\nIs Ollama running, and has `ollama pull nomic-embed-text` been done?");
+  console.log("FAILED");
+  console.error(`
+  ${error instanceof Error ? error.message : String(error)}`);
+  console.error("\nIs Ollama running, and has `ollama pull bge-m3` been done?");
   process.exit(1);
 }

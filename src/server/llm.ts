@@ -35,6 +35,15 @@ export type LlmResponse = {
   provider: string;
   model: string;
   latencyMs: number;
+  /**
+   * What was tried and why it failed, in order, before this answer.
+   *
+   * Empty on a healthy first-choice call. Non-empty means the chain degraded,
+   * and without this nothing anywhere said so: Groq retired a model and
+   * Cerebras ran out of quota, and the product ran on the local floor for
+   * weeks while every screen reported a perfectly ordinary success.
+   */
+  attempts: string[];
 };
 
 type Provider = {
@@ -51,10 +60,16 @@ function providers(): Provider[] {
       name: "groq",
       baseUrl: "https://api.groq.com/openai/v1",
       apiKey: env.GROQ_API_KEY,
+      // The llama-3.x models this used to name were retired from this account
+      // and answered 404 for weeks while the whole chain silently fell through
+      // to the local floor. Probed live before being written down here:
+      // gpt-oss-120b answers in both plain and JSON mode in ~430ms;
+      // gpt-oss-20b returns an empty 200 in plain mode and 400s in JSON;
+      // qwen3.6-27b leaks its <think> reasoning into the content.
       models: {
-        extract: "llama-3.1-8b-instant",
-        judge: "llama-3.3-70b-versatile",
-        write: "llama-3.3-70b-versatile",
+        extract: "openai/gpt-oss-120b",
+        judge: "openai/gpt-oss-120b",
+        write: "openai/gpt-oss-120b",
       },
     },
     {
@@ -66,6 +81,10 @@ function providers(): Provider[] {
       // larger gpt-oss-120b is inconsistent between them, and a model that
       // intermittently returns nothing is worse than a smaller one that always
       // answers — the caller pays a full timeout before falling through.
+      // Measured 2026-08-19: this account returns 402 "payment required" for
+      // every model. It stays in the chain because the failure is an account
+      // state rather than a code one, and it costs one fast HTTP round trip to
+      // find out it is back.
       models: { extract: "gemma-4-31b", judge: "gemma-4-31b", write: "gemma-4-31b" },
     },
     {
@@ -92,6 +111,12 @@ async function callProvider(
   const model = provider.models[request.role];
   const started = Date.now();
 
+  if (request.json && !mentionsJson(request.messages)) {
+    // Caught here rather than as a provider 400, because the fix is in the
+    // prompt and the provider's message does not say which prompt.
+    throw new Error(`${provider.name}_prompt_must_mention_json`);
+  }
+
   const response = await fetch(`${provider.baseUrl}/chat/completions`, {
     method: "POST",
     headers: {
@@ -103,6 +128,10 @@ async function callProvider(
       messages: request.messages,
       temperature: request.temperature ?? 0.2,
       max_tokens: request.maxTokens ?? 2048,
+      // Groq rejects response_format outright unless the word "json" appears
+      // somewhere in the messages — a 400 that says so plainly, but only if
+      // anyone reads it. Every caller here already asks for JSON in words, and
+      // this asserts it rather than hoping.
       ...(request.json ? { response_format: { type: "json_object" } } : {}),
     }),
     signal: AbortSignal.timeout(timeoutMs),
@@ -120,7 +149,7 @@ async function callProvider(
   // treat it as an error so the chain moves on instead of returning nothing.
   if (!text.trim()) throw new Error(`${provider.name}_empty_content`);
 
-  return { text, provider: provider.name, model, latencyMs: Date.now() - started };
+  return { text, provider: provider.name, model, latencyMs: Date.now() - started, attempts: [] };
 }
 
 async function callOllama(request: LlmRequest, timeoutMs: number): Promise<LlmResponse> {
@@ -141,7 +170,18 @@ async function callOllama(request: LlmRequest, timeoutMs: number): Promise<LlmRe
   const body = (await response.json()) as { message?: { content?: string } };
   const text = body.message?.content ?? "";
   if (!text.trim()) throw new Error("ollama_empty_content");
-  return { text, provider: "ollama", model: "phi4-mini", latencyMs: Date.now() - started };
+  return {
+    text,
+    provider: "ollama",
+    model: "phi4-mini",
+    latencyMs: Date.now() - started,
+    attempts: [],
+  };
+}
+
+/** Groq's requirement, checked before the request rather than after its 400. */
+function mentionsJson(messages: ChatMessage[]): boolean {
+  return messages.some((message) => /json/i.test(message.content));
 }
 
 export class LlmUnavailableError extends Error {
@@ -170,7 +210,7 @@ export async function callLlm(
         attempts.push(`${provider.name}: failed caller validation`);
         continue;
       }
-      return result;
+      return { ...result, attempts };
     } catch (error) {
       attempts.push(`${provider.name}: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -178,7 +218,7 @@ export async function callLlm(
 
   try {
     const result = await callOllama(request, timeoutMs);
-    if (!request.validate || request.validate(result.text)) return result;
+    if (!request.validate || request.validate(result.text)) return { ...result, attempts };
     attempts.push("ollama: failed caller validation");
   } catch (error) {
     attempts.push(`ollama: ${error instanceof Error ? error.message : String(error)}`);

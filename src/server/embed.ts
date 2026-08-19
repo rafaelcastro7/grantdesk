@@ -5,39 +5,84 @@ import { serverEnv } from "@/lib/env.server";
 /**
  * Embeddings for the semantic half of retrieval.
  *
- * Local, via Ollama's nomic-embed-text. Three reasons it is not a cloud
+ * Local, via Ollama's bge-m3. Three reasons it is not a cloud
  * embedder: the catalog is tens of thousands of rows and re-embeds whenever a
  * funder edits a description, so per-token pricing would dominate the whole
  * system's cost; embedding a public grant notice needs no cloud judgement; and
  * a rate limit in the middle of a nightly re-embed leaves the index half
  * updated, which is worse than slower.
  *
- * 768 dimensions, matching the `vector(768)` column. A model of a different
+ * Multilingual on purpose, and the reason this is bge-m3 rather than the
+ * English nomic-embed-text it started as. The eval measured the difference on
+ * a French call against an English profile: nomic separated relevant from
+ * irrelevant by 0.084, bge-m3 by 0.226. A gap that small does not survive
+ * thousands of English documents competing for the same ranking, which made
+ * every French and Spanish call in the catalog reachable by exact wording
+ * alone. See migration 0014 and ADR-0004.
+ *
+ * 1024 dimensions, matching the `vector(1024)` column. A model of a different
  * width cannot be swapped in without a migration, which is deliberate — a
  * silent width change would corrupt every distance in the table.
  */
 
-export const EMBED_MODEL = "nomic-embed-text";
-export const EMBED_DIMENSIONS = 768;
+export const EMBED_MODEL = "bge-m3";
+export const EMBED_DIMENSIONS = 1024;
+
+/**
+ * A different model for the answer library, and the measurement that forced it.
+ *
+ * Retrieving grants and retrieving a consultant's own stored answers look like
+ * the same problem and are not. Grants are long documents in four languages
+ * where cross-language matching is the whole point. Answers are short English
+ * passages, written by one person for one client, matched against a short
+ * requirement heading — and bge-m3 is measurably bad at that:
+ *
+ *   query "Organizational Capacity. Demonstrate your ability to deliver..."
+ *                                   bge-m3    nomic
+ *     the client's track-record answer  0.4145   0.5852
+ *     an unrelated budget note          0.5185   0.5945
+ *     an unrelated safety policy        0.4877   0.5342
+ *
+ * Under bge-m3 the right answer sits below both wrong ones, at every phrasing
+ * tried — label alone, detail alone, both. There is no threshold that fixes an
+ * ordering. Under nomic the true match clears 0.55 and reuse works.
+ *
+ * Neither separates the budget note cleanly, and that label is arguable anyway:
+ * a budget narrative does touch organizational capacity. What is not arguable
+ * is that one model retrieves the consultant's own answer and the other does
+ * not.
+ *
+ * The two spaces never meet: grant vectors are only ever compared to grant
+ * queries, answer vectors only to requirement queries.
+ */
+export const ANSWER_EMBED_MODEL = "nomic-embed-text";
+export const ANSWER_EMBED_DIMENSIONS = 768;
+
+/** Rows per request. See the comment in embed() for why this is not larger. */
+const EMBED_BATCH = 16;
 
 /** Re-embedding unchanged text is the main avoidable cost, so content is hashed. */
 export function contentHash(text: string): string {
   return createHash("sha256").update(text).digest("hex");
 }
 
-export async function embed(texts: string[]): Promise<number[][]> {
+export async function embed(texts: string[], model: string = EMBED_MODEL): Promise<number[][]> {
   const env = serverEnv();
   const out: number[][] = [];
 
-  // Ollama's /api/embed takes a batch, but a long batch is one long request
-  // with one timeout; chunking keeps a single slow row from failing the rest.
-  for (let i = 0; i < texts.length; i += 32) {
-    const chunk = texts.slice(i, i + 32);
+  // Ollama's /api/embed takes a batch, but a batch is one request with one
+  // timeout — and grant descriptions run to 8000 characters, so a large batch
+  // of real rows is a very different thing from a large batch of short ones.
+  // Sixteen at a time, with a generous ceiling: the first full run under
+  // bge-m3 died on a 32-row batch of real text while the same code had been
+  // fine under a smaller, faster model.
+  for (let i = 0; i < texts.length; i += EMBED_BATCH) {
+    const chunk = texts.slice(i, i + EMBED_BATCH);
     const response = await fetch(`${env.OLLAMA_BASE_URL}/api/embed`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model: EMBED_MODEL, input: chunk }),
-      signal: AbortSignal.timeout(120_000),
+      body: JSON.stringify({ model, input: chunk }),
+      signal: AbortSignal.timeout(300_000),
     });
     if (!response.ok) {
       throw new Error(`embedding failed: HTTP ${response.status} from ${env.OLLAMA_BASE_URL}`);
@@ -47,10 +92,11 @@ export async function embed(texts: string[]): Promise<number[][]> {
     if (vectors.length !== chunk.length) {
       throw new Error(`embedder returned ${vectors.length} vectors for ${chunk.length} inputs`);
     }
+    const expected = model === ANSWER_EMBED_MODEL ? ANSWER_EMBED_DIMENSIONS : EMBED_DIMENSIONS;
     for (const vector of vectors) {
-      if (vector.length !== EMBED_DIMENSIONS) {
+      if (vector.length !== expected) {
         throw new Error(
-          `embedder returned ${vector.length} dimensions, but the column is ${EMBED_DIMENSIONS}`,
+          `${model} returned ${vector.length} dimensions, but its column is ${expected}`,
         );
       }
       out.push(vector);
@@ -60,8 +106,8 @@ export async function embed(texts: string[]): Promise<number[][]> {
   return out;
 }
 
-export async function embedOne(text: string): Promise<number[]> {
-  const [vector] = await embed([text]);
+export async function embedOne(text: string, model: string = EMBED_MODEL): Promise<number[]> {
+  const [vector] = await embed([text], model);
   if (!vector) throw new Error("the embedder returned no vector");
   return vector;
 }
@@ -166,7 +212,7 @@ export async function embedPendingAnswers(supabase: SupabaseClient): Promise<{ e
   if (rows.length === 0) return { embedded: 0 };
 
   const texts = rows.map((row) => `${row.label}. ${row.content}`.slice(0, 4000));
-  const vectors = await embed(texts);
+  const vectors = await embed(texts, ANSWER_EMBED_MODEL);
 
   for (let i = 0; i < rows.length; i++) {
     const { error: writeError } = await supabase

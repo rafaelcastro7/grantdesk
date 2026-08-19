@@ -39,10 +39,27 @@ stemming, so "environmental" never matched "Environment Fund"; across four
 languages in the Américas that was a large silent recall loss. Cross-language
 matching is left to the vector side, which is what it is good at.
 
-Embeddings are local (`nomic-embed-text`, 768d) because the catalog is tens of
-thousands of rows that re-embed whenever a funder edits a description. Per-token
-pricing would dominate the system's entire cost for a job that needs no cloud
-judgement.
+**That last sentence was asserted here and not measured, and it was wrong for a
+year of this file's life.** Adding French and Spanish rows to the labelled
+corpus put a number on it: 33% cross-language recall. The Spanish row was
+found; both French rows were missed entirely. Measured directly, against an
+English profile about ravine restoration:
+
+| embedder | relevant FR | irrelevant FR | separation |
+|---|---|---|---|
+| nomic-embed-text (768d) | 0.5537 | 0.4699 | 0.084 |
+| bge-m3 (1024d) | 0.7557 | 0.5299 | 0.226 |
+
+nomic-embed-text is an English model. It rated a relevant French call barely
+above an irrelevant one, and a gap that small does not survive three thousand
+English documents competing for the same ranking — so every French and Spanish
+call in the catalog was reachable by exact wording alone, which is the failure
+this whole design exists to avoid. Embeddings are therefore bge-m3, 1024d (see
+migration 0014).
+
+They stay local because the catalog is tens of thousands of rows that re-embed
+whenever a funder edits a description. Per-token pricing would dominate the
+system's entire cost for a job that needs no cloud judgement.
 
 ### Verdicts — rules, with a third answer
 
@@ -77,14 +94,17 @@ false positive there creates a *hard gate* that wrongly rules a client out.
 `bun run eval:match`, over a hand-labelled corpus built around vocabulary gaps
 and deliberate lexical traps:
 
-| arm | P@5 | recall | traps in top 5 |
-|---|---|---|---|
-| keyword baseline (the predecessor's `ilike` scan) | 24% | 33% | 6 |
-| hybrid (this ADR) | 60% | 100% | 1 |
+| arm | P@5 | recall | traps in top 5 | cross-language recall |
+|---|---|---|---|---|
+| keyword baseline (the predecessor's `ilike` scan) | 24% | 25% | 6 | 0% |
+| hybrid, English embedder | 67% | 83% | 2 | 33% |
+| hybrid, multilingual embedder | **80%** | **100%** | **0** | **100%** |
 
-P@5's ceiling on that corpus is 60% — each profile has only three relevant
-grants for five slots — so hybrid retrieval reaches the maximum achievable
-precision while the baseline reaches 40% of it.
+P@5's ceiling on that corpus is 80% — each profile has only four relevant
+grants for five slots — so hybrid retrieval now reaches the maximum achievable
+precision, finds every relevant call, and lets no deliberate lexical trap into
+the top five. The baseline reaches 30% of the achievable precision and cannot
+reach a French or Spanish call at all.
 
 The trap count is the least stable of the three numbers: the corpus is loaded
 into the live catalog and each arm's candidate pool is capped before results are
