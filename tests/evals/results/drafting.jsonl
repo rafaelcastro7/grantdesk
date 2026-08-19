@@ -1,2 +1,7 @@
 {"variant":"376efa3bb59c","at":"2026-08-19T09:29:19.756Z","case":"capacity","outcomes":{"clean":false,"withinLimit":true,"quoted":true}}
 {"variant":"376efa3bb59c","at":"2026-08-19T09:29:19.757Z","case":"capacity","outcomes":{"clean":true,"withinLimit":true,"quoted":true}}
+{"variant":"376efa3bb59c","at":"2026-08-19T10:25:27.675Z","case":"capacity","outcomes":{"clean":true,"withinLimit":true,"quoted":true}}
+{"variant":"376efa3bb59c","at":"2026-08-19T10:25:27.677Z","case":"capacity","outcomes":{"clean":false,"withinLimit":true,"quoted":true}}
+{"variant":"376efa3bb59c","at":"2026-08-19T10:25:27.677Z","case":"budget","outcomes":{"clean":true,"withinLimit":true,"noLeakage":true}}
+{"variant":"376efa3bb59c","at":"2026-08-19T10:28:12.795Z","case":"capacity","outcomes":{"clean":false,"withinLimit":true,"quoted":true}}
+{"variant":"376efa3bb59c","at":"2026-08-19T10:34:21.926Z","case":"budget","outcomes":{"clean":true,"withinLimit":true,"noLeakage":true}}

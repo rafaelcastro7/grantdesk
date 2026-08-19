@@ -298,7 +298,7 @@ export async function draftSection(
       // for any section under ~350 words — which the chain then treated as a
       // provider failure and answered from the local floor instead. Drafts were
       // arriving from the small local model for that reason alone.
-      maxTokens: Math.min(6000, REASONING_HEADROOM + (requirement.wordLimit ?? 600) * 3),
+      maxTokens: Math.min(6000, REASONING_HEADROOM + (requirement.wordLimit ?? 400) * 3),
       messages: [
         { role: "system", content: DRAFT_SYSTEM_PROMPT },
         { role: "user", content: buildPrompt(requirement, client, reused) },

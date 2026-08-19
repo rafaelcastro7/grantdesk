@@ -209,6 +209,25 @@ regex, build it from ASCII:
 const INVISIBLES = new RegExp(["\\uFEFF", "\\u200B", "\\u200C"].join("|"), "g");
 ```
 
+## Never write a regex escape through a Python or shell heredoc
+
+`"\b"` in a non-raw Python string is a **backspace byte**, not the regex
+word-boundary escape. It looks correct in an editor and in `sed` output, and it
+silently matches nothing.
+
+This has now happened twice in this repo. The first time, a circuit breaker
+never fired for a week's worth of requests and was only caught by measuring
+latency across repeated calls. The second time, `TPD` was dead inside a
+working alternation — the other branches carried it, so every test passed.
+
+Two defences, both cheap:
+
+- `no-control-regex` is on in eslint and catches exactly this. It found the
+  second one before I did.
+- Build patterns from ASCII when a script is writing them:
+  `new RegExp(["\bTPD\b", "per day"].join("|"), "i")`, or just edit the
+  file with the editing tools instead.
+
 ## Migrations are history
 
 Once applied anywhere, a migration is history — add a new one rather than

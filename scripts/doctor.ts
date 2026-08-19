@@ -19,6 +19,7 @@ import { createClient } from "@supabase/supabase-js";
 config({ path: ".env" });
 
 const { callLlm } = await import("../src/server/llm");
+const { serverEnv } = await import("../src/lib/env.server");
 const { embedOne, EMBED_MODEL, ANSWER_EMBED_MODEL, EMBED_DIMENSIONS, ANSWER_EMBED_DIMENSIONS } =
   await import("../src/server/embed");
 
@@ -125,7 +126,10 @@ for (const [role, json] of [
     : [{ role: "user" as const, content: "Say OK." }];
 
   try {
-    const response = await callLlm({ role, json, messages, maxTokens: 400 }, { timeoutMs: 45_000 });
+    const response = await callLlm(
+      { role, json, messages, maxTokens: 400, noWait: true },
+      { timeoutMs: 20_000 },
+    );
     const label = `${response.provider}/${response.model}`;
     if (response.provider === "ollama") {
       record(
@@ -149,6 +153,62 @@ for (const [role, json] of [
       error instanceof Error ? error.message.slice(0, 300) : String(error),
     );
   }
+}
+
+// ── How much drafting is left today ─────────────────────────────────────────
+// Providers meter per minute and per day, and only the per-minute figure is
+// visible in the obvious place. A run once fell through to the local model on
+// every call while the per-minute headers showed 7908 of 8000 tokens free —
+// the *daily* allowance was spent, and reading the wrong meter cost a round of
+// tuning a constraint that was not binding.
+try {
+  const env2 = serverEnv();
+  if (!env2.GROQ_API_KEY) {
+    record("daily token budget", "degraded", "no Groq key, so nothing to report");
+  } else {
+    const probe = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${env2.GROQ_API_KEY}` },
+      body: JSON.stringify({
+        model: "openai/gpt-oss-120b",
+        messages: [{ role: "user", content: "Hi" }],
+        // Sized like a real draft, not like a ping. The first version asked
+        // for 16 tokens, which fits in the 811 left of a spent daily
+        // allowance — so the check reported a healthy budget while every
+        // actual draft was falling through to the local model. A probe that
+        // cannot fail the way the thing it checks fails is not a check.
+        max_tokens: 1200,
+      }),
+      signal: AbortSignal.timeout(20_000),
+    });
+
+    const body = probe.ok ? "" : (await probe.text()).slice(0, 200);
+    const perMinute = probe.headers.get("x-ratelimit-remaining-tokens");
+    const daily = /per day \(TPD\): Limit (\d+), Used (\d+)/.exec(body);
+
+    if (daily) {
+      const limit = Number(daily[1]);
+      const used = Number(daily[2]);
+      record(
+        "daily token budget",
+        "broken",
+        `spent: ${used.toLocaleString()}/${limit.toLocaleString()} for today. Drafting runs on the local model until it resets.`,
+      );
+    } else if (!probe.ok) {
+      record("daily token budget", "degraded", `HTTP ${probe.status}: ${body.slice(0, 90)}`);
+    } else {
+      // Roughly 650 tokens a draft with reasoning_effort low, so this is a
+      // usable answer to "can I draft a proposal right now".
+      const remaining = Number(perMinute ?? 0);
+      record(
+        "token budget",
+        "ok",
+        `${remaining.toLocaleString()} tokens this minute — about ${Math.floor(remaining / 650)} drafts`,
+      );
+    }
+  }
+} catch (error) {
+  record("token budget", "degraded", error instanceof Error ? error.message : String(error));
 }
 
 // ── Catalog freshness ───────────────────────────────────────────────────────

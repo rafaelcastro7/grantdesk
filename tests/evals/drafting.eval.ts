@@ -250,10 +250,12 @@ for (const testCase of CASES) {
       `  ${testCase.key.padEnd(15)} run ${run + 1}: ${result.wordCount} words via ${result.draftedBy}
 `,
     );
-    // Paced deliberately. Eight drafts fired back to back provoke a rate limit
-    // that sends later ones to the local floor, and then the eval is measuring
-    // its own burst rather than the product.
-    await new Promise((resolve) => setTimeout(resolve, 4000));
+    // Paced so a burst does not empty the per-minute bucket. Worth saying what
+    // this does *not* fix: the run that prompted it was falling through for a
+    // different reason entirely — the per-*day* token budget was spent, while
+    // the per-minute headers showed 7908 of 8000 free. Pacing cannot buy back
+    // a daily allowance, and reading the wrong meter cost a round of tuning.
+    await new Promise((resolve) => setTimeout(resolve, Number(process.env.EVAL_PACE_MS ?? 15_000)));
   }
 }
 

@@ -22,6 +22,7 @@ describe("restMinutesFor", () => {
 
   it("rests briefly on a rate limit, which time does fix", () => {
     expect(restMinutesFor("gemini_http_429: quota exceeded for this minute")).toBe(2);
+    expect(restMinutesFor("groq_http_429: Rate limit reached on tokens per minute (TPM)")).toBe(2);
   });
 
   it("does not rest on a failure that might be this request's fault", () => {
@@ -66,5 +67,30 @@ describe("parseDuration", () => {
     for (const raw of ["", "soon", "Wed, 21 Oct 2026 07:28:00 GMT", "abc123"]) {
       expect(parseDuration(raw), raw).toBeNull();
     }
+  });
+});
+
+describe("daily exhaustion", () => {
+  it("rests for an hour when the limit is a daily one", () => {
+    // Retrying a spent daily allowance every two minutes is a wasted round
+    // trip each time, and the message is the only thing that distinguishes it
+    // from a per-minute limit that clears in seconds.
+    expect(
+      restMinutesFor(
+        "groq_http_429: Rate limit reached for model in organization on tokens per day (TPD): Limit 200000, Used 199189",
+      ),
+    ).toBe(60);
+    // Gemini's daily form. "quota exceeded" alone is not the tell — it says
+    // that for a per-minute limit too; the billing sentence is what separates
+    // an allowance that clears in seconds from one that clears tomorrow.
+    expect(
+      restMinutesFor(
+        "gemini_http_429: You exceeded your current quota, please check your plan and billing details",
+      ),
+    ).toBe(60);
+  });
+
+  it("still rests only briefly for a per-minute limit", () => {
+    expect(restMinutesFor("groq_http_429: Rate limit reached on tokens per minute (TPM)")).toBe(2);
   });
 });

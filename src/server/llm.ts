@@ -28,6 +28,15 @@ export type LlmRequest = {
   temperature?: number;
   /** Reject a syntactically fine answer that fails the caller's own schema. */
   validate?: (text: string) => boolean;
+  /**
+   * Do not wait out a rate limit; report it instead.
+   *
+   * For callers that want the state rather than an answer. `doctor` set every
+   * probe waiting twenty seconds on a provider it was checking *because* it
+   * was rate-limited, and a health check that takes ten minutes to say
+   * "degraded" is one nobody runs.
+   */
+  noWait?: boolean;
 };
 
 export type LlmResponse = {
@@ -217,7 +226,7 @@ async function callProvider(
     // text a consultant reads word by word — and the measured token ceiling
     // here is 8000/minute, which a proposal of eight sections exceeds on its
     // own. Waited once, briefly, and only for this.
-    if (response.status === 429 && !retried) {
+    if (response.status === 429 && !retried && !request.noWait) {
       const wait = retryAfterMs(response.headers);
       if (wait !== null) {
         await new Promise((resolve) => setTimeout(resolve, wait));
@@ -285,6 +294,20 @@ function mentionsJson(messages: ChatMessage[]): boolean {
  */
 const HARD_FAILURE = /_http_(401|402|403)/;
 const RATE_LIMITED = /_http_429/;
+/**
+ * A 429 that will not clear for hours.
+ *
+ * Providers meter per minute *and* per day, and the two are told apart only by
+ * the message. Groq's per-day exhaustion reads "on tokens per day (TPD): Limit
+ * 200000, Used 199189" — retrying that every two minutes for the rest of the
+ * day is a wasted round trip each time, and it hides the real reason behind a
+ * rate-limit message that looks transient.
+ *
+ * Found by misreading it: the per-minute headers showed 7908 of 8000 tokens
+ * free while every call fell through to the local model, and the pacing fix
+ * that followed addressed a constraint that was not binding.
+ */
+const DAILY_EXHAUSTION = /per day|\bTPD\b|\bRPD\b|daily limit|check your plan and billing/i;
 const RESTING: Map<string, number> = new Map();
 
 /**
@@ -298,7 +321,7 @@ const RESTING: Map<string, number> = new Map();
  */
 export function restMinutesFor(message: string): number {
   if (HARD_FAILURE.test(message)) return 30;
-  if (RATE_LIMITED.test(message)) return 2;
+  if (RATE_LIMITED.test(message)) return DAILY_EXHAUSTION.test(message) ? 60 : 2;
   return 0;
 }
 
