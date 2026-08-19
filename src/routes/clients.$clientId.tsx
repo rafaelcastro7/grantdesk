@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { errorMessage } from "@/lib/error-message";
+import { useAction } from "@/lib/use-action";
 import { useServerFn } from "@tanstack/react-start";
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
@@ -46,9 +46,7 @@ function ClientDetail() {
   const [client, setClient] = useState<ClientRow | null>(null);
   const [profile, setProfile] = useState<StoredProfile | null>(null);
   const [sourceUrl, setSourceUrl] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [note, setNote] = useState<string | null>(null);
+  const { busy, error, note, run, setError } = useAction();
   const [answers, setAnswers] = useState<StoredAnswer[] | null>(null);
 
   const load = useCallback(async () => {
@@ -88,10 +86,7 @@ function ClientDetail() {
 
   async function fillFromWebsite(event: React.FormEvent) {
     event.preventDefault();
-    setBusy(true);
-    setError(null);
-    setNote(null);
-    try {
+    await run("extract", async () => {
       const result = await runExtraction({ data: { url: sourceUrl.trim() } });
       if (!result.ok) throw new Error(result.error);
 
@@ -115,16 +110,9 @@ function ClientDetail() {
           { onConflict: "client_id" },
         );
       if (upsertError) throw upsertError;
-
-      setNote(
-        `Read from ${provenance.source} via ${provenance.model}. Check it before relying on it.`,
-      );
       await load();
-    } catch (caught) {
-      setError(errorMessage(caught));
-    } finally {
-      setBusy(false);
-    }
+      return `Read from ${provenance.source} via ${provenance.model}. Check it before relying on it.`;
+    });
   }
 
   /**
@@ -143,10 +131,7 @@ function ClientDetail() {
         .map((part) => part.trim())
         .filter(Boolean);
 
-    setBusy(true);
-    setError(null);
-    setNote(null);
-    try {
+    await run("save", async () => {
       const budget = Number(text("annualBudget").replace(/[,\s$]/g, ""));
       const { error: saveError } = await supabase()
         .from("client_profiles")
@@ -167,13 +152,9 @@ function ClientDetail() {
           { onConflict: "client_id" },
         );
       if (saveError) throw saveError;
-      setNote("Profile saved.");
       await load();
-    } catch (caught) {
-      setError(errorMessage(caught));
-    } finally {
-      setBusy(false);
-    }
+      return "Profile saved.";
+    });
   }
 
   /**
@@ -186,20 +167,20 @@ function ClientDetail() {
    * delete one is the point.
    */
   async function forgetAnswer(answer: StoredAnswer) {
-    setError(null);
-    setNote(null);
+    // Removed from view first: the row is gone the moment it is clicked, and
+    // put back only if the delete actually fails.
     setAnswers((current) => (current ?? []).filter((a) => a.id !== answer.id));
-    try {
+    await run("forget", async () => {
       const { error: deleteError } = await supabase()
         .from("answer_library")
         .delete()
         .eq("id", answer.id);
-      if (deleteError) throw deleteError;
-      setNote(`Removed "${answer.label}". Future drafts will not use it.`);
-    } catch (caught) {
-      await load();
-      setError(errorMessage(caught));
-    }
+      if (deleteError) {
+        await load();
+        throw deleteError;
+      }
+      return `Removed "${answer.label}". Future drafts will not use it.`;
+    });
   }
 
   const fields = toFields(profile);
@@ -231,10 +212,10 @@ function ClientDetail() {
           />
           <button
             type="submit"
-            disabled={busy}
+            disabled={busy !== null}
             className="rounded-md bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
           >
-            {busy ? "Reading…" : "Read the page"}
+            {busy === "extract" ? "Reading…" : "Read the page"}
           </button>
         </form>
         {note && <p className="mt-3 text-sm text-[var(--color-ink-soft)]">{note}</p>}
@@ -301,10 +282,10 @@ function ClientDetail() {
           <div className="bg-[var(--color-surface)] px-4 py-3 sm:col-span-2">
             <button
               type="submit"
-              disabled={busy}
+              disabled={busy !== null}
               className="rounded-md border border-[var(--color-rule)] px-3 py-1.5 text-sm font-medium disabled:opacity-50"
             >
-              {busy ? "Saving…" : "Save profile"}
+              {busy === "save" ? "Saving…" : "Save profile"}
             </button>
           </div>
         </form>

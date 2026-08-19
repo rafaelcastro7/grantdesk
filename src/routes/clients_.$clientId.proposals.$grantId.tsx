@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { accessToken } from "@/lib/session";
 import { errorMessage } from "@/lib/error-message";
+import { useAction } from "@/lib/use-action";
 import {
   draftProposalSection,
   readRequirements,
@@ -76,9 +77,7 @@ function ProposalPage() {
   } | null>(null);
   const [blockers, setBlockers] = useState<Blocker[] | null>(null);
   const [awards, setAwards] = useState<PastAwardsResult | null>(null);
-  const [busy, setBusy] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [note, setNote] = useState<string | null>(null);
+  const { busy, error, note, run, setError } = useAction();
   const autoRead = useRef(false);
 
   const load = useCallback(async () => {
@@ -162,21 +161,13 @@ function ProposalPage() {
     void readCall();
   }, [requirements, busy]);
 
-  async function readCall() {
-    setBusy("read");
-    setError(null);
-    setNote(null);
-    try {
+  const readCall = () =>
+    run("read", async () => {
       const result = await runRead({ data: { grantId, accessToken: await accessToken() } });
       if (!result.ok) throw new Error(result.error);
-      setNote(`Read ${result.count} requirements from ${result.provenance.source}.`);
       await load();
-    } catch (caught) {
-      setError(errorMessage(caught));
-    } finally {
-      setBusy(null);
-    }
-  }
+      return `Read ${result.count} requirements from ${result.provenance.source}.`;
+    });
 
   /**
    * A heading the consultant read off the funder's own form.
@@ -191,13 +182,9 @@ function ProposalPage() {
     const data = new FormData(form);
     const label = String(data.get("label") ?? "").trim();
     if (!label) return;
-
     const limit = Number(String(data.get("wordLimit") ?? "").replace(/\D/g, ""));
 
-    setBusy("add");
-    setError(null);
-    setNote(null);
-    try {
+    await run("add", async () => {
       const { error: insertError } = await supabase()
         .from("requirements")
         .upsert(
@@ -213,11 +200,7 @@ function ProposalPage() {
       if (insertError) throw insertError;
       form.reset();
       await load();
-    } catch (caught) {
-      setError(errorMessage(caught));
-    } finally {
-      setBusy(null);
-    }
+    });
   }
 
   /**
@@ -283,27 +266,17 @@ function ProposalPage() {
     }
   }
 
-  async function refreshReadiness() {
-    if (!proposalId) return;
-    setBusy("readiness");
-    setError(null);
-    try {
+  const refreshReadiness = () =>
+    run("readiness", async () => {
+      if (!proposalId) return;
       const result = await runReadiness({ data: { proposalId, accessToken: await accessToken() } });
       if (!result.ok) throw new Error(result.error);
       setBlockers(result.blockers);
-    } catch (caught) {
-      setError(errorMessage(caught));
-    } finally {
-      setBusy(null);
-    }
-  }
+    });
 
-  async function send(override: boolean) {
-    if (!proposalId) return;
-    setBusy("submit");
-    setError(null);
-    setNote(null);
-    try {
+  const send = (override: boolean) =>
+    run("submit", async () => {
+      if (!proposalId) return;
       const result = await runSubmit({
         data: { proposalId, overrideSoftBlockers: override, accessToken: await accessToken() },
       });
@@ -311,18 +284,11 @@ function ProposalPage() {
         if (result.blockers) setBlockers(result.blockers);
         throw new Error(result.error);
       }
-      setNote(
-        result.overrode > 0
-          ? `Recorded as submitted, over ${result.overrode} stated warning${result.overrode === 1 ? "" : "s"}. What you were told is stored with it.`
-          : "Recorded as submitted.",
-      );
       await load();
-    } catch (caught) {
-      setError(errorMessage(caught));
-    } finally {
-      setBusy(null);
-    }
-  }
+      return result.overrode > 0
+        ? `Recorded as submitted, over ${result.overrode} stated warning${result.overrode === 1 ? "" : "s"}. What you were told is stored with it.`
+        : "Recorded as submitted.";
+    });
 
   /**
    * Record what the funder decided.
@@ -334,13 +300,10 @@ function ProposalPage() {
    */
   async function updateOutcome(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!proposalId) return;
     const form = new FormData(event.currentTarget);
 
-    setBusy("outcome");
-    setError(null);
-    setNote(null);
-    try {
+    await run("outcome", async () => {
+      if (!proposalId) return;
       const reference = String(form.get("confirmationNumber") ?? "").trim();
       const { error: updateError } = await supabase()
         .from("submissions")
@@ -350,35 +313,21 @@ function ProposalPage() {
         })
         .eq("proposal_id", proposalId);
       if (updateError) throw updateError;
-      setNote("Outcome saved.");
       await load();
-    } catch (caught) {
-      setError(errorMessage(caught));
-    } finally {
-      setBusy(null);
-    }
+      return "Outcome saved.";
+    });
   }
 
-  async function loadAwards() {
-    setBusy("awards");
-    setError(null);
-    try {
+  const loadAwards = () =>
+    run("awards", async () => {
       const result = await runPastAwards({ data: { grantId, accessToken: await accessToken() } });
       if (!result.ok) throw new Error(result.error);
       setAwards(result.result);
-    } catch (caught) {
-      setError(errorMessage(caught));
-    } finally {
-      setBusy(null);
-    }
-  }
+    });
 
-  async function draft(requirement: Requirement) {
-    if (!proposalId) return;
-    setBusy(requirement.id);
-    setError(null);
-    setNote(null);
-    try {
+  const draft = (requirement: Requirement) =>
+    run(requirement.id, async () => {
+      if (!proposalId) return;
       const result = await runDraft({
         data: {
           clientId,
@@ -388,39 +337,20 @@ function ProposalPage() {
         },
       });
       if (!result.ok) throw new Error(result.error);
-      setNote(
-        result.reused.length > 0
-          ? `Drafted ${result.wordCount} words, reusing ${result.reused.map((r) => `"${r.label}"`).join(", ")}.`
-          : `Drafted ${result.wordCount} words. Nothing in the answer library matched yet.`,
-      );
       await load();
-    } catch (caught) {
-      setError(errorMessage(caught));
-    } finally {
-      setBusy(null);
-    }
-  }
+      return result.reused.length > 0
+        ? `Drafted ${result.wordCount} words, reusing ${result.reused.map((r) => `"${r.label}"`).join(", ")}.`
+        : `Drafted ${result.wordCount} words. Nothing in the answer library matched yet.`;
+    });
 
-  async function keepAnswer(requirement: Requirement, content: string) {
-    setBusy(requirement.id);
-    setError(null);
-    try {
+  const keepAnswer = (requirement: Requirement, content: string) =>
+    run(requirement.id, async () => {
       const result = await runSaveAnswer({
-        data: {
-          clientId,
-          label: requirement.label,
-          content,
-          accessToken: await accessToken(),
-        },
+        data: { clientId, label: requirement.label, content, accessToken: await accessToken() },
       });
       if (!result.ok) throw new Error(result.error);
-      setNote(`Kept "${requirement.label}" — the next call that asks this will reuse it.`);
-    } catch (caught) {
-      setError(errorMessage(caught));
-    } finally {
-      setBusy(null);
-    }
-  }
+      return `Kept "${requirement.label}" — the next call that asks this will reuse it.`;
+    });
 
   async function saveEdit(requirement: Requirement, content: string) {
     if (!proposalId) return;

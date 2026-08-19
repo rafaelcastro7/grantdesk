@@ -1,6 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { errorMessage } from "@/lib/error-message";
-import { useState } from "react";
+import { useAction } from "@/lib/use-action";
 import { supabase } from "@/lib/supabase";
 
 export const Route = createFileRoute("/auth")({ component: AuthPage });
@@ -17,8 +16,7 @@ export const Route = createFileRoute("/auth")({ component: AuthPage });
  */
 function AuthPage() {
   const navigate = useNavigate();
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { busy, error, run, setError } = useAction();
 
   async function submit(form: HTMLFormElement, mode: "signin" | "signup") {
     const data = new FormData(form);
@@ -30,9 +28,7 @@ function AuthPage() {
       return;
     }
 
-    setBusy(true);
-    setError(null);
-    try {
+    await run(mode, async () => {
       const auth = supabase().auth;
       const result =
         mode === "signup"
@@ -49,11 +45,7 @@ function AuthPage() {
       }
 
       await navigate({ to: "/clients" });
-    } catch (caught) {
-      setError(errorMessage(caught));
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
   return (
@@ -101,14 +93,14 @@ function AuthPage() {
         <div className="flex gap-2">
           <button
             type="submit"
-            disabled={busy}
+            disabled={busy !== null}
             className="flex-1 rounded-md bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
           >
             {busy ? "Working…" : "Sign in"}
           </button>
           <button
             type="button"
-            disabled={busy}
+            disabled={busy !== null}
             onClick={(event) => {
               const form = event.currentTarget.closest("form");
               if (form) void submit(form, "signup");

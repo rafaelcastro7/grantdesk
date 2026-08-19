@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { errorMessage } from "@/lib/error-message";
+import { useAction } from "@/lib/use-action";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 
@@ -17,8 +17,7 @@ function ClientsPage() {
   const [clients, setClients] = useState<ClientRow[] | null>(null);
   const [name, setName] = useState("");
   const [website, setWebsite] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { busy, error, run, setError } = useAction();
 
   useEffect(() => {
     void (async () => {
@@ -43,9 +42,7 @@ function ClientsPage() {
 
   async function addClient(event: React.FormEvent) {
     event.preventDefault();
-    setBusy(true);
-    setError(null);
-    try {
+    await run("add", async () => {
       const { data: userData } = await supabase().auth.getUser();
       const consultantId = userData.user?.id;
       if (!consultantId) throw new Error("Your session expired. Sign in again.");
@@ -58,11 +55,7 @@ function ClientsPage() {
       if (insertError) throw insertError;
 
       await navigate({ to: "/clients/$clientId", params: { clientId: data.id as string } });
-    } catch (caught) {
-      setError(errorMessage(caught));
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
   return (
@@ -101,7 +94,7 @@ function ClientsPage() {
         </label>
         <button
           type="submit"
-          disabled={busy}
+          disabled={busy !== null}
           className="rounded-md bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
         >
           {busy ? "Adding…" : "Add client"}

@@ -3,7 +3,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { accessToken } from "@/lib/session";
-import { errorMessage } from "@/lib/error-message";
+import { useAction } from "@/lib/use-action";
 import { relevanceFrom } from "@/lib/match-explain";
 import { findMatches } from "@/server/match.functions";
 
@@ -73,9 +73,7 @@ function MatchesPage() {
 
   const [clientName, setClientName] = useState<string>("");
   const [matches, setMatches] = useState<MatchRow[] | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [note, setNote] = useState<string | null>(null);
+  const { busy, error, note, run, setError } = useAction();
   const [showRuledOut, setShowRuledOut] = useState(false);
   const autoRan = useRef(false);
 
@@ -120,36 +118,28 @@ function MatchesPage() {
   useEffect(() => {
     if (autoRan.current || matches === null || matches.length > 0 || busy) return;
     autoRan.current = true;
-    void run();
+    void findAll();
     // `run` is stable enough for this one-shot; re-running on its identity
     // would defeat the guard it depends on.
   }, [matches, busy]);
 
-  async function run() {
-    setBusy(true);
-    setError(null);
-    setNote(null);
-    try {
+  const findAll = () =>
+    run("matching", async () => {
       const response = await runMatching({ data: { clientId, accessToken: await accessToken() } });
       if (!response.ok) throw new Error(response.error);
 
       const { result } = response;
+      await load();
       // Say which halves of retrieval ran. A degraded run that looks identical
       // to a healthy one teaches the consultant to distrust the good ones too.
       const degraded = !result.usedVector
         ? " Meaning-based search was unavailable, so these are word matches only."
         : "";
-      setNote(
+      return (
         `Checked ${result.retrieved} calls: ${result.eligible} to apply for, ` +
-          `${result.needsInput} awaiting an answer, ${result.ineligible} ruled out.${degraded}`,
+        `${result.needsInput} awaiting an answer, ${result.ineligible} ruled out.${degraded}`
       );
-      await load();
-    } catch (caught) {
-      setError(errorMessage(caught));
-    } finally {
-      setBusy(false);
-    }
-  }
+    });
 
   const grouped = (verdict: Verdict) => (matches ?? []).filter((m) => m.verdict === verdict);
 
@@ -171,8 +161,8 @@ function MatchesPage() {
       <div className="mt-6 flex flex-wrap items-center gap-3">
         <button
           type="button"
-          onClick={run}
-          disabled={busy}
+          onClick={findAll}
+          disabled={busy !== null}
           data-testid="run-matching"
           className="rounded-md bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
         >
