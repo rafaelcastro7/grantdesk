@@ -136,7 +136,7 @@ export async function findReusableAnswers(
   }));
 }
 
-const SYSTEM = `You draft one section of a grant application for a consultant who will edit it.
+export const DRAFT_SYSTEM_PROMPT = `You draft one section of a grant application for a consultant who will edit it.
 
 Absolute rules:
 - Use only the facts you are given about the organization. Never invent a
@@ -300,7 +300,7 @@ export async function draftSection(
       // arriving from the small local model for that reason alone.
       maxTokens: Math.min(6000, REASONING_HEADROOM + (requirement.wordLimit ?? 600) * 3),
       messages: [
-        { role: "system", content: SYSTEM },
+        { role: "system", content: DRAFT_SYSTEM_PROMPT },
         { role: "user", content: buildPrompt(requirement, client, reused) },
       ],
       validate: (candidate) => cleanDraft(candidate).length > 80,
