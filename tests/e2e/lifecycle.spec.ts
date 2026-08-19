@@ -135,6 +135,17 @@ test("a consultant goes from a new client to a recorded submission", async ({ pa
   await page.getByTestId("past-awards").click();
   await expect(page.getByTestId("awards-panel")).toBeVisible({ timeout: 60_000 });
 
+  // ── It is on the desk before it is sent, too ──────────────────────────────
+  // An application in progress has to appear under "what is due" — that is the
+  // first question in the spec, and a consultant who cannot see unsent work
+  // there will keep a second list somewhere else.
+  await page.goto("/");
+  const due = page.getByTestId("due-list");
+  await expect(due).toBeVisible({ timeout: 30_000 });
+  await expect(due).toContainText(`Ravine Keepers ${stamp}`);
+  await due.getByRole("link").first().click();
+  await expect(page).toHaveURL(/\/proposals\/[0-9a-f-]{36}$/, { timeout: 30_000 });
+
   // ── The submit gate ───────────────────────────────────────────────────────
   const send = page.getByTestId("send");
   await expect(send).toBeVisible();
