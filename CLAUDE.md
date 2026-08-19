@@ -29,7 +29,15 @@ bun run test:e2e         # needs the live stack + a dev server it starts itself
 bun run eval:match       # retrieval precision vs the keyword baseline; exits non-zero if it loses
 bun run eval:drafting    # reuse, word limits, and no fabricated numbers
 bun run eval:profile     # extraction quality across real pages
+bun run doctor           # is any of this actually working right now?
 ```
+
+`doctor` exists because the answer was no for weeks and nothing said so: Groq
+retired a model, Cerebras ran out of quota, and every call fell through to the
+small local model while every screen reported an ordinary success. It probes
+with real calls — listing a model is not evidence it can be called — and
+separates *broken* from *degraded*, exiting non-zero only for the first. A
+check that cries wolf gets run with `|| true` within a week.
 
 `verify` must never depend on the network. A gate people learn to re-run is not
 a gate.

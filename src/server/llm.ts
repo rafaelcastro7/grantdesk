@@ -184,6 +184,51 @@ function mentionsJson(messages: ChatMessage[]): boolean {
   return messages.some((message) => /json/i.test(message.content));
 }
 
+/**
+ * Stop asking a provider that has told us to stop asking.
+ *
+ * A 401 or 402 is an account state, not a blip: Cerebras answers "payment
+ * required" to every call until someone visits the billing tab, and retrying it
+ * first on every request buys a wasted round trip and nothing else. A 429 is
+ * different in kind but the same in effect for the next little while.
+ *
+ * Deliberately in-process and short. This is a courtesy to the request path,
+ * not a source of truth — `bun run doctor` always probes for real, so a
+ * provider that has come back is found by the thing whose job that is rather
+ * than by a cache someone has to remember to clear.
+ */
+const HARD_FAILURE = /_http_(401|402|403)/;
+const RATE_LIMITED = /_http_429/;
+const RESTING: Map<string, number> = new Map();
+
+/**
+ * How long to leave a provider alone after this failure, in minutes.
+ *
+ * Exported because it is the whole decision, and the first version of it never
+ * fired: the pattern ended in a literal backspace character rather than a word
+ * boundary, so it matched nothing and every request kept paying a round trip to
+ * a provider that had already said no. It looked correct in an editor. A test
+ * is the only thing that would have caught it, so now there is one.
+ */
+export function restMinutesFor(message: string): number {
+  if (HARD_FAILURE.test(message)) return 30;
+  if (RATE_LIMITED.test(message)) return 2;
+  return 0;
+}
+
+function restUntil(name: string, message: string): void {
+  const minutes = restMinutesFor(message);
+  if (minutes > 0) RESTING.set(name, Date.now() + minutes * 60_000);
+}
+
+function isResting(name: string): boolean {
+  const until = RESTING.get(name);
+  if (until === undefined) return false;
+  if (until > Date.now()) return true;
+  RESTING.delete(name);
+  return false;
+}
+
 export class LlmUnavailableError extends Error {
   constructor(public readonly attempts: string[]) {
     super(`every provider failed: ${attempts.join("; ")}`);
@@ -204,6 +249,10 @@ export async function callLlm(
   const attempts: string[] = [];
 
   for (const provider of chain) {
+    if (isResting(provider.name)) {
+      attempts.push(`${provider.name}: skipped, still failing`);
+      continue;
+    }
     try {
       const result = await callProvider(provider, request, timeoutMs);
       if (request.validate && !request.validate(result.text)) {
@@ -212,7 +261,9 @@ export async function callLlm(
       }
       return { ...result, attempts };
     } catch (error) {
-      attempts.push(`${provider.name}: ${error instanceof Error ? error.message : String(error)}`);
+      const message = error instanceof Error ? error.message : String(error);
+      restUntil(provider.name, message);
+      attempts.push(`${provider.name}: ${message}`);
     }
   }
 

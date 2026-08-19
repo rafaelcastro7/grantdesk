@@ -89,6 +89,16 @@ jobs:
       - name: Retrieval precision vs the keyword baseline
         run: bun run eval:match
 
+      # Would we notice the system being broken? This is the check that did not
+      # exist while a retired model and an exhausted quota sent every call to
+      # the local fallback for weeks, with every screen reporting success.
+      - name: Health check
+        run: bun run doctor
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          CEREBRAS_API_KEY: ${{ secrets.CEREBRAS_API_KEY }}
+          GOOGLE_AI_STUDIO_KEY: ${{ secrets.GOOGLE_AI_STUDIO_KEY }}
+
       # Drafting quality, checked against the text rather than by a judge:
       # reuse, word limits, and — the one that matters most — no number in a
       # draft that does not trace back to a fact we supplied.
