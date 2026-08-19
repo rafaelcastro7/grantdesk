@@ -51,6 +51,12 @@ type Provider = {
   baseUrl: string;
   apiKey?: string;
   models: Record<Role, string>;
+  /**
+   * Accepts OpenAI's `reasoning_effort`. Sent only where it is known to be
+   * understood: an unknown field is a 400 on some OpenAI-compatible gateways,
+   * and trading a working provider for a cheaper one is a bad deal.
+   */
+  reasoningEffort?: boolean;
 };
 
 function providers(): Provider[] {
@@ -60,6 +66,7 @@ function providers(): Provider[] {
       name: "groq",
       baseUrl: "https://api.groq.com/openai/v1",
       apiKey: env.GROQ_API_KEY,
+      reasoningEffort: true,
       // The llama-3.x models this used to name were retired from this account
       // and answered 404 for weeks while the whole chain silently fell through
       // to the local floor. Probed live before being written down here:
@@ -125,10 +132,47 @@ function order(role: Role): Provider["name"][] {
   return ["groq", "gemini", "cerebras"];
 }
 
+/**
+ * How long a rate-limited provider says to wait, in milliseconds.
+ *
+ * Null when it does not say, or when the wait is long enough that falling
+ * through to another provider is plainly better than blocking on this one.
+ * Groq reports a token-bucket reset that is usually seconds; a minute-long
+ * wait is a different situation and belongs to the next provider in the chain.
+ */
+const MAX_WAIT_MS = 20_000;
+
+function retryAfterMs(headers: Headers): number | null {
+  const candidates = [
+    headers.get("retry-after"),
+    headers.get("x-ratelimit-reset-tokens"),
+    headers.get("x-ratelimit-reset-requests"),
+  ].filter((value): value is string => !!value);
+
+  for (const raw of candidates) {
+    const ms = parseDuration(raw);
+    if (ms !== null && ms <= MAX_WAIT_MS) return ms + 250;
+  }
+  return null;
+}
+
+/** "13.905s", "2m30s", or a bare number of seconds. */
+export function parseDuration(raw: string): number | null {
+  const trimmed = raw.trim();
+  if (/^\d+(\.\d+)?$/.test(trimmed)) return Math.round(Number(trimmed) * 1000);
+
+  const match = /^(?:(\d+(?:\.\d+)?)m)?(?:(\d+(?:\.\d+)?)s)?$/.exec(trimmed);
+  if (!match || (!match[1] && !match[2])) return null;
+  const minutes = Number(match[1] ?? 0);
+  const seconds = Number(match[2] ?? 0);
+  return Math.round((minutes * 60 + seconds) * 1000);
+}
+
 async function callProvider(
   provider: Provider,
   request: LlmRequest,
   timeoutMs: number,
+  retried = false,
 ): Promise<LlmResponse> {
   const model = provider.models[request.role];
   const started = Date.now();
@@ -150,6 +194,13 @@ async function callProvider(
       messages: request.messages,
       temperature: request.temperature ?? 0.2,
       max_tokens: request.maxTokens ?? 2048,
+      // Measured on gpt-oss-120b, drafting a 250-word section: default effort
+      // spends 1804 completion tokens, "low" spends 337 for the same 1900
+      // characters of output. Groq bills the *requested* max_tokens against an
+      // 8000/minute ceiling, so the difference is four drafts a minute versus
+      // thirteen — the difference between a proposal that drafts and one that
+      // falls through to the local model half way down.
+      ...(provider.reasoningEffort ? { reasoning_effort: "low" } : {}),
       // Groq rejects response_format outright unless the word "json" appears
       // somewhere in the messages — a 400 that says so plainly, but only if
       // anyone reads it. Every caller here already asks for JSON in words, and
@@ -160,6 +211,19 @@ async function callProvider(
   });
 
   if (!response.ok) {
+    // A 429 is not a failure, it is a "come back shortly", and the provider
+    // says exactly how long. Falling through to a weaker model when waiting
+    // fourteen seconds would produce the better answer is the wrong trade for
+    // text a consultant reads word by word — and the measured token ceiling
+    // here is 8000/minute, which a proposal of eight sections exceeds on its
+    // own. Waited once, briefly, and only for this.
+    if (response.status === 429 && !retried) {
+      const wait = retryAfterMs(response.headers);
+      if (wait !== null) {
+        await new Promise((resolve) => setTimeout(resolve, wait));
+        return callProvider(provider, request, timeoutMs, true);
+      }
+    }
     throw new Error(
       `${provider.name}_http_${response.status}: ${(await response.text()).slice(0, 200)}`,
     );

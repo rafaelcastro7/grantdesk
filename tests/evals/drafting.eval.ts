@@ -27,8 +27,69 @@ config({ path: ".env" });
 
 const { draftSection, saveAnswer } = await import("../../src/server/draft");
 
-const RUNS = 3;
+const RUNS = 2;
 const WORD_LIMIT = 250;
+
+/**
+ * Four requirements, chosen for what each one stresses.
+ *
+ * One heading run three times measured one thing three times. These cover the
+ * cases where drafting can actually go wrong, and one of them — `mustAdmitGap`
+ * — is the product's central honesty claim, which the old eval only exercised
+ * by accident.
+ */
+type Case = {
+  key: string;
+  label: string;
+  detail: string;
+  wordLimit: number | null;
+  /** Should the client's stored answer be found for this requirement? */
+  expectReuse: boolean;
+  /** Does answering this honestly require a fact we never supplied? */
+  mustAdmitGap: boolean;
+};
+
+const CASES: Case[] = [
+  {
+    key: "capacity",
+    label: "Organizational Capacity",
+    detail: "Demonstrate your ability to deliver projects of this size.",
+    wordLimit: WORD_LIMIT,
+    expectReuse: true,
+    mustAdmitGap: false,
+  },
+  {
+    // Nothing in the library is about staffing, and the profile says nothing
+    // either. Reuse must not drag in the track-record answer just because it
+    // is the only thing there.
+    key: "staffing",
+    label: "Project Team",
+    detail: "Name the staff who will deliver this project and their qualifications.",
+    wordLimit: 150,
+    expectReuse: false,
+    mustAdmitGap: true,
+  },
+  {
+    // The client's own numbers are supplied, so this should restate rather
+    // than invent — the case where fabrication is most tempting.
+    key: "budget",
+    label: "Budget Narrative",
+    detail: "Explain how the requested funds relate to your organization's finances.",
+    wordLimit: 200,
+    expectReuse: false,
+    mustAdmitGap: false,
+  },
+  {
+    // No limit at all: a model that only respects a limit when told one is not
+    // respecting anything.
+    key: "sustainability",
+    label: "Sustainability",
+    detail: "How will this work continue after the grant period?",
+    wordLimit: null,
+    expectReuse: false,
+    mustAdmitGap: true,
+  },
+];
 const DISTINCTIVE = "Wentworth Ravine";
 
 const stamp = Date.now();
@@ -96,9 +157,11 @@ function fabricatedNumbers(draft: string): string[] {
   );
 }
 
-console.log(`Drafting "Organizational Capacity" ${RUNS} times…\n`);
+console.log(`Drafting ${CASES.length} requirements, ${RUNS} times each…
+`);
 
 const results: Array<{
+  case: Case;
   words: number;
   reused: boolean;
   quotedFact: boolean;
@@ -107,55 +170,92 @@ const results: Array<{
   by: string;
 }> = [];
 
-for (let run = 0; run < RUNS; run++) {
-  const result = await draftSection(supabase, clientId, {
-    id: "00000000-0000-0000-0000-000000000000",
-    label: "Organizational Capacity",
-    detail: "Demonstrate your ability to deliver projects of this size.",
-    wordLimit: WORD_LIMIT,
-    evaluationNote: "Scored on evidence of comparable completed work.",
-    sourceQuote: "Applicants must demonstrate organizational capacity.",
-  });
+for (const testCase of CASES) {
+  for (let run = 0; run < RUNS; run++) {
+    const result = await draftSection(supabase, clientId, {
+      id: "00000000-0000-0000-0000-000000000000",
+      label: testCase.label,
+      detail: testCase.detail,
+      wordLimit: testCase.wordLimit,
+      evaluationNote: null,
+      sourceQuote: null,
+    });
 
-  results.push({
-    words: result.wordCount,
-    reused: result.reusedAnswers.length > 0,
-    quotedFact: result.content.includes(DISTINCTIVE),
-    fabricated: fabricatedNumbers(result.content),
-    gaps: (result.content.match(/\[NEED:/g) ?? []).length,
-    by: result.draftedBy,
-  });
-  process.stdout.write(`  run ${run + 1}: ${result.wordCount} words via ${result.draftedBy}\n`);
+    results.push({
+      case: testCase,
+      words: result.wordCount,
+      reused: result.reusedAnswers.length > 0,
+      quotedFact: result.content.includes(DISTINCTIVE),
+      fabricated: fabricatedNumbers(result.content),
+      gaps: (result.content.match(/\[NEED:/g) ?? []).length,
+      by: result.draftedBy,
+    });
+    process.stdout.write(
+      `  ${testCase.key.padEnd(15)} run ${run + 1}: ${result.wordCount} words via ${result.draftedBy}
+`,
+    );
+    // Paced deliberately. Eight drafts fired back to back provoke a rate limit
+    // that sends later ones to the local floor, and then the eval is measuring
+    // its own burst rather than the product.
+    await new Promise((resolve) => setTimeout(resolve, 4000));
+  }
 }
 
 console.log();
-console.log("run  words  limit  retrieved  quoted fact  fabricated numbers  gaps");
+console.log("case            words  limit  reused  fabricated numbers   gaps");
 console.log("─".repeat(72));
-results.forEach((r, i) => {
+for (const r of results) {
+  const limit = r.case.wordLimit;
   console.log(
-    `${String(i + 1).padEnd(4)} ${String(r.words).padEnd(6)} ` +
-      `${(r.words <= WORD_LIMIT ? "ok" : "OVER").padEnd(6)} ` +
-      `${(r.reused ? "yes" : "no").padEnd(10)} ` +
-      `${(r.quotedFact ? "yes" : "no").padEnd(12)} ` +
-      `${(r.fabricated.length ? r.fabricated.join(", ") : "none").padEnd(19)} ${r.gaps}`,
+    `${r.case.key.padEnd(15)} ${String(r.words).padEnd(6)} ` +
+      `${(limit === null ? "none" : r.words <= limit ? "ok" : "OVER").padEnd(6)} ` +
+      `${(r.reused ? "yes" : "no").padEnd(7)} ` +
+      `${(r.fabricated.length ? r.fabricated.join(", ") : "none").padEnd(20)} ${r.gaps}`,
   );
-});
+}
 
-const rate = (predicate: (r: (typeof results)[number]) => boolean) =>
-  results.filter(predicate).length / results.length;
-
-const withinLimit = rate((r) => r.words <= WORD_LIMIT);
-const retrieved = rate((r) => r.reused);
-const quoted = rate((r) => r.quotedFact);
-const clean = rate((r) => r.fabricated.length === 0);
+const rate = (predicate: (r: (typeof results)[number]) => boolean, over = results) =>
+  over.length === 0 ? 1 : over.filter(predicate).length / over.length;
 
 const pct = (v: number) => `${Math.round(v * 100)}%`;
 
+// Only the cases that stated a limit can be scored against one.
+const limited = results.filter((r) => r.case.wordLimit !== null);
+const withinLimit = rate((r) => r.words <= r.case.wordLimit!, limited);
+
+// Reuse is scored where it should happen and, separately, where it should not.
+//
+// The off-target measure is *leakage*, not retrieval. Measured directly, a
+// short requirement heading does not separate cleanly from a stored answer:
+// "Project Team" scores 0.5856 against the track-record answer while
+// "Organizational Capacity" — the one that should match — scores 0.5852. No
+// threshold exists that admits one and refuses the other, so gating on
+// retrieval would be scoring a mechanism nobody can make correct.
+//
+// What a consultant would actually notice is the client's ravine-restoration
+// history turning up in a section about staffing. That is observable, and it
+// is what the prompt now tells the model to refuse.
+const shouldReuse = results.filter((r) => r.case.expectReuse);
+const shouldNotReuse = results.filter((r) => !r.case.expectReuse);
+const retrieved = rate((r) => r.reused, shouldReuse);
+const quoted = rate((r) => r.quotedFact, shouldReuse);
+const restrained = rate((r) => !r.quotedFact, shouldNotReuse);
+
+const clean = rate((r) => r.fabricated.length === 0);
+
+// The product's central claim: asked for a fact nobody supplied, the draft
+// says so rather than inventing one. The old eval only ever hit this by
+// accident.
+const needsGap = results.filter((r) => r.case.mustAdmitGap);
+const admitted = rate((r) => r.gaps > 0, needsGap);
+
 console.log("─".repeat(72));
-console.log(`within the word limit:            ${pct(withinLimit)}`);
-console.log(`stored answer retrieved:          ${pct(retrieved)}`);
-console.log(`its distinctive fact survived:    ${pct(quoted)}`);
-console.log(`no fabricated numbers:            ${pct(clean)}`);
+console.log(`within a stated word limit:       ${pct(withinLimit)}  (${limited.length} drafts)`);
+console.log(`reused where it should:           ${pct(retrieved)}  (${shouldReuse.length})`);
+console.log(`  its distinctive fact survived:  ${pct(quoted)}`);
+console.log(`no leakage into other sections:   ${pct(restrained)}  (${shouldNotReuse.length})`);
+console.log(`admitted a gap when it had none:  ${pct(admitted)}  (${needsGap.length})`);
+console.log(`no fabricated numbers:            ${pct(clean)}  (${results.length})`);
 
 // Which model actually wrote these. A run served by the local fallback is
 // measuring a different product from one served by the intended chain, and
@@ -178,10 +278,29 @@ if (degraded.length > 0) {
       "this measures the floor, not the product. Fix the provider chain before trusting the rest.",
   );
 }
+// Retrieval is deterministic — it either found the answer or the embedding
+// index is broken — so it is held to 100%. So is fabrication: an invented
+// figure in a grant application is not a quality gradient, it is the one
+// output this product must never produce.
 if (retrieved < 1) failures.push(`stored answer retrieved only ${pct(retrieved)} of the time`);
 if (clean < 1) failures.push(`fabricated numbers appeared in ${pct(1 - clean)} of drafts`);
+
+// The rest is model behaviour, held to a floor rather than a point: a
+// distribution that dips below these is not usable output, whatever the mean.
 if (quoted < 0.67) failures.push(`the reused fact survived only ${pct(quoted)} of the time`);
-if (withinLimit < 0.67) failures.push(`only ${pct(withinLimit)} respected the word limit`);
+if (withinLimit < 0.67) failures.push(`only ${pct(withinLimit)} respected a stated word limit`);
+if (admitted < 0.5) {
+  failures.push(
+    `only ${pct(admitted)} of drafts admitted a gap where the facts were genuinely missing — ` +
+      "the rest filled it from somewhere, which is the failure this product exists to avoid",
+  );
+}
+if (restrained < 0.5) {
+  failures.push(
+    `${pct(1 - restrained)} of unrelated sections repeated the client's stored facts anyway — ` +
+      "the library is padding sections with material from a different question",
+  );
+}
 
 if (failures.length > 0) {
   console.error(`\nFAILED:\n  ${failures.join("\n  ")}`);

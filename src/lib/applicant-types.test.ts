@@ -4,6 +4,8 @@ import {
   fromGrantsGovCodes,
   fromProse,
   listApplicantTypes,
+  listPlaces,
+  placeName,
 } from "./applicant-types";
 
 describe("Grants.gov codes", () => {
@@ -67,5 +69,28 @@ describe("labels", () => {
     expect(listApplicantTypes(["nonprofit", "academic", "government"])).toBe(
       "nonprofits, universities and colleges and governments and public bodies",
     );
+  });
+});
+
+describe("place names", () => {
+  it("says a subnational code the way a person would", () => {
+    // A model handed "CA-ON" wrote that the client operates in the
+    // "California-Ontario region". That sentence reaches a funder.
+    expect(placeName("CA-ON")).toBe("Ontario, Canada");
+    expect(placeName("CA")).toBe("Canada");
+    expect(placeName("US")).toBe("the United States");
+  });
+
+  it("still resolves the country of a code it does not know", () => {
+    // Better than handing over a hyphenated pair to interpret freely.
+    expect(placeName("US-CA")).toBe("CA (the United States)");
+  });
+
+  it("gives back an unrecognized code rather than inventing a place", () => {
+    expect(placeName("ZZ")).toBe("ZZ");
+  });
+
+  it("reads as a sentence for several places", () => {
+    expect(listPlaces(["CA-ON", "US"])).toBe("Ontario, Canada and the United States");
   });
 });

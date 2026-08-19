@@ -158,3 +158,55 @@ export function listApplicantTypes(types: readonly ApplicantType[]): string {
   if (labels.length === 1) return last;
   return `${labels.slice(0, -1).join(", ")} and ${last}`;
 }
+
+/**
+ * A jurisdiction code, said the way a person would say it.
+ *
+ * Profiles store ISO-like codes because rules compare them. Prompts must not:
+ * a model handed "CA-ON" wrote that the client operates in the
+ * "California-Ontario region", which is the kind of sentence that reaches a
+ * funder and is remembered. The codes are unambiguous to the eligibility
+ * engine and genuinely ambiguous to a reader.
+ */
+const PLACE_NAMES: Record<string, string> = {
+  CA: "Canada",
+  US: "the United States",
+  MX: "Mexico",
+  BR: "Brazil",
+  INTL: "internationally",
+  "CA-AB": "Alberta, Canada",
+  "CA-BC": "British Columbia, Canada",
+  "CA-MB": "Manitoba, Canada",
+  "CA-NB": "New Brunswick, Canada",
+  "CA-NL": "Newfoundland and Labrador, Canada",
+  "CA-NS": "Nova Scotia, Canada",
+  "CA-NT": "the Northwest Territories, Canada",
+  "CA-NU": "Nunavut, Canada",
+  "CA-ON": "Ontario, Canada",
+  "CA-PE": "Prince Edward Island, Canada",
+  "CA-QC": "Quebec, Canada",
+  "CA-SK": "Saskatchewan, Canada",
+  "CA-YT": "Yukon, Canada",
+};
+
+export function placeName(code: string): string {
+  const key = code.trim().toUpperCase();
+  const known = PLACE_NAMES[key];
+  if (known) return known;
+
+  // An unknown subnational code still resolves its country, which is better
+  // than handing the model a hyphenated pair to interpret however it likes.
+  const [country, region] = key.split("-");
+  const countryName = country ? PLACE_NAMES[country] : undefined;
+  if (region && countryName) return `${region} (${countryName})`;
+  return countryName ?? key;
+}
+
+/** "Ontario, Canada and the United States" — for a sentence, not a filter. */
+export function listPlaces(codes: readonly string[]): string {
+  const names = [...new Set(codes.map(placeName))];
+  const last = names.at(-1);
+  if (!last) return "";
+  if (names.length === 1) return last;
+  return `${names.slice(0, -1).join(", ")} and ${last}`;
+}

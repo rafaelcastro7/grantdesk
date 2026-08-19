@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { restMinutesFor } from "./llm";
+import { parseDuration, restMinutesFor } from "./llm";
 
 /**
  * The circuit breaker's decision, tested because its first version never fired.
@@ -40,5 +40,31 @@ describe("restMinutesFor", () => {
   it("does not match a status that merely appears in the body", () => {
     // The provider prefix is what makes this a status rather than prose.
     expect(restMinutesFor('groq_http_500: {"detail":"upstream returned 402"}')).toBe(0);
+  });
+});
+
+/**
+ * Reading how long a rate-limited provider says to wait.
+ *
+ * Groq reports a token-bucket reset like "13.905s"; others use a bare number
+ * of seconds or a minutes-and-seconds form. Getting this wrong is invisible in
+ * the good case and expensive in the bad one: an unparsed wait means falling
+ * through to the local model when waiting fourteen seconds would have produced
+ * the better answer.
+ */
+describe("parseDuration", () => {
+  it("reads the forms these providers actually send", () => {
+    expect(parseDuration("13.905s")).toBe(13905);
+    expect(parseDuration("2m30s")).toBe(150_000);
+    expect(parseDuration("27m21.6s")).toBe(1_641_600);
+    // Retry-After is plain seconds.
+    expect(parseDuration("30")).toBe(30_000);
+    expect(parseDuration("1.5")).toBe(1500);
+  });
+
+  it("returns null rather than guessing at anything else", () => {
+    for (const raw of ["", "soon", "Wed, 21 Oct 2026 07:28:00 GMT", "abc123"]) {
+      expect(parseDuration(raw), raw).toBeNull();
+    }
   });
 });
