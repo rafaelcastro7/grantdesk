@@ -142,3 +142,42 @@ export async function embedCatalog(
 
   return { considered: rows.length, embedded, unchanged: rows.length - stale.length };
 }
+
+/**
+ * Back-fill answers that were stored without an embedding.
+ *
+ * `saveAnswer` deliberately keeps a consultant's work even when the local
+ * embedder is unreachable — losing what they wrote because a model was down
+ * would be far worse. But nothing ever came back for those rows, so an answer
+ * saved during one bad minute was silently excluded from reuse forever, and the
+ * library quietly stopped being worth anything for that client.
+ *
+ * Run alongside the catalog embed; it is a no-op when there is nothing to fix.
+ */
+export async function embedPendingAnswers(supabase: SupabaseClient): Promise<{ embedded: number }> {
+  const { data, error } = await supabase
+    .from("answer_library")
+    .select("id, label, content")
+    .is("embedding", null)
+    .limit(500);
+  if (error) throw new Error(`could not read the answer library: ${error.message}`);
+
+  const rows = (data ?? []) as Array<{ id: string; label: string; content: string }>;
+  if (rows.length === 0) return { embedded: 0 };
+
+  const texts = rows.map((row) => `${row.label}. ${row.content}`.slice(0, 4000));
+  const vectors = await embed(texts);
+
+  for (let i = 0; i < rows.length; i++) {
+    const { error: writeError } = await supabase
+      .from("answer_library")
+      .update({
+        embedding: JSON.stringify(vectors[i]),
+        content_hash: contentHash(texts[i]!),
+      })
+      .eq("id", rows[i]!.id);
+    if (writeError) throw new Error(`could not store an answer embedding: ${writeError.message}`);
+  }
+
+  return { embedded: rows.length };
+}

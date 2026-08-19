@@ -1,6 +1,7 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { draftSection, findReusableAnswers, saveAnswer } from "../../src/server/draft";
+import { embedPendingAnswers } from "../../src/server/embed";
 import { sourceHash } from "../../src/server/ingest";
 
 /**
@@ -157,6 +158,45 @@ describe("the answer library", () => {
     expect(found.length).toBeGreaterThan(0);
     expect(found[0]!.content).toContain("Wentworth Ravine");
   }, 60_000);
+
+  it("recovers an answer that was stored while the embedder was unreachable", async () => {
+    // saveAnswer keeps the consultant's work even when the local model is down
+    // — losing what they wrote would be far worse. But nothing came back for
+    // those rows, so one bad minute excluded an answer from reuse permanently
+    // and the library quietly stopped being worth anything for that client.
+    const { data: stranded } = await consultant
+      .from("answer_library")
+      .insert({
+        client_id: clientId,
+        label: "Community partnerships",
+        content: "We co-deliver ravine restoration with four neighbourhood associations.",
+        embedding: null,
+      })
+      .select("id")
+      .single();
+    const strandedId = (stranded as { id: string }).id;
+
+    const { data: beforeMatch } = await consultant.rpc("match_answers", {
+      target_client: clientId,
+      q_embedding: JSON.stringify(new Array(768).fill(0.01)),
+      max_results: 50,
+      min_similarity: -1,
+    });
+    // Invisible to reuse while its embedding is null, whatever the threshold.
+    expect((beforeMatch as Array<{ id: string }>).map((a) => a.id)).not.toContain(strandedId);
+
+    const { embedded } = await embedPendingAnswers(consultant);
+    expect(embedded).toBeGreaterThan(0);
+
+    const { data: after } = await consultant
+      .from("answer_library")
+      .select("embedding")
+      .eq("id", strandedId)
+      .single();
+    expect(after!.embedding).not.toBeNull();
+
+    await consultant.from("answer_library").delete().eq("id", strandedId);
+  }, 120_000);
 
   it("stops reusing an answer once the consultant removes it", async () => {
     // The reason the library needed a visible surface at all: a stored answer

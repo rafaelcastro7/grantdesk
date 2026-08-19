@@ -59,30 +59,12 @@ export const readRequirements = createServerFn({ method: "POST" })
       // 501(c)(3) Status" all describing one rule. A consultant reading that
       // list cannot tell which are real.
       //
-      // Only rows this app extracted, and only those nothing has been written
-      // against, are cleared: headings the consultant typed from the funder's
-      // form survive, and so does any requirement with a drafted section
-      // attached to it.
-      const { data: drafted } = await supabase
-        .from("proposal_sections")
-        .select("requirement_id")
-        .not("requirement_id", "is", null);
-      const keep = new Set(
-        ((drafted ?? []) as Array<{ requirement_id: string }>).map((r) => r.requirement_id),
-      );
-
-      const { data: previous } = await supabase
-        .from("requirements")
-        .select("id")
-        .eq("grant_id", data.grantId)
-        .not("extracted_from", "is", null);
-
-      const stale = ((previous ?? []) as Array<{ id: string }>)
-        .map((r) => r.id)
-        .filter((id) => !keep.has(id));
-      if (stale.length > 0) {
-        await supabase.from("requirements").delete().in("id", stale);
-      }
+      // Done in the database rather than here, because the safety check has to
+      // see across every consultant. Requirements are shared reference data,
+      // and reading proposal_sections from this client only ever shows the
+      // caller's own — so this code used to delete requirements another
+      // consultant had already drafted against, silently unlinking their work.
+      await supabase.rpc("replace_extracted_requirements", { target_grant: data.grantId });
 
       const { error: writeError } = await supabase.from("requirements").upsert(
         requirements.map((r) => ({
