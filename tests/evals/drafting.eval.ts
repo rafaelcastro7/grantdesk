@@ -27,7 +27,16 @@ config({ path: ".env" });
 
 const { draftSection, saveAnswer } = await import("../../src/server/draft");
 
-const RUNS = 2;
+/**
+ * Runs per requirement. Two by default so a routine check is quick.
+ *
+ * Two is not enough to *tune* against, and finding that out cost a round of
+ * prompt edits: a change that should have reduced fabrication moved the number
+ * the wrong way, then back, on eight drafts. Differences of ten or twenty
+ * points are inside the noise at that size. Raise it — `EVAL_RUNS=5` — before
+ * concluding a prompt change helped.
+ */
+const RUNS = Number(process.env.EVAL_RUNS ?? 2);
 const WORD_LIMIT = 250;
 
 /**
@@ -110,6 +119,16 @@ const { data: client } = await supabase
   .single();
 const clientId = (client as { id: string }).id;
 
+/** The call being applied to. Its figures are supplied, so restating them is not invention. */
+const CALL = {
+  title: "Urban Greening Fund",
+  funder: "Ontario Trillium Foundation",
+  amountMin: 25_000,
+  amountMax: 150_000,
+  currency: "CAD",
+  deadline: "2026-12-01",
+};
+
 /** Everything the model is allowed to know. Any other figure is fabricated. */
 const FACTS = {
   capabilities:
@@ -140,6 +159,14 @@ for (const source of [
   String(FACTS.annualBudget),
   FACTS.annualBudget.toLocaleString("en-US"),
   String(WORD_LIMIT),
+  // The call's own figures. Quoting the award range back is reading, not
+  // inventing — what must not appear is a specific amount chosen from inside
+  // it, which the checker below catches as its own case.
+  String(CALL.amountMin),
+  String(CALL.amountMax),
+  CALL.amountMin.toLocaleString("en-US"),
+  CALL.amountMax.toLocaleString("en-US"),
+  CALL.deadline,
 ]) {
   for (const number of source.match(/\d[\d,]*/g) ?? []) permitted.add(number.replace(/,/g, ""));
 }
@@ -150,7 +177,12 @@ for (let year = 2011; year <= 2026; year++) permitted.add(String(year));
 function fabricatedNumbers(draft: string): string[] {
   // Gaps the model marked instead of filling are the correct behaviour, so
   // whatever is inside them is not a claim.
-  const withoutGaps = draft.replace(/\[NEED:[^\]]*\]/g, " ");
+  const withoutGaps = draft
+    .replace(/\[NEED:[^\]]*\]/g, " ")
+    // Nor is a list marker. "1. Staffing 2. Materials" was being counted as two
+    // fabricated figures, which made the number say something it did not mean —
+    // and a metric with false positives gets argued with instead of fixed.
+    .replace(/^\s*\d{1,2}[.)]\s/gm, " ");
   const found = withoutGaps.match(/\d[\d,]*(?:\.\d+)?/g) ?? [];
   return [...new Set(found.map((n) => n.replace(/,/g, "")))].filter(
     (n) => !permitted.has(n) && !permitted.has(n.replace(/\.\d+$/, "")),
@@ -179,6 +211,10 @@ for (const testCase of CASES) {
       wordLimit: testCase.wordLimit,
       evaluationNote: null,
       sourceQuote: null,
+      // The product always drafts against a specific call; drafting without
+      // one measured a situation that never happens, and it was the missing
+      // context that made a budget section invent an amount to request.
+      grant: CALL,
     });
 
     results.push({

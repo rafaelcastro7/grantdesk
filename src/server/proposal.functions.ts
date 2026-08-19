@@ -104,19 +104,30 @@ export const draftProposalSection = createServerFn({ method: "POST" })
     try {
       const { data: requirement, error } = await supabase
         .from("requirements")
-        .select("id, label, detail, word_limit, evaluation_note, source_quote")
+        .select(
+          "id, label, detail, word_limit, evaluation_note, source_quote, grant_id, " +
+            "grants(title, amount_min, amount_max, currency, deadline, funders(name))",
+        )
         .eq("id", data.requirementId)
         .maybeSingle();
       if (error) throw new Error(error.message);
       if (!requirement) throw new Error("That requirement is no longer on the call.");
 
-      const row = requirement as {
+      const row = requirement as unknown as {
         id: string;
         label: string;
         detail: string | null;
         word_limit: number | null;
         evaluation_note: string | null;
         source_quote: string | null;
+        grants: {
+          title: string;
+          amount_min: number | null;
+          amount_max: number | null;
+          currency: string | null;
+          deadline: string | null;
+          funders: { name: string } | null;
+        } | null;
       };
       const target: DraftRequirement = {
         id: row.id,
@@ -125,6 +136,18 @@ export const draftProposalSection = createServerFn({ method: "POST" })
         wordLimit: row.word_limit,
         evaluationNote: row.evaluation_note,
         sourceQuote: row.source_quote,
+        // Without this a budget section invented both the amount being
+        // requested and a project name to attach it to.
+        grant: row.grants
+          ? {
+              title: row.grants.title,
+              funder: row.grants.funders?.name ?? null,
+              amountMin: row.grants.amount_min,
+              amountMax: row.grants.amount_max,
+              currency: row.grants.currency,
+              deadline: row.grants.deadline,
+            }
+          : null,
       };
 
       const result = await draftSection(supabase, data.clientId, target);

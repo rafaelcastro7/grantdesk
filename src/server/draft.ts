@@ -27,6 +27,23 @@ export type DraftRequirement = {
   wordLimit: number | null;
   evaluationNote: string | null;
   sourceQuote: string | null;
+  /**
+   * The call this section belongs to.
+   *
+   * Absent at first, and a budget section invented "$120,000 we are
+   * requesting" and a project name to go with it — not out of carelessness,
+   * but because the requirement asked about the request and nothing had said
+   * what the request was. Facts the model does not have are the ones it fills
+   * in, so the fix is to give it the ones we hold.
+   */
+  grant?: {
+    title: string;
+    funder: string | null;
+    amountMin: number | null;
+    amountMax: number | null;
+    currency: string | null;
+    deadline: string | null;
+  } | null;
 };
 
 export type DraftClient = {
@@ -127,14 +144,25 @@ Absolute rules:
   a fact you do not have, write the sentence and mark the gap inline as
   [NEED: what is missing] — a consultant can fill a marked gap in seconds and
   cannot find an invented one at all.
+- Never round or soften a figure you were given. "312 volunteers" is not "about
+  300 volunteers", and "since 2011" is not "for over a decade". A rounded figure
+  reads as careful and is a different claim from the one the consultant
+  approved — and it is the version a funder will check.
 - That includes proportions. "Roughly 45% from municipal grants, 30% from
   foundations" is an invented funding mix even though it sounds like context
   rather than a claim, and a funder can check it. Percentages, splits and
   ratios are facts; mark them [NEED: ...] like any other.
+- The amount being requested is a fact too. You may be told the call's award
+  range; you are never told what this applicant decided to ask for. Write
+  [NEED: amount we are requesting] rather than choosing a number inside the
+  range, and never name a project the applicant has not named. A number outside
+  the stated range is worse still — it tells the funder nobody read the call.
 - Answer the requirement you are given, in the funder's own terms. Do not
   produce a generic proposal section.
 - If the funder stated how this is evaluated, write to that.
-- Respect the word limit if one is given.
+- The word limit is the funder's, not a suggestion. Aim about ten percent under
+  it and stop; a section that runs over is truncated or rejected by the form
+  itself, and trimming it is work the consultant then has to redo.
 - Where previously approved answers are supplied, build on them and keep their
   facts intact. They were written and checked by the consultant.
 - But use only the ones that actually answer THIS requirement. They are
@@ -152,10 +180,30 @@ function buildPrompt(
 ): string {
   const lines: string[] = [];
 
+  if (requirement.grant) {
+    const g = requirement.grant;
+    lines.push(`The call: ${g.title}${g.funder ? `, from ${g.funder}` : ""}`);
+    const unit = g.currency ?? "";
+    if (g.amountMin && g.amountMax) {
+      lines.push(
+        `Awards range from ${unit} ${g.amountMin.toLocaleString()} to ${unit} ${g.amountMax.toLocaleString()}.`,
+      );
+    } else if (g.amountMax) {
+      lines.push(`Awards are up to ${unit} ${g.amountMax.toLocaleString()}.`);
+    } else if (g.amountMin) {
+      lines.push(`Awards start at ${unit} ${g.amountMin.toLocaleString()}.`);
+    }
+    if (g.deadline) lines.push(`It closes on ${g.deadline}.`);
+    lines.push("");
+  }
+
   lines.push(`Funder's requirement: ${requirement.label}`);
   if (requirement.detail) lines.push(`What it must cover: ${requirement.detail}`);
   if (requirement.evaluationNote) lines.push(`How it is evaluated: ${requirement.evaluationNote}`);
-  if (requirement.wordLimit) lines.push(`Word limit: ${requirement.wordLimit}`);
+  if (requirement.wordLimit)
+    lines.push(
+      `Hard word limit: ${requirement.wordLimit}. Aim for about ${Math.round(requirement.wordLimit * 0.9)}.`,
+    );
   if (requirement.sourceQuote) lines.push(`The call says, verbatim: "${requirement.sourceQuote}"`);
 
   lines.push("", `Organization: ${client.name}`);
