@@ -51,6 +51,39 @@ export const readRequirements = createServerFn({ method: "POST" })
         };
       }
 
+      // Replace what a previous read extracted, rather than merging into it.
+      //
+      // The upsert keys on the exact label and a model does not produce the
+      // same wording twice: re-reading one call turned six conditions into
+      // nineteen — "Applicant Status", "Nonprofit Status" and "Applicant
+      // 501(c)(3) Status" all describing one rule. A consultant reading that
+      // list cannot tell which are real.
+      //
+      // Only rows this app extracted, and only those nothing has been written
+      // against, are cleared: headings the consultant typed from the funder's
+      // form survive, and so does any requirement with a drafted section
+      // attached to it.
+      const { data: drafted } = await supabase
+        .from("proposal_sections")
+        .select("requirement_id")
+        .not("requirement_id", "is", null);
+      const keep = new Set(
+        ((drafted ?? []) as Array<{ requirement_id: string }>).map((r) => r.requirement_id),
+      );
+
+      const { data: previous } = await supabase
+        .from("requirements")
+        .select("id")
+        .eq("grant_id", data.grantId)
+        .not("extracted_from", "is", null);
+
+      const stale = ((previous ?? []) as Array<{ id: string }>)
+        .map((r) => r.id)
+        .filter((id) => !keep.has(id));
+      if (stale.length > 0) {
+        await supabase.from("requirements").delete().in("id", stale);
+      }
+
       const { error: writeError } = await supabase.from("requirements").upsert(
         requirements.map((r) => ({
           grant_id: data.grantId,

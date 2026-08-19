@@ -206,6 +206,37 @@ describe("drafting", () => {
     expect(result.reusedAnswers.length).toBeGreaterThan(0);
   }, 180_000);
 
+  it("counts each reuse, so the library can show what earns its keep", async () => {
+    // times_used sat in the schema from the start and was never incremented,
+    // which left the one question the library exists to answer with no data
+    // behind it.
+    const { data: before } = await consultant
+      .from("answer_library")
+      .select("id, times_used")
+      .eq("client_id", clientId)
+      .order("times_used", { ascending: false })
+      .limit(1)
+      .single();
+
+    await draftSection(consultant, clientId, {
+      id: requirementId,
+      label: "Organizational Capacity",
+      detail: "Demonstrate your ability to deliver projects of this size.",
+      wordLimit: 300,
+      evaluationNote: null,
+      sourceQuote: null,
+    });
+
+    const { data: after } = await consultant
+      .from("answer_library")
+      .select("times_used, last_used_at")
+      .eq("id", (before as { id: string }).id)
+      .single();
+
+    expect(after!.times_used).toBeGreaterThan((before as { times_used: number }).times_used);
+    expect(after!.last_used_at).not.toBeNull();
+  }, 180_000);
+
   it("refuses to draft for a client it knows nothing about", async () => {
     const { data: blank } = await consultant
       .from("clients")

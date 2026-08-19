@@ -253,7 +253,6 @@ async function persist(supabase: SupabaseClient, clientId: string, rows: MatchRo
       match_id: id,
       rule_key: check.key,
       status: check.status,
-      passed: check.status === "pass",
       is_hard_gate: check.isHardGate,
       detail: check.detail,
     }));

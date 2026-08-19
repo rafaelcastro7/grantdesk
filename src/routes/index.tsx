@@ -6,7 +6,6 @@ export const Route = createFileRoute("/")({ component: Home });
 
 type Row = {
   id: string;
-  status: string;
   client_id: string;
   grant_id: string;
   clients: { name: string } | null;
@@ -43,7 +42,7 @@ function Home() {
     const { data, error: readError } = await supabase()
       .from("proposals")
       .select(
-        "id, status, client_id, grant_id, clients(name), grants(title, deadline), submissions(submitted_at, outcome)",
+        "id, client_id, grant_id, clients(name), grants(title, deadline), submissions(submitted_at, outcome)",
       );
     if (readError) {
       setError(readError.message);

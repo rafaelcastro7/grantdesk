@@ -163,16 +163,29 @@ describe("who won this before", () => {
     expect(awards[0]!.externalId).toContain("93.224");
   }, 90_000);
 
-  it("stores them against the grant, idempotently", async () => {
+  it("stores them once per assistance listing, and serves the second call from store", async () => {
+    // Scoped to the listing rather than the opportunity, deliberately: a
+    // program reissues its call every year, and last year's winners are the
+    // useful answer. Two opportunities under the same listing therefore share
+    // one stored answer instead of each re-querying USAspending.
     const first = await loadPastAwards(admin, grantId);
     expect(first.known).toBe(true);
 
-    await loadPastAwards(admin, grantId);
-    const { count } = await admin
+    const { count: afterFirst } = await admin
       .from("past_awards")
       .select("id", { count: "exact", head: true })
-      .eq("grant_id", grantId);
-    expect(count).toBe(first.known ? first.awards.length : 0);
+      .eq("assistance_listing", "93.224");
+    expect(afterFirst).toBeGreaterThan(0);
+
+    const second = await loadPastAwards(admin, grantId);
+    expect(second.known).toBe(true);
+
+    const { count: afterSecond } = await admin
+      .from("past_awards")
+      .select("id", { count: "exact", head: true })
+      .eq("assistance_listing", "93.224");
+    // Re-running must not duplicate; the source hash keys each award.
+    expect(afterSecond).toBe(afterFirst);
   }, 180_000);
 
   it("says it does not know, rather than showing an empty list", async () => {

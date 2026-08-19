@@ -115,13 +115,7 @@ export const checkReadiness = createServerFn({ method: "POST" })
         false,
       );
       const assessed = assessSubmission(candidate);
-      return {
-        ok: true as const,
-        blockers: assessed.blockers,
-        // Recomputed without the review line, which is what the submit button
-        // itself asks for.
-        readyForReview: assessed.blockers.every((b) => b.key === "not_reviewed"),
-      };
+      return { ok: true as const, blockers: assessed.blockers };
     } catch (error) {
       return { ok: false as const, error: error instanceof Error ? error.message : String(error) };
     }
@@ -178,7 +172,7 @@ export const submitProposal = createServerFn({ method: "POST" })
 
       await supabase
         .from("proposals")
-        .update({ status: "submitted", updated_at: new Date().toISOString() })
+        .update({ updated_at: new Date().toISOString() })
         .eq("id", data.proposalId);
 
       return { ok: true as const, overrode: assessed.blockers.length };

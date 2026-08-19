@@ -130,6 +130,11 @@ For each requirement:
   it exactly. This is checked against the page.
 - isCritical: true only if the call says the application is rejected without it.
 
+Merge conditions that restate one rule. A call that says an applicant must be a
+501(c)(3) nonprofit is one eligibility requirement, not three — listing
+"Applicant Status", "Nonprofit Status" and "501(c)(3) Status" separately gives a
+consultant a list they cannot act on. Prefer the funder's own heading.
+
 If the page is not a funding call, or lists no requirements, return an empty array.
 
 Reply with a single JSON object: {"requirements":[...]} and nothing else.`;

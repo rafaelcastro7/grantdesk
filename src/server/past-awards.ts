@@ -22,6 +22,9 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 const SEARCH_URL = "https://api.usaspending.gov/api/v2/search/spending_by_award/";
 const SOURCE_KEY = "usaspending";
 
+/** How long a stored answer stays good. Award history moves in months. */
+const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+
 /** Grants, cooperative agreements, and the other assistance award types. */
 const ASSISTANCE_TYPES = ["02", "03", "04", "05"];
 
@@ -122,6 +125,41 @@ export async function loadPastAwards(
     };
   }
 
+  // Served from our own table when it is fresh. Storing these and then
+  // re-querying USAspending on every page view made past_awards a write-only
+  // table: we paid for the same answer repeatedly and the stored copy did
+  // nothing. A funder's award history changes on the order of months, so a day
+  // is a generous freshness window.
+  const cutoff = new Date(Date.now() - CACHE_TTL_MS).toISOString();
+  const { data: cached } = await supabase
+    .from("past_awards")
+    .select("recipient_name, amount, awarded_on, recipient_location, source_hash, fetched_at")
+    .eq("assistance_listing", listing)
+    .gte("fetched_at", cutoff)
+    .order("amount", { ascending: false, nullsFirst: false })
+    .limit(25);
+
+  const stored = (cached ?? []) as Array<{
+    recipient_name: string;
+    amount: number | null;
+    awarded_on: string | null;
+    recipient_location: string | null;
+    source_hash: string;
+  }>;
+  if (stored.length > 0) {
+    return {
+      known: true,
+      listing,
+      awards: stored.map((row) => ({
+        recipientName: row.recipient_name,
+        amount: row.amount,
+        awardedOn: row.awarded_on,
+        location: row.recipient_location,
+        externalId: row.source_hash,
+      })),
+    };
+  }
+
   const awards = await fetchPastAwards(listing);
 
   if (awards.length > 0) {
@@ -134,6 +172,7 @@ export async function loadPastAwards(
         awarded_on: award.awardedOn,
         recipient_location: award.location,
         assistance_listing: listing,
+        fetched_at: new Date().toISOString(),
         source_key: SOURCE_KEY,
         source_hash: createHash("sha256").update(`${SOURCE_KEY}:${award.externalId}`).digest("hex"),
       })),

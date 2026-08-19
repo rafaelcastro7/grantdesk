@@ -221,13 +221,10 @@ export async function draftSection(
   const content = cleanDraft(response.text);
 
   if (reused.length > 0) {
-    await supabase
-      .from("answer_library")
-      .update({ last_used_at: new Date().toISOString() })
-      .in(
-        "id",
-        reused.map((a) => a.id),
-      );
+    // Counted, not just timestamped. Which answers a client's proposals keep
+    // reaching for is the only evidence of what the library is worth, and it
+    // needs an increment — which PostgREST cannot express, hence the function.
+    await supabase.rpc("record_answer_use", { answer_ids: reused.map((a) => a.id) });
   }
 
   return {
