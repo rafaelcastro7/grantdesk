@@ -209,6 +209,38 @@ regex, build it from ASCII:
 const INVISIBLES = new RegExp(["\\uFEFF", "\\u200B", "\\u200C"].join("|"), "g");
 ```
 
+## This machine has no GPU, and that decides the local model
+
+An i7-6700HQ from 2015, four physical cores, 48 GB of RAM, Intel HD 530
+integrated graphics. Everything runs on CPU, so a model's size *is* its speed
+and speed is a quality attribute rather than a comfort: a draft nobody waits
+for was not produced.
+
+Measured (`bun run benchmark:local`):
+
+- `phi4-mini` (3.8B Q4): 4.6 tok/s generating. A 250-word section is ~350
+  tokens, so about 76 seconds.
+- `dolphin3` (8B Q4): 1.5 tok/s. Not usable for drafting here.
+
+This is why a lifecycle e2e run that falls through to the local model takes
+five minutes. It is physics, not a defect.
+
+Two things that are *not* the model:
+
+- **Load time was half the cost.** A cold load is 6.9s before a single token;
+  warm is 0.8s. Ollama unloads after five minutes idle, which is exactly the
+  rhythm of drafting one section at a time — so nearly every fallback call paid
+  it. `keep_alive: "30m"` on the request fixes it.
+- **Thread tuning does nothing here.** 4, 6 and 8 threads measured within noise
+  of each other on this hyperthreaded 4-core, despite the usual advice that
+  physical-core count wins. Tested because it was free, reported because it was
+  my hypothesis and it did not hold.
+
+Check sizes against the registry rather than an article: a 2026 comparison
+described Gemma 4 E2B as "fits in 2 GB at Q4", and the actual
+`gemma4:e2b-it-q4_K_M` tag is 7.2 GB. `gemma4:e2b-it-qat` is the compact one at
+4.3 GB.
+
 ## Never write a regex escape through a Python or shell heredoc
 
 `"\b"` in a non-raw Python string is a **backspace byte**, not the regex

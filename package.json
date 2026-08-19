@@ -26,7 +26,8 @@
     "eval:drafting": "bun run tests/evals/drafting.eval.ts",
     "doctor": "bun run scripts/doctor.ts",
     "refresh": "bun run scripts/refresh.ts",
-    "benchmark": "bun run scripts/benchmark-providers.ts"
+    "benchmark": "bun run scripts/benchmark-providers.ts",
+    "benchmark:local": "bun run scripts/benchmark-local.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.58.0",

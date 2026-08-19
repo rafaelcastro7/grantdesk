@@ -34,6 +34,7 @@ const {
   variantOf,
   verdictFor,
 } = await import("./sample-log");
+const { fabrications } = await import("../../src/lib/fabrication");
 
 /**
  * Where samples accumulate, and what they are samples *of*.
@@ -170,43 +171,34 @@ await supabase.from("client_profiles").upsert({
 
 await saveAnswer(supabase, clientId, "Track record and past projects", FACTS.storedAnswer);
 
-/** Every number the model was given, in the forms it might restate them. */
-const permitted = new Set<string>();
-for (const source of [
-  FACTS.capabilities,
-  FACTS.beneficiaries,
-  FACTS.storedAnswer,
-  String(FACTS.annualBudget),
-  FACTS.annualBudget.toLocaleString("en-US"),
-  String(WORD_LIMIT),
-  // The call's own figures. Quoting the award range back is reading, not
-  // inventing — what must not appear is a specific amount chosen from inside
-  // it, which the checker below catches as its own case.
-  String(CALL.amountMin),
-  String(CALL.amountMax),
-  CALL.amountMin.toLocaleString("en-US"),
-  CALL.amountMax.toLocaleString("en-US"),
-  CALL.deadline,
-]) {
-  for (const number of source.match(/\d[\d,]*/g) ?? []) permitted.add(number.replace(/,/g, ""));
-}
-// A year range the client plainly implies: founded 2011, so any year from 2011
-// to now is a restatement rather than an invention.
-for (let year = 2011; year <= 2026; year++) permitted.add(String(year));
-
+/**
+ * Everything the draft claimed that nobody told it.
+ *
+ * Shared with the product rather than reimplemented here, and no longer
+ * digit-only: a local model wrote "Dr. Elena Rossi, an environmental scientist
+ * with over fifteen years" and the first version of this caught neither the
+ * invented person nor the spelled-out number. A named person with invented
+ * credentials is the most damaging output this product has, and it contains no
+ * digits at all.
+ */
 function fabricatedNumbers(draft: string): string[] {
-  // Gaps the model marked instead of filling are the correct behaviour, so
-  // whatever is inside them is not a claim.
-  const withoutGaps = draft
-    .replace(/\[NEED:[^\]]*\]/g, " ")
-    // Nor is a list marker. "1. Staffing 2. Materials" was being counted as two
-    // fabricated figures, which made the number say something it did not mean —
-    // and a metric with false positives gets argued with instead of fixed.
-    .replace(/^\s*\d{1,2}[.)]\s/gm, " ");
-  const found = withoutGaps.match(/\d[\d,]*(?:\.\d+)?/g) ?? [];
-  return [...new Set(found.map((n) => n.replace(/,/g, "")))].filter(
-    (n) => !permitted.has(n) && !permitted.has(n.replace(/\.\d+$/, "")),
-  );
+  return fabrications(draft, [
+    FACTS.capabilities,
+    FACTS.beneficiaries,
+    FACTS.storedAnswer,
+    String(FACTS.annualBudget),
+    FACTS.annualBudget.toLocaleString("en-US"),
+    String(WORD_LIMIT),
+    String(CALL.amountMin),
+    String(CALL.amountMax),
+    CALL.amountMin.toLocaleString("en-US"),
+    CALL.amountMax.toLocaleString("en-US"),
+    CALL.deadline,
+    CALL.title,
+    CALL.funder,
+    // Years the client's own history plainly implies.
+    Array.from({ length: 16 }, (_, i) => String(2011 + i)).join(" "),
+  ]).map((f: { kind: string; text: string }) => `${f.kind === "person" ? "who?" : ""}${f.text}`);
 }
 
 console.log(`Drafting ${CASES.length} requirements, ${RUNS} times each…

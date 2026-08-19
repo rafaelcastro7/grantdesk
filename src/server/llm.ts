@@ -254,9 +254,22 @@ async function callOllama(request: LlmRequest, timeoutMs: number): Promise<LlmRe
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      model: "phi4-mini",
+      model: env.OLLAMA_CHAT_MODEL,
       messages: request.messages,
       stream: false,
+      // Held resident between calls. Measured on this machine: a cold load
+      // costs 6.9 seconds before the model says anything, a warm one 0.8 —
+      // and Ollama unloads after five minutes idle, which is exactly the
+      // rhythm of a consultant drafting one section at a time. Six seconds of
+      // every fallback draft was the schedule, not the model.
+      keep_alive: "30m",
+      // Thinking off. Every current small model reasons by default and will
+      // otherwise spend its whole budget doing it — measured on qwen3.5 and
+      // gemma4: an empty `content`, 1800 characters of `thinking`, and
+      // done_reason "length". `callLlm` reads `content`, so the fallback would
+      // return nothing and the chain would report every provider as failed
+      // without anything saying why.
+      think: false,
       ...(request.json ? { format: "json" } : {}),
     }),
     signal: AbortSignal.timeout(timeoutMs),
@@ -268,7 +281,7 @@ async function callOllama(request: LlmRequest, timeoutMs: number): Promise<LlmRe
   return {
     text,
     provider: "ollama",
-    model: "phi4-mini",
+    model: env.OLLAMA_CHAT_MODEL,
     latencyMs: Date.now() - started,
     attempts: [],
   };
