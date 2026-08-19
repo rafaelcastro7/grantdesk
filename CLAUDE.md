@@ -44,6 +44,7 @@ bun run eval:match       # retrieval precision vs the keyword baseline; exits no
 bun run eval:drafting    # reuse, word limits, and no fabricated numbers
 bun run eval:profile     # extraction quality across real pages
 bun run doctor           # is any of this actually working right now?
+bun run benchmark        # which provider should lead each role, measured today
 ```
 
 `doctor` exists because the answer was no for weeks and nothing said so: Groq

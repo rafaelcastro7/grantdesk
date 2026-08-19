@@ -98,9 +98,31 @@ function providers(): Provider[] {
   ];
 }
 
-/** Volume work leads with the fastest provider; judgement leads with the largest. */
+/**
+ * Who to ask first, per role. Measured 2026-08-19 by `bun run benchmark`.
+ *
+ *   role      groq (gpt-oss-120b)   gemini (2.5-flash)   cerebras
+ *   extract   3/3   943ms           3/3  1905ms          0/3, HTTP 402
+ *   judge     3/3   475ms           3/3  4337ms          0/3, HTTP 402
+ *   write     2/3  3984ms           3/3  5915ms          0/3, HTTP 402
+ *
+ * Groq leads everywhere: it answered every role and is two to nine times
+ * faster. Its one miss on `write` was a 429 provoked by the benchmark itself
+ * firing nine calls in seconds — a property of how it was measured, not of the
+ * provider, and treating it as evidence would be over-fitting to my own load.
+ *
+ * Cerebras stays last rather than being removed: the failure is an account
+ * state, not a code one, and the breaker skips it after the first refusal, so
+ * it costs one round trip per half hour to discover it is back.
+ *
+ * The rationale this replaced — "volume work leads with the fastest, judgement
+ * with the largest" — was true about models that no longer exist, which reads
+ * like a decision while being none. Re-run the benchmark before trusting the
+ * table above; the date is there so you can see how stale it is.
+ */
 function order(role: Role): Provider["name"][] {
-  return role === "extract" ? ["cerebras", "groq", "gemini"] : ["groq", "cerebras", "gemini"];
+  void role;
+  return ["groq", "gemini", "cerebras"];
 }
 
 async function callProvider(

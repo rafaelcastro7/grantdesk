@@ -56,6 +56,16 @@ export type DraftResult = {
   attempts: string[];
 };
 
+/**
+ * Tokens a reasoning model spends before producing any visible output.
+ *
+ * Measured against gpt-oss-120b on a real section prompt: ~700 tokens of
+ * reasoning, nothing visible below a 1500-token ceiling. This is deliberately
+ * generous — an over-budget request costs nothing when the model stops on its
+ * own, while an under-budget one costs the whole call.
+ */
+const REASONING_HEADROOM = 1200;
+
 export class NoProfileError extends Error {
   constructor() {
     super("no_profile");
@@ -216,7 +226,15 @@ export async function draftSection(
     {
       role: "write",
       temperature: 0.4,
-      maxTokens: requirement.wordLimit ? Math.min(4000, requirement.wordLimit * 3) : 2000,
+      // Budget for thinking as well as writing. The hosted models are
+      // reasoning models: gpt-oss-120b spends about 700 tokens working out what
+      // to say before it emits a character, and at 1000 it returns
+      // finish_reason "length" with *zero* visible content. Sizing the budget
+      // purely from the requested word count produced a guaranteed empty 200
+      // for any section under ~350 words — which the chain then treated as a
+      // provider failure and answered from the local floor instead. Drafts were
+      // arriving from the small local model for that reason alone.
+      maxTokens: Math.min(6000, REASONING_HEADROOM + (requirement.wordLimit ?? 600) * 3),
       messages: [
         { role: "system", content: SYSTEM },
         { role: "user", content: buildPrompt(requirement, client, reused) },

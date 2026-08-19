@@ -151,6 +151,34 @@ returns confident nonsense instead of an error.
   the shared catalog and get counted on the coverage page as real grants — the
   exact overstatement this product exists to stop making.
 
+## Reasoning models need budget to think, not just to write
+
+`gpt-oss-120b` spends about 700 tokens working out what to say before emitting
+a character. Below a ~1500-token ceiling it returns `finish_reason: "length"`
+with **zero visible content** — a perfectly valid HTTP 200 containing nothing.
+
+Sizing `max_tokens` from the desired output length is therefore a trap: a
+150-word section at `wordLimit * 3` is 450 tokens, which is a guaranteed empty
+response, which the chain then reads as a provider failure and answers from the
+local floor instead. Drafts were arriving from the small local model for that
+reason alone, and nothing said so.
+
+Budget for the thinking as well: `REASONING_HEADROOM + words * 3`. An
+over-budget request costs nothing when the model stops on its own; an
+under-budget one costs the whole call.
+
+## Provider order is a measurement, not an opinion
+
+`bun run benchmark` probes every provider on every role with representative
+calls and prints a suggested order with the date. `order()` in
+`src/server/llm.ts` carries that table and that date.
+
+Do not reason about which model is "bigger" or "faster" from memory — the
+rationale that lived there described models that had since been retired, which
+reads like a decision while being none. And do not over-fit to the benchmark's
+own load: nine calls in a few seconds provokes a 429 that says nothing about
+the provider.
+
 ## Never edit files with PowerShell
 
 `Set-Content -Encoding utf8` writes BOMs and mojibakes accented characters. It
