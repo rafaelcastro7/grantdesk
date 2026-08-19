@@ -92,6 +92,10 @@ silently disappears is indistinguishable from one we never found.
 - **Do not reload after an optimistic update succeeds.** The reload returns a
   snapshot taken before the write landed, and ticking several checkboxes quickly
   un-ticked the earlier ones in front of the user.
+- **On failure, revert only what failed.** Re-reading everything to recover from
+  one failed write clobbers the optimistic state of the writes still in flight
+  beside it. Three separate bugs on the proposal screen were this same shape: a
+  read returning a snapshot older than the writes around it.
 
 ## House style
 
