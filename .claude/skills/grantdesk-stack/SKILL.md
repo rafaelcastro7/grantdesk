@@ -97,8 +97,13 @@ list, Kong echoes the preflight and it stops happening.
   arbitrate.
 - **Do not reload after a successful optimistic update.** The reload returns a
   snapshot taken before the write landed — ticking several checkboxes quickly
-  un-ticked the earlier ones on screen while every write had succeeded. Reload
-  only on failure, where the server really is the authority.
+  un-ticked the earlier ones on screen while every write had succeeded.
+- **On failure, revert only the one thing that failed.** Re-reading the whole
+  set to recover clobbers the optimistic state of the writes still in flight
+  beside it: one failed acknowledgement silently dropped its neighbours, and the
+  submit gate then refused for a condition the consultant could see was ticked.
+  Three bugs on that one screen have been this shape — a read returning a
+  snapshot older than the writes around it.
 - **Clear derived state synchronously, on the event.** Clearing it after an
   await let a slow write wipe the result of a newer request the user had already
   asked for.
