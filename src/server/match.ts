@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { decideEligibility, type Verdict } from "@/lib/eligibility";
 import { hasQueryableProfile, lexicalQuery, semanticQuery } from "@/lib/match-query";
+import { matchedTerms } from "@/lib/match-explain";
 import type { ApplicantType } from "@/lib/applicant-types";
 import { embedOne } from "./embed";
 
@@ -37,7 +38,7 @@ export type MatchRow = {
   verdict: Verdict;
   relevance: number;
   headline: string;
-  retrieval: { lexicalRank: number | null; vectorRank: number | null };
+  retrieval: { lexicalRank: number | null; vectorRank: number | null; terms: string[] };
   checks: Array<{ key: string; status: string; isHardGate: boolean; detail: string }>;
 };
 
@@ -62,6 +63,8 @@ export class ProfileTooThinError extends Error {
 
 type GrantRow = {
   id: string;
+  title: string;
+  summary: string | null;
   country: string;
   deadline: string | null;
   status: string | null;
@@ -151,7 +154,7 @@ export async function runMatch(
     const { data, error } = await supabase
       .from("grants")
       .select(
-        "id, country, deadline, status, eligible_applicant_types, amount_min, amount_max, currency",
+        "id, title, summary, country, deadline, status, eligible_applicant_types, amount_min, amount_max, currency",
       )
       .in("id", ids.slice(i, i + 50));
     if (error) throw new Error(`could not read candidates: ${error.message}`);
@@ -187,7 +190,18 @@ export async function runMatch(
       verdict: decision.verdict,
       relevance: Number(hit.score),
       headline: decision.headline,
-      retrieval: { lexicalRank: hit.lexical_rank, vectorRank: hit.vector_rank },
+      retrieval: {
+        lexicalRank: hit.lexical_rank,
+        vectorRank: hit.vector_rank,
+        // Which of the client's own words this funder's text actually
+        // contains. Stored rather than recomputed: the profile can change,
+        // and a reason that silently rewrites itself is not a reason.
+        terms: matchedTerms(
+          profile.sectors,
+          `${grant.title}
+${grant.summary ?? ""}`,
+        ),
+      },
       checks: decision.checks.map((c) => ({
         key: c.key,
         status: c.status,

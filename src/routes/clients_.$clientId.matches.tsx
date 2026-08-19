@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { accessToken } from "@/lib/session";
 import { errorMessage } from "@/lib/error-message";
+import { relevanceFrom } from "@/lib/match-explain";
 import { findMatches } from "@/server/match.functions";
 
 export const Route = createFileRoute("/clients_/$clientId/matches")({ component: MatchesPage });
@@ -14,7 +15,11 @@ type MatchRow = {
   id: string;
   verdict: Verdict;
   relevance: number | null;
-  retrieval: { lexicalRank?: number | null; vectorRank?: number | null } | null;
+  retrieval: {
+    lexicalRank?: number | null;
+    vectorRank?: number | null;
+    terms?: string[];
+  } | null;
   grants: {
     id: string;
     title: string;
@@ -292,6 +297,15 @@ function MatchCard({ row, clientId }: { row: MatchRow; clientId: string }) {
       </p>
 
       {deciding && <p className="mt-2 text-sm">{deciding.detail}</p>}
+
+      {/* Eligibility and relevance are different questions and are never
+          blurred into one number. The incumbent shows a match score with
+          nothing behind it, and its own users describe re-checking every
+          result by hand — a claim you have to verify is worth less than no
+          claim. This one is checkable against the call in a second. */}
+      <p data-testid="why-relevant" className="mt-1 text-sm text-[var(--color-ink-soft)]">
+        {relevanceFrom(row.retrieval?.terms ?? [], row.retrieval).statement}
+      </p>
 
       {/* Only where applying is actually possible. Offering to draft against a
           call the rules just ruled out would undo the verdict one line above. */}

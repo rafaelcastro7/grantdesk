@@ -70,6 +70,14 @@ test("a consultant matches a client and sees why each result was ruled in or out
 
   // The product's actual claim: results are grouped by verdict, and the ones
   // ruled out are collapsed rather than dropped.
+  // Every result says why it is relevant, separately from whether it is
+  // allowed. The incumbent gives a match score with nothing behind it and its
+  // own users describe re-checking each result by hand; a claim you have to
+  // verify is worth less than no claim, so this one is checkable at a glance.
+  const why = page.getByTestId("why-relevant").first();
+  await expect(why).toBeVisible();
+  await expect(why).toContainText(/mentions "|No shared wording/);
+
   const ruledOut = page.getByTestId("group-ineligible");
   await expect(ruledOut).toBeVisible();
   await expect(ruledOut).toContainText("Ruled out");
