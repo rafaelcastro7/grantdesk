@@ -13,9 +13,23 @@ reverse. This file is the short version of how to work in here.
 bun run db:up          # Postgres 15532 · gateway 15535 · project "grantdesk"
 bun run db:migrate     # applies migrations AND reloads PostgREST's schema cache
 bun run dev            # app on 5180
-bun run ingest         # every source; add a key for one, --limit=N for a small run
-bun run embed          # brings grant_embeddings up to date (only re-embeds changed text)
+bun run refresh        # read whatever is due by its own cadence, then embed. Hourly-safe.
+bun run ingest         # every source now, ignoring cadence
+bun run embed          # brings embeddings up to date (only re-embeds changed text)
 ```
+
+Prefer `refresh` — it is the one that leaves the catalog *searchable*. Ingestion
+and embedding used to be separate commands, so a freshly ingested call was
+invisible to meaning-based search until someone ran the second one, and the
+eval shows the vector side is what finds vocabulary gaps and cross-language
+matches at all. The newest calls, whose deadlines are closest, were the least
+findable in the product.
+
+To stop depending on anyone remembering:
+`powershell -ExecutionPolicy Bypass -File scripts\install-schedule.ps1`
+registers it hourly. `refresh` decides what is due and exits in under a second
+when nothing is, so the schedule stays fixed while cadences live with the
+adapters that own them.
 
 Nothing is shared with the predecessor at `e:/dev/iial-grants` — different
 folder, different ports, different database, different JWT secret.

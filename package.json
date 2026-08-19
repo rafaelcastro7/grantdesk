@@ -24,7 +24,8 @@
     "embed": "bun run scripts/embed.ts",
     "eval:match": "bun run tests/evals/match-precision.eval.ts",
     "eval:drafting": "bun run tests/evals/drafting.eval.ts",
-    "doctor": "bun run scripts/doctor.ts"
+    "doctor": "bun run scripts/doctor.ts",
+    "refresh": "bun run scripts/refresh.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.58.0",

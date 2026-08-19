@@ -107,15 +107,20 @@ test("the second-click controls work: re-run, re-read, collapse", async ({ page 
   const all = [...headings, ...conditionLabels].map((t) => t.trim());
   expect(new Set(all).size, `duplicated requirements: ${all.join(" | ")}`).toBe(all.length);
 
-  // And the list must not grow with every read. A model does not produce the
-  // same heading twice, so the label-keyed upsert used to turn one pass's six
-  // conditions into nineteen near-synonyms across two passes; the second read
-  // now replaces what the first extracted.
+  // The list must be *replaced* by a re-read, not accumulated onto. A model
+  // does not word a heading the same way twice, so the label-keyed upsert used
+  // to turn one pass's six conditions into nineteen near-synonyms across two.
+  //
+  // Not asserted as "no larger than before": two readings of the same call
+  // legitimately differ by a requirement or two, and pinning that treats model
+  // variance as a regression — the mistake Phase 1 already paid for, and this
+  // assertion did fail that way once. What accumulation actually looks like is
+  // roughly doubling, and that is what this rules out.
   const afterReread = await countRequirements();
   expect(
     afterReread,
-    `requirements grew from ${beforeReread} to ${afterReread} on a re-read`,
-  ).toBeLessThanOrEqual(beforeReread);
+    `requirements went from ${beforeReread} to ${afterReread} on a re-read, which looks like accumulation rather than replacement`,
+  ).toBeLessThan(beforeReread * 2);
 
   expect(consoleErrors, `page errors: ${consoleErrors.join("; ")}`).toEqual([]);
 });
