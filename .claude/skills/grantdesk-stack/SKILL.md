@@ -179,6 +179,25 @@ reads like a decision while being none. And do not over-fit to the benchmark's
 own load: nine calls in a few seconds provokes a 429 that says nothing about
 the provider.
 
+## One token budget, shared by everything
+
+This account's hosted models allow ~8000 tokens a minute, and it is the binding
+constraint on anything that drafts. Measured consequences:
+
+- A draft costs ~650 tokens with `reasoning_effort: "low"`, ~1950 without. Groq
+  bills the **requested** `max_tokens`, not the emitted ones, so headroom
+  nobody uses is drafts nobody gets.
+- The lifecycle e2e drafts every section a call asks for, so it takes about
+  five minutes and is the heaviest thing in the suite.
+- **Do not run `eval:drafting` and the e2e suite at the same time.** They share
+  the ceiling; the loser falls through to the local model, and then one is
+  measuring the other's load rather than the product. A twenty-draft eval run
+  followed immediately by the e2e made the lifecycle time out, and re-running it
+  alone passed unchanged.
+
+A consultant drafting a full proposal hits the same ceiling. That is a real
+product limitation on this tier, not a test artefact.
+
 ## Never edit files with PowerShell
 
 `Set-Content -Encoding utf8` writes BOMs and mojibakes accented characters. It
