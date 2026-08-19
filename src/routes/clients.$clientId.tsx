@@ -10,6 +10,14 @@ export const Route = createFileRoute("/clients/$clientId")({ component: ClientDe
 
 type ClientRow = { id: string; name: string; website: string | null };
 
+type StoredAnswer = {
+  id: string;
+  label: string;
+  content: string;
+  times_used: number;
+  last_used_at: string | null;
+};
+
 type StoredProfile = {
   sectors: string[] | null;
   jurisdictions: string[] | null;
@@ -41,6 +49,7 @@ function ClientDetail() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  const [answers, setAnswers] = useState<StoredAnswer[] | null>(null);
 
   const load = useCallback(async () => {
     const { data: clientRow, error: clientError } = await supabase()
@@ -63,6 +72,14 @@ function ClientDetail() {
       .eq("client_id", clientId)
       .maybeSingle();
     setProfile((profileRow as StoredProfile | null) ?? null);
+
+    const { data: answerRows } = await supabase()
+      .from("answer_library")
+      .select("id, label, content, times_used, last_used_at")
+      .eq("client_id", clientId)
+      .order("times_used", { ascending: false })
+      .order("updated_at", { ascending: false });
+    setAnswers((answerRows ?? []) as StoredAnswer[]);
   }, [clientId, sourceUrl]);
 
   useEffect(() => {
@@ -156,6 +173,32 @@ function ClientDetail() {
       setError(errorMessage(caught));
     } finally {
       setBusy(false);
+    }
+  }
+
+  /**
+   * Remove an answer from the reuse pool.
+   *
+   * This is the reason the library needed a surface at all. A saved answer is
+   * not a note — it is fed to the model as approved fact on every future draft
+   * for this client, so one wrong figure kept here quietly reappears in
+   * proposal after proposal. Being able to see them is useful; being able to
+   * delete one is the point.
+   */
+  async function forgetAnswer(answer: StoredAnswer) {
+    setError(null);
+    setNote(null);
+    setAnswers((current) => (current ?? []).filter((a) => a.id !== answer.id));
+    try {
+      const { error: deleteError } = await supabase()
+        .from("answer_library")
+        .delete()
+        .eq("id", answer.id);
+      if (deleteError) throw deleteError;
+      setNote(`Removed "${answer.label}". Future drafts will not use it.`);
+    } catch (caught) {
+      await load();
+      setError(errorMessage(caught));
     }
   }
 
@@ -300,6 +343,41 @@ function ClientDetail() {
           </Link>
         )}
       </section>
+
+      {answers !== null && answers.length > 0 && (
+        <section className="mt-10" data-testid="answer-library">
+          <h2 className="text-sm font-semibold">Answers kept for this client</h2>
+          <p className="mt-1 max-w-prose text-sm text-[var(--color-ink-soft)]">
+            Every draft for this client is written from these. They are approved facts, not notes —
+            so anything wrong in here reappears in proposal after proposal until it is removed.
+          </p>
+          <ul className="mt-3 flex flex-col gap-px overflow-hidden rounded-md border border-[var(--color-rule)] bg-[var(--color-rule)]">
+            {answers.map((answer) => (
+              <li key={answer.id} className="bg-[var(--color-surface)] px-4 py-3">
+                <div className="flex items-baseline justify-between gap-3">
+                  <span className="text-sm font-medium">{answer.label}</span>
+                  <span className="shrink-0 text-xs text-[var(--color-ink-soft)]">
+                    {answer.times_used === 0
+                      ? "not used yet"
+                      : `used ${answer.times_used} time${answer.times_used === 1 ? "" : "s"}`}
+                  </span>
+                </div>
+                <p className="mt-1 line-clamp-2 text-sm text-[var(--color-ink-soft)]">
+                  {answer.content}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => forgetAnswer(answer)}
+                  data-testid="forget-answer"
+                  className="mt-2 text-xs text-[var(--color-ineligible)]"
+                >
+                  Remove from future drafts
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
     </main>
   );
 }

@@ -158,6 +158,45 @@ describe("the answer library", () => {
     expect(found[0]!.content).toContain("Wentworth Ravine");
   }, 60_000);
 
+  it("stops reusing an answer once the consultant removes it", async () => {
+    // The reason the library needed a visible surface at all: a stored answer
+    // is fed to the model as approved fact on every future draft, so a wrong
+    // figure kept here reappears in proposal after proposal. Removal has to
+    // actually take it out of the reuse pool, not just hide it.
+    const target = {
+      id: requirementId,
+      label: "Organizational Capacity",
+      detail: "Demonstrate your ability to deliver projects of this size.",
+      wordLimit: 300,
+      evaluationNote: null,
+      sourceQuote: null,
+    };
+
+    // Its own answer, not the shared fixture: deleting that one would leave
+    // every later test in this file with nothing to reuse, and a suite whose
+    // tests depend on each other's leftovers fails for reasons nobody can read.
+    const doomed = await saveAnswer(
+      consultant,
+      clientId,
+      "Capacity to deliver at this size",
+      "We have delivered eleven comparable restoration projects since 2011, each managed in house.",
+    );
+
+    const before = await findReusableAnswers(consultant, clientId, target);
+    expect(before.map((a) => a.id)).toContain(doomed.id);
+
+    const { error: deleteError } = await consultant
+      .from("answer_library")
+      .delete()
+      .eq("id", doomed.id);
+    expect(deleteError).toBeNull();
+
+    const after = await findReusableAnswers(consultant, clientId, target);
+    expect(after.map((a) => a.id)).not.toContain(doomed.id);
+    // ...and the rest of the library is untouched.
+    expect(after.length).toBeGreaterThan(0);
+  }, 90_000);
+
   it("does not surface one client's answer in another client's proposal", async () => {
     const { data: other } = await consultant
       .from("clients")

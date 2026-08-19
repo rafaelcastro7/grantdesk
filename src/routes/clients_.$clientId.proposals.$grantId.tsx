@@ -268,10 +268,17 @@ function ProposalPage() {
       // conditions quickly un-ticked the earlier ones in front of the
       // consultant — the write had succeeded and the screen said otherwise.
     } catch (caught) {
-      // On failure the server is the authority, so re-read. A confirmation that
-      // looks recorded but is not is the one failure this screen exists to
-      // prevent.
-      await load();
+      // Revert this one box, and only this one. Re-reading the whole set here
+      // clobbered the optimistic state of the acknowledgements still in flight
+      // beside it — ticking several conditions quickly, one failure silently
+      // dropped its neighbours, and the submit gate then refused for a
+      // condition the consultant had visibly confirmed.
+      setAcknowledged((current) => {
+        const reverted = new Set(current);
+        if (has) reverted.delete(requirement.id);
+        else reverted.add(requirement.id);
+        return reverted;
+      });
       setError(errorMessage(caught));
     }
   }

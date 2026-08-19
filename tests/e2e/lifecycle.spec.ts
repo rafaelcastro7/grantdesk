@@ -36,6 +36,7 @@ test("a consultant goes from a new client to a recorded submission", async ({ pa
   await page.locator('input[name="clientWebsite"]').fill("https://example.org");
   await page.getByRole("button", { name: "Add client" }).click();
   await expect(page).toHaveURL(/\/clients\/[0-9a-f-]{36}$/, { timeout: 30_000 });
+  const clientUrl = page.url();
 
   await page.locator('input[name="jurisdictions"]').fill("US");
   await page.locator('input[name="sectors"]').fill("health-wellbeing, community");
@@ -56,6 +57,7 @@ test("a consultant goes from a new client to a recorded submission", async ({ pa
   await expect(eligible).toBeVisible({ timeout: 30_000 });
   await eligible.getByTestId("to-proposal").first().click();
   await expect(page).toHaveURL(/\/proposals\/[0-9a-f-]{36}$/, { timeout: 30_000 });
+  const proposalUrl = page.url();
 
   // The call reads itself on arrival too. Either it yields requirements, or it
   // says why not — a silent no-op is the only unacceptable outcome.
@@ -128,6 +130,25 @@ test("a consultant goes from a new client to a recorded submission", async ({ pa
     timeout: 60_000,
   });
 
+  // ── The kept answer is visible and removable ──────────────────────────────
+  // A saved answer is fed to the model as approved fact on every future draft
+  // for this client. One that cannot be seen or removed is a wrong figure that
+  // reappears in proposal after proposal with nowhere to fix it.
+  await page.goto(clientUrl);
+  const library = page.getByTestId("answer-library");
+  await expect(library).toBeVisible({ timeout: 30_000 });
+  await expect(library).toContainText("Organizational Capacity");
+
+  await library.getByTestId("forget-answer").first().click();
+  await expect(page.getByText(/Future drafts will not use it/)).toBeVisible({ timeout: 30_000 });
+  await page.reload();
+  await expect(page.getByTestId("answer-library")).toBeHidden({ timeout: 30_000 });
+
+  // Back by address, not by history: a reload sits in the middle of this
+  // detour, so counting back-steps is a guess about the browser rather than a
+  // statement about the app.
+  await page.goto(proposalUrl);
+
   // ── Who has won this before ───────────────────────────────────────────────
   // Either real recipients, or a statement of why we cannot see them. An empty
   // list would read as "nobody has ever won this", which is a far stronger
@@ -160,8 +181,15 @@ test("a consultant goes from a new client to a recorded submission", async ({ pa
   // Any condition the call rejects applications without has to be confirmed
   // before the gate will pass, because software cannot verify it.
   const conditionBoxes = page.getByTestId("conditions").getByRole("checkbox");
-  for (let i = 0; i < (await conditionBoxes.count()); i++) {
+  const conditionCount = await conditionBoxes.count();
+  for (let i = 0; i < conditionCount; i++) {
     await conditionBoxes.nth(i).check();
+  }
+  // Every one has to have stuck. A confirmation that looks recorded and is not
+  // is the single failure this screen exists to prevent, and asserting it here
+  // names the cause instead of surfacing later as a mysterious blocker.
+  for (let i = 0; i < conditionCount; i++) {
+    await expect(conditionBoxes.nth(i)).toBeChecked();
   }
 
   await send.getByTestId("check-readiness").click();
