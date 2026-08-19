@@ -1,7 +1,8 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import { accessToken } from "@/lib/session";
 import { errorMessage } from "@/lib/error-message";
 import {
   draftProposalSection,
@@ -78,13 +79,7 @@ function ProposalPage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
-
-  const token = useCallback(async () => {
-    const { data } = await supabase().auth.getSession();
-    const accessToken = data.session?.access_token;
-    if (!accessToken) throw new Error("Your session expired. Sign in again.");
-    return accessToken;
-  }, []);
+  const autoRead = useRef(false);
 
   const load = useCallback(async () => {
     const { data: grantRow } = await supabase()
@@ -154,12 +149,25 @@ function ProposalPage() {
     void load();
   }, [load]);
 
+  /**
+   * Read the call without being asked, once, when we have not read it yet.
+   *
+   * Arriving here is the decision; the button was pure latency in front of it.
+   * It stays as "Re-read the call", because re-reading after a funder amends
+   * their notice is a real choice a consultant makes deliberately.
+   */
+  useEffect(() => {
+    if (autoRead.current || requirements === null || requirements.length > 0 || busy) return;
+    autoRead.current = true;
+    void readCall();
+  }, [requirements, busy]);
+
   async function readCall() {
     setBusy("read");
     setError(null);
     setNote(null);
     try {
-      const result = await runRead({ data: { grantId, accessToken: await token() } });
+      const result = await runRead({ data: { grantId, accessToken: await accessToken() } });
       if (!result.ok) throw new Error(result.error);
       setNote(`Read ${result.count} requirements from ${result.provenance.source}.`);
       await load();
@@ -273,7 +281,7 @@ function ProposalPage() {
     setBusy("readiness");
     setError(null);
     try {
-      const result = await runReadiness({ data: { proposalId, accessToken: await token() } });
+      const result = await runReadiness({ data: { proposalId, accessToken: await accessToken() } });
       if (!result.ok) throw new Error(result.error);
       setBlockers(result.blockers);
     } catch (caught) {
@@ -290,7 +298,7 @@ function ProposalPage() {
     setNote(null);
     try {
       const result = await runSubmit({
-        data: { proposalId, overrideSoftBlockers: override, accessToken: await token() },
+        data: { proposalId, overrideSoftBlockers: override, accessToken: await accessToken() },
       });
       if (!result.ok) {
         if (result.blockers) setBlockers(result.blockers);
@@ -309,11 +317,46 @@ function ProposalPage() {
     }
   }
 
+  /**
+   * Record what the funder decided.
+   *
+   * Written straight from the browser: it needs no server-only capability, and
+   * row-level security already governs who may touch this row. Routing it
+   * through a server function would only move the check somewhere easier to
+   * get wrong.
+   */
+  async function updateOutcome(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!proposalId) return;
+    const form = new FormData(event.currentTarget);
+
+    setBusy("outcome");
+    setError(null);
+    setNote(null);
+    try {
+      const reference = String(form.get("confirmationNumber") ?? "").trim();
+      const { error: updateError } = await supabase()
+        .from("submissions")
+        .update({
+          outcome: String(form.get("outcome") ?? "awaiting"),
+          confirmation_number: reference || null,
+        })
+        .eq("proposal_id", proposalId);
+      if (updateError) throw updateError;
+      setNote("Outcome saved.");
+      await load();
+    } catch (caught) {
+      setError(errorMessage(caught));
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function loadAwards() {
     setBusy("awards");
     setError(null);
     try {
-      const result = await runPastAwards({ data: { grantId, accessToken: await token() } });
+      const result = await runPastAwards({ data: { grantId, accessToken: await accessToken() } });
       if (!result.ok) throw new Error(result.error);
       setAwards(result.result);
     } catch (caught) {
@@ -330,7 +373,12 @@ function ProposalPage() {
     setNote(null);
     try {
       const result = await runDraft({
-        data: { clientId, proposalId, requirementId: requirement.id, accessToken: await token() },
+        data: {
+          clientId,
+          proposalId,
+          requirementId: requirement.id,
+          accessToken: await accessToken(),
+        },
       });
       if (!result.ok) throw new Error(result.error);
       setNote(
@@ -355,7 +403,7 @@ function ProposalPage() {
           clientId,
           label: requirement.label,
           content,
-          accessToken: await token(),
+          accessToken: await accessToken(),
         },
       });
       if (!result.ok) throw new Error(result.error);
@@ -499,8 +547,8 @@ function ProposalPage() {
 
       {requirements !== null && requirements.length === 0 && (
         <p className="mt-8 text-sm text-[var(--color-ink-soft)]">
-          We have not read this call yet. Reading it lists what the funder actually asks for, so the
-          draft answers their questions rather than a generic outline.
+          We could not read requirements from this call. Add the headings from the funder's form
+          below and we will draft against them.
         </p>
       )}
 
@@ -614,11 +662,69 @@ function ProposalPage() {
           <h2 className="text-sm font-semibold">Ready to send?</h2>
 
           {submission ? (
-            <p data-testid="submitted" className="mt-2 text-sm">
-              <span className="font-medium text-[var(--color-eligible)]">Submitted</span>{" "}
-              {new Date(submission.submitted_at).toLocaleDateString()} · {submission.outcome}
-              {submission.confirmation_number && ` · ref ${submission.confirmation_number}`}
-            </p>
+            <>
+              <p data-testid="submitted" className="mt-2 text-sm">
+                <span className="font-medium text-[var(--color-eligible)]">Submitted</span>{" "}
+                {new Date(submission.submitted_at).toLocaleDateString()} · {submission.outcome}
+                {submission.confirmation_number && ` · ref ${submission.confirmation_number}`}
+              </p>
+
+              {/* The other half of "submit and track". Without this, outcome had
+                  four states and exactly one reachable: the product claimed to
+                  track what happened and could only ever say "awaiting". A
+                  consultant updates this months later, between other work,
+                  which is why it is two fields rather than a workflow. */}
+              <form
+                onSubmit={updateOutcome}
+                data-testid="outcome-form"
+                className="mt-4 flex flex-wrap items-end gap-2"
+              >
+                <div>
+                  <label
+                    htmlFor="outcome"
+                    className="text-xs uppercase tracking-wide text-[var(--color-ink-soft)]"
+                  >
+                    What happened
+                  </label>
+                  <select
+                    id="outcome"
+                    name="outcome"
+                    key={submission.outcome ?? "awaiting"}
+                    defaultValue={submission.outcome ?? "awaiting"}
+                    className="mt-1 block rounded-md border border-[var(--color-rule)] bg-[var(--color-paper)] px-3 py-2 text-sm"
+                  >
+                    <option value="awaiting">Awaiting a decision</option>
+                    <option value="awarded">Awarded</option>
+                    <option value="declined">Declined</option>
+                    <option value="withdrawn">Withdrawn</option>
+                  </select>
+                </div>
+                <div className="min-w-48 flex-1">
+                  <label
+                    htmlFor="confirmation"
+                    className="text-xs uppercase tracking-wide text-[var(--color-ink-soft)]"
+                  >
+                    Their reference number
+                  </label>
+                  <input
+                    id="confirmation"
+                    name="confirmationNumber"
+                    key={submission.confirmation_number ?? ""}
+                    defaultValue={submission.confirmation_number ?? ""}
+                    placeholder="From their acknowledgement email"
+                    className="mt-1 w-full rounded-md border border-[var(--color-rule)] bg-[var(--color-paper)] px-3 py-2 text-sm"
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={busy !== null}
+                  data-testid="save-outcome"
+                  className="rounded-md border border-[var(--color-rule)] px-3 py-2 text-sm font-medium disabled:opacity-50"
+                >
+                  {busy === "outcome" ? "Saving…" : "Save"}
+                </button>
+              </form>
+            </>
           ) : (
             <>
               <p className="mt-1 max-w-prose text-sm text-[var(--color-ink-soft)]">

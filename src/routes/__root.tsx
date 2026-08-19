@@ -2,6 +2,7 @@
 import { createRootRoute, HeadContent, Outlet, Scripts } from "@tanstack/react-router";
 import { useEffect, type ReactNode } from "react";
 import styles from "../styles.css?url";
+import { Nav } from "@/components/Nav";
 
 export const Route = createRootRoute({
   head: () => ({
@@ -18,6 +19,7 @@ export const Route = createRootRoute({
 function RootComponent() {
   return (
     <RootDocument>
+      <Nav />
       <Outlet />
     </RootDocument>
   );

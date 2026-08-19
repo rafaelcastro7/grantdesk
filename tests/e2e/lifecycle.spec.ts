@@ -48,7 +48,7 @@ test("a consultant goes from a new client to a recorded submission", async ({ pa
   await expect(page.getByTestId("can-match")).toContainText("Ready to match.", { timeout: 30_000 });
 
   await page.getByTestId("to-matches").click();
-  await page.getByTestId("run-matching").click();
+  // Matching runs on arrival; no click needed.
   await expect(page.getByTestId("match-summary")).toBeVisible({ timeout: 120_000 });
 
   // Drafting is only offered where the rules said applying is possible.
@@ -57,11 +57,9 @@ test("a consultant goes from a new client to a recorded submission", async ({ pa
   await eligible.getByTestId("to-proposal").first().click();
   await expect(page).toHaveURL(/\/proposals\/[0-9a-f-]{36}$/, { timeout: 30_000 });
 
-  // Reading the call: either it yields requirements, or it says why not. A
-  // silent no-op is the only unacceptable outcome.
-  const read = page.getByTestId("read-call");
-  await expect(read).toBeEnabled();
-  await read.click();
+  // The call reads itself on arrival too. Either it yields requirements, or it
+  // says why not — a silent no-op is the only unacceptable outcome.
+  await expect(page.getByTestId("read-call")).toBeVisible();
 
   const conditions = page.getByTestId("conditions");
   const failure = page.getByRole("alert");
@@ -84,15 +82,45 @@ test("a consultant goes from a new client to a recorded submission", async ({ pa
   const card = page.getByTestId("section-card").filter({ hasText: "Organizational Capacity" });
   await expect(card).toBeVisible({ timeout: 30_000 });
 
-  await card.getByRole("button", { name: "Draft this" }).click();
+  // Draft every section the funder asked for, not just the one we added. The
+  // gate refuses to submit with an unwritten section — correctly — so a run
+  // that drafts only one is not the lifecycle, it is a fragment of it.
+  const cards = page.getByTestId("section-card");
+  for (let i = 0; i < (await cards.count()); i++) {
+    const section = cards.nth(i);
+    const draft = section.getByRole("button", { name: "Draft this" });
+    if (await draft.isVisible()) {
+      await draft.click();
+      await expect(section.getByRole("button", { name: "Draft again" })).toBeVisible({
+        timeout: 180_000,
+      });
+    }
+  }
 
   const body = card.getByRole("textbox", { name: "Organizational Capacity" });
-  await expect(body).not.toHaveValue("", { timeout: 180_000 });
+  await expect(body).not.toHaveValue("");
 
   // The draft has to be attributable and countable against the funder's limit.
   await expect(card).toContainText(/Drafted by \S+\/\S+/);
   await expect(card).toContainText(/\d+\/250 words/);
   await expect(page.getByTestId("draft-progress")).toContainText(/of \d+ sections drafted/);
+
+  // ── Filling what the draft admitted it did not know ───────────────────────
+  // The model marks a missing fact as [NEED: ...] rather than inventing one,
+  // and the submit gate refuses to send while any remain — a literal
+  // "[NEED: how many]" reaching a funder is the most visible way to look
+  // careless. So the consultant fills them in, which is also the only path
+  // that exercises editing and saving a section by hand.
+  for (let i = 0; i < (await cards.count()); i++) {
+    const section = cards.nth(i);
+    const box = section.getByRole("textbox");
+    const text = await box.inputValue();
+    if (!text.includes("[NEED:")) continue;
+
+    await box.fill(text.replace(/\[NEED:[^\]]*\]/g, "400"));
+    await section.getByRole("button", { name: "Save" }).click();
+    await expect(section.getByRole("button", { name: "Save" })).toBeHidden({ timeout: 30_000 });
+  }
 
   // Kept for reuse — the whole promised time saving on the next call.
   await card.getByRole("button", { name: "Keep for next time" }).click();
@@ -128,7 +156,13 @@ test("a consultant goes from a new client to a recorded submission", async ({ pa
   await send.getByTestId("check-readiness").click();
   await expect(blockers).not.toContainText("Confirm you have it", { timeout: 60_000 });
 
-  await send.getByTestId("submit-proposal").click();
+  // Nothing hard may remain: the button enables itself only when every
+  // non-overridable check has passed. Waiting on that is the assertion.
+  const submit = send.getByTestId("submit-proposal");
+  await expect(submit, `blockers still standing: ${await blockers.innerText()}`).toBeEnabled({
+    timeout: 60_000,
+  });
+  await submit.click();
 
   const submitted = page.getByTestId("submitted");
   const submitFailure = page.getByRole("alert");
@@ -141,12 +175,25 @@ test("a consultant goes from a new client to a recorded submission", async ({ pa
   }
   await expect(submitted).toContainText("Submitted");
 
+  // ── Tracking what came back ───────────────────────────────────────────────
+  // The other half of "submit and track". Without this the outcome column had
+  // four states and exactly one reachable.
+  const outcome = page.getByTestId("outcome-form");
+  await expect(outcome).toBeVisible();
+  await outcome.getByLabel("What happened").selectOption("awarded");
+  await outcome.getByLabel("Their reference number").fill(`REF-${stamp}`);
+  await outcome.getByTestId("save-outcome").click();
+  await expect(submitted).toContainText("awarded", { timeout: 30_000 });
+  await expect(submitted).toContainText(`REF-${stamp}`);
+
   // ── And it shows up on the desk ───────────────────────────────────────────
   // The first question in the spec: what is due across all my clients. A
   // submission that does not appear here is one the consultant will re-do.
   await page.goto("/");
-  await expect(page.getByTestId("sent-list")).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByTestId("sent-list")).toContainText("awaiting");
+  const sent = page.getByTestId("sent-list");
+  await expect(sent).toBeVisible({ timeout: 30_000 });
+  // The desk shows what actually happened, not a frozen "awaiting".
+  await expect(sent).toContainText("awarded");
 
   expect(consoleErrors, `page errors: ${consoleErrors.join("; ")}`).toEqual([]);
 });

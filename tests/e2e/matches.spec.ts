@@ -49,9 +49,10 @@ test("a consultant matches a client and sees why each result was ruled in or out
   await page.getByTestId("to-matches").click();
   await expect(page).toHaveURL(/\/matches$/, { timeout: 30_000 });
 
+  // Matching starts by itself on arrival — the click carried no decision, only
+  // a delay. What the test asserts is therefore the outcome, not the click.
   const run = page.getByTestId("run-matching");
-  await expect(run).toBeEnabled();
-  await run.click();
+  await expect(run).toBeVisible();
 
   // Retrieval plus an embedding call against the live catalog; wait on the
   // outcome, and accept a stated failure over a silent one.

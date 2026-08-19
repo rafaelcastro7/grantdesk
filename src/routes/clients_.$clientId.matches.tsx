@@ -1,7 +1,8 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import { accessToken } from "@/lib/session";
 import { errorMessage } from "@/lib/error-message";
 import { findMatches } from "@/server/match.functions";
 
@@ -71,6 +72,7 @@ function MatchesPage() {
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [showRuledOut, setShowRuledOut] = useState(false);
+  const autoRan = useRef(false);
 
   const load = useCallback(async () => {
     const { data: client } = await supabase()
@@ -101,16 +103,29 @@ function MatchesPage() {
     void load();
   }, [load]);
 
+  /**
+   * Run it without being asked, once, when there is nothing to show.
+   *
+   * The consultant reached this screen by clicking "Find what they can apply
+   * for" on the client. Making them then click "Find matches" is asking the
+   * same question twice — the button carried no decision, only a delay. It
+   * stays on the page as "Check again", because re-running after a profile
+   * edit is a real choice.
+   */
+  useEffect(() => {
+    if (autoRan.current || matches === null || matches.length > 0 || busy) return;
+    autoRan.current = true;
+    void run();
+    // `run` is stable enough for this one-shot; re-running on its identity
+    // would defeat the guard it depends on.
+  }, [matches, busy]);
+
   async function run() {
     setBusy(true);
     setError(null);
     setNote(null);
     try {
-      const { data: session } = await supabase().auth.getSession();
-      const accessToken = session.session?.access_token;
-      if (!accessToken) throw new Error("Your session expired. Sign in again.");
-
-      const response = await runMatching({ data: { clientId, accessToken } });
+      const response = await runMatching({ data: { clientId, accessToken: await accessToken() } });
       if (!response.ok) throw new Error(response.error);
 
       const { result } = response;
@@ -156,7 +171,11 @@ function MatchesPage() {
           data-testid="run-matching"
           className="rounded-md bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
         >
-          {busy ? "Checking the catalog…" : "Find matches"}
+          {busy
+            ? "Checking the catalog…"
+            : matches && matches.length > 0
+              ? "Check again"
+              : "Find matches"}
         </button>
         {note && (
           <p data-testid="match-summary" className="text-sm text-[var(--color-ink-soft)]">
@@ -173,7 +192,8 @@ function MatchesPage() {
 
       {matches !== null && matches.length === 0 && !busy && (
         <p className="mt-8 text-sm text-[var(--color-ink-soft)]">
-          Nothing checked yet. Run matching to see what this client can apply for.
+          Nothing came back for this profile. Add more detail about what this client does, then
+          check again.
         </p>
       )}
 

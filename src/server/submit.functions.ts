@@ -1,30 +1,11 @@
 import { createServerFn } from "@tanstack/react-start";
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
-import { serverEnv } from "@/lib/env.server";
+import { ACCESS_TOKEN_MESSAGE, callerClient } from "./caller";
 import { assessSubmission, type Blocker, type SubmitCandidate } from "@/lib/submit-gate";
 import { loadPastAwards } from "./past-awards";
 
-/**
- * Submitting is the one action in this product that is irreversible from the
- * consultant's side, so it is the one that runs the most checks — and the last
- * one is always a person.
- *
- * The gate is re-evaluated on the server at the moment of submission rather
- * than trusting what the browser last computed. Between opening the page and
- * clicking submit, a deadline can pass and a profile edit can change the
- * verdict; a stale client-side assessment would record a submission the rules
- * no longer support.
- */
-function callerClient(accessToken: string): SupabaseClient {
-  const env = serverEnv();
-  return createClient(env.SUPABASE_URL, env.SUPABASE_ANON_KEY, {
-    auth: { persistSession: false, autoRefreshToken: false },
-    global: { headers: { Authorization: `Bearer ${accessToken}` } },
-  });
-}
-
-const auth = z.string().min(10, "Your session expired. Sign in again.");
+const auth = z.string().min(10, ACCESS_TOKEN_MESSAGE);
 
 async function buildCandidate(
   supabase: SupabaseClient,

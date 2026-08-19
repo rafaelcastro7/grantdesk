@@ -1,25 +1,10 @@
 import { createServerFn } from "@tanstack/react-start";
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
-import { serverEnv } from "@/lib/env.server";
+import { ACCESS_TOKEN_MESSAGE, callerClient } from "./caller";
 import { extractRequirementsFromText, extractRequirementsFromUrl } from "./extract-requirements";
 import { draftSection, NoProfileError, saveAnswer, type DraftRequirement } from "./draft";
 
-/**
- * The three things drafting needs a server for: reading a funder's page,
- * calling a hosted model, and calling the local embedder. Everything else —
- * creating the proposal, saving edited text — goes straight from the browser to
- * Postgres under row-level security, and these run as the consultant too.
- */
-function callerClient(accessToken: string): SupabaseClient {
-  const env = serverEnv();
-  return createClient(env.SUPABASE_URL, env.SUPABASE_ANON_KEY, {
-    auth: { persistSession: false, autoRefreshToken: false },
-    global: { headers: { Authorization: `Bearer ${accessToken}` } },
-  });
-}
-
-const auth = z.string().min(10, "Your session expired. Sign in again.");
+const auth = z.string().min(10, ACCESS_TOKEN_MESSAGE);
 
 /**
  * Read a call's own requirements and store them against the grant.

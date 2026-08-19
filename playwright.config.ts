@@ -7,7 +7,7 @@ config({ path: ".env" });
 // driver handshake does not complete under Bun's runtime and simply hangs.
 export default defineConfig({
   testDir: "./tests/e2e",
-  timeout: 120_000,
+  timeout: 300_000,
   expect: { timeout: 15_000 },
   workers: 1,
   fullyParallel: false,
