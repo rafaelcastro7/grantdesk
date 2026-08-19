@@ -111,7 +111,13 @@ function ClientDetail() {
         );
       if (upsertError) throw upsertError;
       await load();
-      return `Read from ${provenance.source} via ${provenance.model}. Check it before relying on it.`;
+      // The chain falls through to a small local model when the hosted ones
+      // are unreachable. Naming the model is not the same as saying what it
+      // means — "ollama/phi4-mini" tells a consultant nothing about how hard
+      // to check what it just wrote into their client's profile.
+      return provenance.model.startsWith("ollama")
+        ? `Read from ${provenance.source}, but the usual models were unreachable so a small local one did it. Check every field before relying on this.`
+        : `Read from ${provenance.source} via ${provenance.model}. Check it before relying on it.`;
     });
   }
 

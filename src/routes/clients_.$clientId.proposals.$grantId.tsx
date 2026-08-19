@@ -859,6 +859,17 @@ function SectionCard({
           </span>
         )}
       </div>
+
+      {/* Said in words rather than left as a model name. "ollama/phi4-mini"
+          means nothing to a consultant, and the difference it makes is real:
+          the eval measured the fallback inventing figures where the hosted
+          model did not. */}
+      {section?.drafted_by?.startsWith("ollama") && (
+        <p data-testid="fallback-warning" className="mt-2 text-sm text-[var(--color-needs-input)]">
+          The usual models were unreachable, so this was written by the small local one. Read it
+          closely before it goes anywhere, or draft it again now.
+        </p>
+      )}
     </li>
   );
 }

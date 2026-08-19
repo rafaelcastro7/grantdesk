@@ -105,6 +105,48 @@ describe("hard blockers", () => {
 });
 
 describe("soft blockers", () => {
+  it("warns when a section was written by the local fallback, without refusing", () => {
+    // The chain falls through to a small local model when the hosted ones are
+    // unreachable, and the eval measured that model inventing figures where
+    // the hosted one did not. The consultant is entitled to know before it
+    // reaches a funder — and entitled to send it anyway.
+    const result = assessSubmission(
+      candidate({
+        sections: [
+          {
+            label: "Impact",
+            content: "A complete answer.",
+            wordLimit: null,
+            wordCount: 3,
+            draftedBy: "ollama/phi4-mini",
+          },
+        ],
+      }),
+    );
+
+    const blocker = result.blockers.find((b) => b.key === "fallback_model");
+    expect(blocker?.isHard).toBe(false);
+    expect(blocker?.detail).toContain("Impact");
+    expect(result.canOverride).toBe(true);
+  });
+
+  it("says nothing when the intended model wrote it", () => {
+    const result = assessSubmission(
+      candidate({
+        sections: [
+          {
+            label: "Impact",
+            content: "A complete answer.",
+            wordLimit: null,
+            wordCount: 3,
+            draftedBy: "groq/openai/gpt-oss-120b",
+          },
+        ],
+      }),
+    );
+    expect(result.blockers).toEqual([]);
+  });
+
   it("lets the consultant override an unsettled eligibility verdict", () => {
     const result = assessSubmission(candidate({ verdict: null }));
     expect(result.canSubmit).toBe(false);

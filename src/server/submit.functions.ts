@@ -35,7 +35,7 @@ async function buildCandidate(
         .eq("grant_id", row.grant_id),
       supabase
         .from("proposal_sections")
-        .select("requirement_id, content, word_count")
+        .select("requirement_id, content, word_count, drafted_by")
         .eq("proposal_id", proposalId),
       supabase
         .from("matches")
@@ -66,6 +66,7 @@ async function buildCandidate(
         requirement_id: string | null;
         content: string | null;
         word_count: number | null;
+        drafted_by: string | null;
       }>
     ).map((s) => [s.requirement_id ?? "", s]),
   );
@@ -86,6 +87,7 @@ async function buildCandidate(
           content: written.get(r.id)?.content ?? null,
           wordLimit: r.word_limit,
           wordCount: written.get(r.id)?.word_count ?? null,
+          draftedBy: written.get(r.id)?.drafted_by ?? null,
         })),
       conditions: reqs
         .filter((r) => r.kind !== "section")

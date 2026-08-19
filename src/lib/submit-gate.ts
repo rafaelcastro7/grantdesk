@@ -33,6 +33,8 @@ export type SubmitCandidate = {
     content: string | null;
     wordLimit: number | null;
     wordCount: number | null;
+    /** `provider/model`, or null once a person has edited it. */
+    draftedBy?: string | null;
   }>;
   conditions: Array<{ label: string; isCritical: boolean; acknowledged: boolean }>;
   /** Set only when a person has actually confirmed they read it. */
@@ -126,6 +128,22 @@ export function assessSubmission(candidate: SubmitCandidate): {
       detail: `"${first.label}" is ${(first.wordCount ?? 0) - first.wordLimit!} words over the funder's limit of ${first.wordLimit}.`,
       // Some funders truncate, some reject. We cannot know which, so this is
       // stated rather than enforced.
+      isHard: false,
+    });
+  }
+
+  // The provider chain falls through to a small local model when the hosted
+  // ones are unreachable, and for weeks nothing anywhere said so. A draft
+  // written by the floor is not the same product as one written by the
+  // intended model — it is likelier to invent a figure, which the eval
+  // measured — and the consultant is entitled to know that before it reaches a
+  // funder. Soft, because it is their judgement to make: they may have read
+  // every word and be satisfied.
+  const fallback = candidate.sections.filter((s) => s.draftedBy?.startsWith("ollama"));
+  if (fallback.length > 0) {
+    blockers.push({
+      key: "fallback_model",
+      detail: `${fallback.length === 1 ? `"${fallback[0]!.label}" was` : `${fallback.length} sections were`} written by the local fallback model, because the usual ones were unreachable. Read them closely, or draft again now that the chain is back.`,
       isHard: false,
     });
   }
