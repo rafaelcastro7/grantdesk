@@ -1,6 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import { Landing } from "@/components/Landing";
 
 export const Route = createFileRoute("/")({ component: Home });
 
@@ -66,6 +67,18 @@ function Home() {
     });
   const sent = (rows ?? []).filter((r) => r.submissions.length > 0);
 
+  // One route, two audiences. A visitor gets the case for the product; a
+  // signed-in consultant gets the first of the five questions in docs/SPEC.md.
+  // Splitting them into two routes would add a screen to the budget in
+  // ADR-0002 for what is one address with two states.
+  //
+  // The landing is the default, not the else-branch. Reading the session is a
+  // client-side call, so `signedIn` is null on the server — and asking for the
+  // desk first meant this address served an empty document to every visitor
+  // until JavaScript had run and answered. A landing page that arrives blank
+  // is the first impression it exists to make.
+  if (signedIn !== true) return <Landing />;
+
   return (
     <main className="mx-auto max-w-3xl px-6 py-12">
       <h1 className="text-2xl font-semibold tracking-tight">What is due</h1>
@@ -76,15 +89,6 @@ function Home() {
       {error && (
         <p role="alert" className="mt-4 text-sm text-[var(--color-ineligible)]">
           {error}
-        </p>
-      )}
-
-      {signedIn === false && (
-        <p className="mt-8 text-sm">
-          <Link to="/auth" className="text-[var(--color-accent)]">
-            Sign in
-          </Link>{" "}
-          to see your clients.
         </p>
       )}
 

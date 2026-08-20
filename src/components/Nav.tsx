@@ -30,7 +30,7 @@ export function Nav() {
     >
       <div className="mx-auto flex max-w-3xl items-baseline gap-6 px-6 py-3">
         <Link to="/" className="text-sm font-semibold tracking-tight">
-          GrantDesk
+          IIAL <span className="font-normal text-[var(--color-ink-soft)]">Grant Desk</span>
         </Link>
         <div className="flex gap-4">
           {LINKS.map((link) => {

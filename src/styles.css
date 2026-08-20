@@ -10,8 +10,11 @@
   --color-rule: oklch(0.91 0.008 240);
 
   /* One accent, used sparingly. */
-  --color-accent: oklch(0.52 0.13 240);
-  --color-accent-soft: oklch(0.95 0.02 240);
+  --color-accent: oklch(0.36 0.11 258);
+  --color-accent-soft: oklch(0.95 0.025 258);
+  /* The deep field the logo sits on, used for the landing's one dark panel. */
+  --color-deep: oklch(0.24 0.06 258);
+  --color-deep-ink: oklch(0.97 0.01 258);
 
   /* Verdict colours are semantic and deliberately separate from the accent:
      an eligible/ineligible decision must never be confused with brand. */
@@ -31,8 +34,10 @@
     --color-paper: oklch(0.17 0.012 240);
     --color-surface: oklch(0.21 0.014 240);
     --color-rule: oklch(0.3 0.016 240);
-    --color-accent: oklch(0.72 0.12 240);
-    --color-accent-soft: oklch(0.27 0.03 240);
+    --color-accent: oklch(0.74 0.11 258);
+    --color-accent-soft: oklch(0.27 0.035 258);
+    --color-deep: oklch(0.19 0.045 258);
+    --color-deep-ink: oklch(0.97 0.01 258);
   }
 }
 
