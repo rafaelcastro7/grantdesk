@@ -1,6 +1,7 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { runMatch } from "../../src/server/match";
+import { decideEligibility } from "../../src/lib/eligibility";
 import { sourceHash } from "../../src/server/ingest";
 
 /**
@@ -217,7 +218,18 @@ describe("evidence", () => {
     const keys = match!.eligibility_checks.map((c) => c.rule_key).sort();
     // Otherwise "why is this here?" is answerable only for the failing rule,
     // and a consultant cannot see what *was* verified.
-    expect(keys).toEqual(["applicant_type", "deadline", "jurisdiction", "scale"]);
+    //
+    // Asked of the engine rather than written out here: the claim is that
+    // persistence keeps every rule, and a hand-written list would only ever
+    // test that someone remembered to edit this line when adding one.
+    const expected = decideEligibility({
+      grant: { country: "US" },
+      client: { jurisdictions: ["CA"] },
+      today: new Date(),
+    })
+      .checks.map((c) => c.key)
+      .sort();
+    expect(keys).toEqual(expected);
   });
 
   it("records how each match was retrieved", async () => {

@@ -31,6 +31,7 @@ export type ProfileRow = {
   currency: string | null;
   capabilities: string | null;
   beneficiaries: string | null;
+  lead_time_weeks: number | null;
 };
 
 export type MatchRow = {
@@ -69,6 +70,7 @@ type GrantRow = {
   deadline: string | null;
   status: string | null;
   eligible_applicant_types: string[] | null;
+  eligibility_note: string | null;
   amount_min: number | null;
   amount_max: number | null;
   currency: string | null;
@@ -91,7 +93,10 @@ export async function runMatch(
 
   const { data: profileData, error: profileError } = await supabase
     .from("client_profiles")
-    .select("sectors, jurisdictions, stage, annual_budget, currency, capabilities, beneficiaries")
+    .select(
+      "sectors, jurisdictions, stage, annual_budget, currency, capabilities, beneficiaries, " +
+        "lead_time_weeks",
+    )
     .eq("client_id", clientId)
     .maybeSingle();
   if (profileError) throw new Error(`could not read the profile: ${profileError.message}`);
@@ -154,11 +159,12 @@ export async function runMatch(
     const { data, error } = await supabase
       .from("grants")
       .select(
-        "id, title, summary, country, deadline, status, eligible_applicant_types, amount_min, amount_max, currency",
+        "id, title, summary, country, deadline, status, eligible_applicant_types, " +
+          "eligibility_note, amount_min, amount_max, currency",
       )
       .in("id", ids.slice(i, i + 50));
     if (error) throw new Error(`could not read candidates: ${error.message}`);
-    for (const grant of (data ?? []) as GrantRow[]) grants.set(grant.id, grant);
+    for (const grant of (data ?? []) as unknown as GrantRow[]) grants.set(grant.id, grant);
   }
 
   const decided: MatchRow[] = [];
@@ -172,6 +178,10 @@ export async function runMatch(
         deadline: grant.deadline,
         status: grant.status,
         eligibleApplicantTypes: (grant.eligible_applicant_types ?? []) as ApplicantType[],
+        // The funder's own prose, where a cost share is stated if it is stated
+        // at all — it is never a structured field.
+        eligibilityNote: grant.eligibility_note,
+        summary: grant.summary,
         amountMin: grant.amount_min,
         amountMax: grant.amount_max,
         currency: grant.currency,
@@ -181,6 +191,7 @@ export async function runMatch(
         stage: profile.stage,
         annualBudget: profile.annual_budget,
         currency: profile.currency,
+        leadTimeWeeks: profile.lead_time_weeks,
       },
       today,
     });
@@ -211,6 +222,17 @@ ${grant.summary ?? ""}`,
     });
   }
 
+  // Every verdict is stored, including every rejection. "Why is this here?"
+  // and "did you even look at that one?" both have to stay answerable from the
+  // database months later, and a record that quietly drops the low-ranked
+  // rejections cannot answer the second.
+  //
+  // The screen is where the amount is a problem, and that is where it is
+  // solved: measured on a Canadian client against this catalog, 51 of 60
+  // results were ruled out on jurisdiction alone — the US half has richer
+  // descriptions and ranks better — so the consultant met nine usable calls and
+  // fifty-one proofs of diligence. The results page shows a bounded sample of
+  // the rejections; the record keeps all of them.
   await persist(supabase, clientId, decided);
 
   return {

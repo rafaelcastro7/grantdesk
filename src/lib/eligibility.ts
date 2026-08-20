@@ -42,12 +42,21 @@ export type EligibilityInput = {
     amountMin?: number | null;
     amountMax?: number | null;
     currency?: string | null;
+    /** The funder's own prose, where a cost share is usually stated. */
+    eligibilityNote?: string | null;
+    summary?: string | null;
   };
   client: {
     jurisdictions?: readonly string[] | null;
     stage?: string | null;
     annualBudget?: number | null;
     currency?: string | null;
+    /**
+     * Working weeks this consultant needs to put a credible application
+     * together. A call that is technically open and closes on Friday is not
+     * an opportunity, and the predecessor learned this the expensive way.
+     */
+    leadTimeWeeks?: number | null;
   };
   /** Injected so the verdict is reproducible in tests and in the past. */
   today: Date;
@@ -213,7 +222,133 @@ function scaleRule(input: EligibilityInput): RuleResult {
   };
 }
 
-const RULES = [jurisdictionRule, deadlineRule, applicantTypeRule, scaleRule];
+/**
+ * A funder asking the applicant to carry part of the cost, read from their own
+ * words.
+ *
+ * Carried over from the predecessor, where it earned its place: a call that
+ * funds 60% is a call that asks the organisation to find the other 40%, and a
+ * consultant who discovers that after drafting has lost the week. It is stated
+ * in prose rather than in a field, so it is read from prose.
+ *
+ * Never a hard gate. Whether the organisation can carry a share is a finance
+ * decision nobody in this system is entitled to make for them.
+ */
+export function detectCostSharePercent(text: string | null | undefined): number | null {
+  if (!text) return null;
+  const hay = text.toLowerCase();
+
+  // "covers up to 75%" / "80% funding" — the funder states its own share.
+  const funderCovers =
+    /\b(?:covers?|covering|funds|funded at|up to|reimburses)\s+(\d{1,3})\s*%/.exec(hay) ??
+    /\b(\d{1,3})\s*%\s*(?:funding|grant|of eligible costs)\b/.exec(hay);
+  if (funderCovers?.[1]) {
+    const share = Number(funderCovers[1]);
+    if (share >= 0 && share <= 100) return 100 - share;
+  }
+
+  // "25% cost share" / "20% match required" — the applicant's share, directly.
+  const applicantCarries =
+    /\b(\d{1,3})\s*%\s*(?:cost[- ]?share|match|matching|contribution)\b/.exec(hay);
+  if (applicantCarries?.[1]) {
+    const share = Number(applicantCarries[1]);
+    if (share >= 0 && share <= 100) return share;
+  }
+
+  return null;
+}
+
+function costShareRule(input: EligibilityInput): RuleResult {
+  const text = [input.grant.eligibilityNote, input.grant.summary].filter(Boolean).join(" ");
+  const share = detectCostSharePercent(text);
+
+  if (share === null) {
+    return {
+      key: "cost_share",
+      status: "unknown",
+      isHardGate: false,
+      detail: "This call does not say whether the applicant must contribute anything.",
+    };
+  }
+  if (share === 0) {
+    return {
+      key: "cost_share",
+      status: "pass",
+      isHardGate: false,
+      detail: "The funder covers the full cost.",
+    };
+  }
+  return {
+    key: "cost_share",
+    status: "fail",
+    isHardGate: false,
+    detail: `The applicant is expected to carry about ${share}% of the cost. Confirm that before drafting.`,
+  };
+}
+
+/**
+ * Is there time to write this?
+ *
+ * The deadline rule answers whether the call is open. This answers a different
+ * question the predecessor treated as separate and this system had lost: an
+ * application that closes in four days is open and undeliverable, and telling a
+ * consultant it is "eligible" wastes exactly the week they do not have.
+ *
+ * Soft, because it is their judgement — they may already have most of it
+ * written, or may decide a rushed application is worth filing.
+ */
+const DEFAULT_LEAD_TIME_WEEKS = 3;
+
+function runwayRule(input: EligibilityInput): RuleResult {
+  const weeks = input.client.leadTimeWeeks ?? DEFAULT_LEAD_TIME_WEEKS;
+
+  if (!input.grant.deadline) {
+    return {
+      key: "runway",
+      status: "pass",
+      isHardGate: false,
+      detail: "No closing date, so there is no deadline to race.",
+    };
+  }
+  const closes = new Date(`${input.grant.deadline}T23:59:59Z`);
+  if (Number.isNaN(closes.getTime())) {
+    return {
+      key: "runway",
+      status: "unknown",
+      isHardGate: false,
+      detail: "We could not read the closing date, so we cannot say whether there is time.",
+    };
+  }
+
+  const days = Math.ceil((closes.getTime() - input.today.getTime()) / 86_400_000);
+  if (days < 0) {
+    return { key: "runway", status: "fail", isHardGate: false, detail: "This call has closed." };
+  }
+  const needed = weeks * 7;
+  if (days < needed) {
+    return {
+      key: "runway",
+      status: "fail",
+      isHardGate: false,
+      detail: `${days} day${days === 1 ? "" : "s"} left, against the ${weeks} weeks this client usually needs. Winnable only if much of it is already written.`,
+    };
+  }
+  return {
+    key: "runway",
+    status: "pass",
+    isHardGate: false,
+    detail: `${Math.floor(days / 7)} weeks to the deadline.`,
+  };
+}
+
+const RULES = [
+  jurisdictionRule,
+  deadlineRule,
+  applicantTypeRule,
+  scaleRule,
+  costShareRule,
+  runwayRule,
+];
 
 export type EligibilityDecision = {
   verdict: Verdict;

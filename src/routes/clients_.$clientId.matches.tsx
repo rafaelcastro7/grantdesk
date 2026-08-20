@@ -67,6 +67,17 @@ const GROUPS: Array<{ verdict: Verdict; heading: string; blurb: string }> = [
   },
 ];
 
+/**
+ * How many rejections to render when the group is opened.
+ *
+ * Every rejection is stored — the record has to answer "did you even look at
+ * that one?" months later. But a Canadian client against this catalog gets 51
+ * of them, 51 for the same reason, and a wall of identical rows is not
+ * evidence, it is noise wearing evidence's clothes. The heading still counts
+ * all of them, and the list says what it is showing.
+ */
+const RULED_OUT_SHOWN = 12;
+
 function MatchesPage() {
   const { clientId } = Route.useParams();
   const runMatching = useServerFn(findMatches);
@@ -197,6 +208,7 @@ function MatchesPage() {
         if (rows.length === 0) return null;
         const collapsible = group.verdict === "ineligible";
         const open = !collapsible || showRuledOut;
+        const visible = collapsible ? rows.slice(0, RULED_OUT_SHOWN) : rows;
 
         return (
           <section key={group.verdict} className="mt-10" data-testid={`group-${group.verdict}`}>
@@ -221,9 +233,18 @@ function MatchesPage() {
 
             {open && (
               <ul className="mt-3 flex flex-col gap-px overflow-hidden rounded-md border border-[var(--color-rule)] bg-[var(--color-rule)]">
-                {rows.map((row) => (
+                {visible.map((row) => (
                   <MatchCard key={row.id} row={row} clientId={clientId} />
                 ))}
+                {visible.length < rows.length && (
+                  <li
+                    data-testid="ruled-out-truncated"
+                    className="bg-[var(--color-surface)] px-4 py-3 text-sm text-[var(--color-ink-soft)]"
+                  >
+                    Showing {visible.length} of {rows.length}. The rest were rejected the same way
+                    and are kept with this client's record.
+                  </li>
+                )}
               </ul>
             )}
           </section>
@@ -265,7 +286,7 @@ function MatchCard({ row, clientId }: { row: MatchRow; clientId: string }) {
   const how = row.retrieval;
 
   return (
-    <li className="bg-[var(--color-surface)] px-4 py-3">
+    <li data-testid="match-card" className="bg-[var(--color-surface)] px-4 py-3">
       <div className="flex items-baseline justify-between gap-3">
         <a
           href={grant.url}

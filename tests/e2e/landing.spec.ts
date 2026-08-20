@@ -21,7 +21,10 @@ test("a visitor gets the case for the product, a consultant gets their desk", as
   await page.goto("/");
   await expect(page.locator("html[data-hydrated='true']")).toBeAttached({ timeout: 30_000 });
 
-  await expect(page.getByRole("heading", { name: /Fewer results, verified/ })).toBeVisible();
+  // The headline names the institute, because the desk was rebuilt for them
+  // and a visitor who arrives from iial.ca has to recognise where they landed.
+  await expect(page.getByRole("heading", { name: /IIAL and its partners/ })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /never merged into one number/ })).toBeVisible();
   await expect(page.getByText("What it will not do")).toBeVisible();
 
   // The coverage figures are read from the catalog as the page loads rather

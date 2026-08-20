@@ -83,13 +83,31 @@ test("a consultant matches a client and sees why each result was ruled in or out
   await expect(ruledOut).toContainText("Ruled out");
 
   await ruledOut.getByRole("button", { name: "Show why" }).click();
-  const firstRuledOut = ruledOut.locator("li").first();
+  const firstRuledOut = ruledOut.getByTestId("match-card").first();
   await expect(firstRuledOut).toBeVisible();
 
   // A verdict with no stated reason is the failure this phase exists to
   // prevent — it is indistinguishable from an opinion.
   await firstRuledOut.getByText("Every rule, and how this was found").click();
   await expect(firstRuledOut).toContainText(/Restricted to|Closed on|Open to/);
+
+  // Two halves of one promise, and getting them backwards is how this was
+  // first built: the record keeps every rejection, the screen shows a bounded
+  // sample of them. The heading counts the record, so it must agree with the
+  // run summary — if a rejection were dropped on the way to the database, the
+  // two numbers would drift apart and no other test would notice.
+  const stated = /(\d+) ruled out/.exec((await summary.textContent()) ?? "")?.[1];
+  expect(stated, "the run summary did not state a ruled-out count").toBeTruthy();
+  await expect(ruledOut.getByRole("heading")).toContainText(String(stated));
+
+  // At most a page of rejections, plus the line that says so.
+  const shown = await ruledOut.getByTestId("match-card").count();
+  expect(shown).toBeLessThanOrEqual(12);
+  if (Number(stated) > 12) {
+    await expect(ruledOut.getByTestId("ruled-out-truncated")).toContainText(
+      `Showing 12 of ${stated}`,
+    );
+  }
 
   expect(consoleErrors, `page errors: ${consoleErrors.join("; ")}`).toEqual([]);
 });

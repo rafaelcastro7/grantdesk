@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { decideEligibility, type EligibilityInput } from "./eligibility";
+import { decideEligibility, detectCostSharePercent, type EligibilityInput } from "./eligibility";
 
 const TODAY = new Date("2026-08-16T12:00:00Z");
 
@@ -141,11 +141,99 @@ describe("verdict precedence", () => {
   it("says plainly when everything checkable passed", () => {
     const decision = decideEligibility(
       input({
-        grant: { eligibleApplicantTypes: ["nonprofit"], amountMin: 50_000 },
+        grant: {
+          eligibleApplicantTypes: ["nonprofit"],
+          amountMin: 50_000,
+          // Stated, so the cost-share check has something to decide. Left out,
+          // it reports "the call does not say" — honest, but then not
+          // *everything* checkable was checked.
+          eligibilityNote: "This program funds 100% of eligible costs.",
+        },
         client: { stage: "nonprofit", annualBudget: 400_000 },
       }),
     );
     expect(decision.verdict).toBe("eligible");
     expect(decision.headline).toBe("Meets every published requirement.");
+  });
+
+  it("admits what it could not check rather than implying it checked everything", () => {
+    // Most funders say nothing about a cost share, and silence is not "no
+    // contribution required". A consultant told "meets everything" who then
+    // finds a 30% match stops trusting every other verdict too.
+    const decision = decideEligibility(
+      input({
+        grant: { eligibleApplicantTypes: ["nonprofit"], amountMin: 50_000 },
+        client: { stage: "nonprofit", annualBudget: 400_000 },
+      }),
+    );
+    expect(decision.verdict).toBe("eligible");
+    expect(decision.headline).toMatch(/we can check/);
+  });
+});
+
+describe("cost share", () => {
+  it("reads the applicant's share when the funder states its own", () => {
+    // "covers up to 75%" means the applicant finds the other 25%.
+    expect(detectCostSharePercent("This program covers up to 75% of eligible costs.")).toBe(25);
+    expect(detectCostSharePercent("Projects are funded at 60% of total cost.")).toBe(40);
+  });
+
+  it("reads the applicant's share when it is stated directly", () => {
+    expect(detectCostSharePercent("A 25% cost share is required.")).toBe(25);
+    expect(detectCostSharePercent("Applicants must provide a 20% match.")).toBe(20);
+  });
+
+  it("says nothing when the call says nothing", () => {
+    expect(detectCostSharePercent("Applications are reviewed quarterly.")).toBeNull();
+    expect(detectCostSharePercent(null)).toBeNull();
+  });
+
+  it("flags a required contribution without ruling the call out", () => {
+    // Whether the organisation can carry 30% is a finance decision, and
+    // nothing in this system is entitled to make it for them.
+    const decision = decideEligibility(
+      input({ grant: { eligibilityNote: "The funder covers up to 70% of project costs." } }),
+    );
+    const rule = decision.checks.find((c) => c.key === "cost_share");
+    expect(rule?.status).toBe("fail");
+    expect(rule?.isHardGate).toBe(false);
+    expect(rule?.detail).toContain("30%");
+    expect(decision.verdict).toBe("eligible");
+  });
+});
+
+describe("runway", () => {
+  it("says there is no time when the deadline is inside the lead time", () => {
+    // Open and undeliverable are different things, and calling the second one
+    // "eligible" wastes exactly the week the consultant does not have.
+    const decision = decideEligibility(
+      input({ grant: { deadline: "2026-08-20" }, client: { leadTimeWeeks: 3 } }),
+    );
+    const rule = decision.checks.find((c) => c.key === "runway");
+    expect(rule?.status).toBe("fail");
+    expect(rule?.detail).toContain("3 weeks");
+  });
+
+  it("leaves the verdict alone, because a rushed application is their call", () => {
+    const decision = decideEligibility(
+      input({ grant: { deadline: "2026-08-20" }, client: { leadTimeWeeks: 3 } }),
+    );
+    expect(decision.verdict).toBe("eligible");
+    expect(decision.checks.find((c) => c.key === "runway")?.isHardGate).toBe(false);
+  });
+
+  it("passes a call with real time left", () => {
+    expect(
+      decideEligibility(input({ grant: { deadline: "2026-12-01" } })).checks.find(
+        (c) => c.key === "runway",
+      )?.status,
+    ).toBe("pass");
+  });
+
+  it("has no deadline to race when the funder publishes none", () => {
+    expect(
+      decideEligibility(input({ grant: { deadline: null } })).checks.find((c) => c.key === "runway")
+        ?.status,
+    ).toBe("pass");
   });
 });

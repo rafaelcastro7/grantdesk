@@ -79,6 +79,8 @@ function ProposalPage() {
   const [awards, setAwards] = useState<PastAwardsResult | null>(null);
   const { busy, error, note, run, setError } = useAction();
   const autoRead = useRef(false);
+  /** Acknowledgement writes that have not reached Postgres yet. */
+  const pendingAcks = useRef(new Set<Promise<unknown>>());
 
   const load = useCallback(async () => {
     const { data: grantRow } = await supabase()
@@ -212,6 +214,24 @@ function ProposalPage() {
     if (!proposalId) return;
     setError(null);
 
+    const settled = acknowledgeInFlight(requirement, has);
+    pendingAcks.current.add(settled);
+    void settled.finally(() => pendingAcks.current.delete(settled));
+    await settled;
+  }
+
+  /**
+   * The write itself, kept separate so the caller can hold onto its promise.
+   *
+   * The checkbox flips locally and the round-trip to Postgres finishes later,
+   * which is right for the checkbox and wrong for anything that reads the
+   * server afterwards: a consultant who ticks a condition and immediately asks
+   * for a readiness check gets told the condition is outstanding, naming a
+   * requirement they can see themselves having confirmed. The confirmation was
+   * never lost — the question was asked too early. So the readiness check waits
+   * for these, and only these.
+   */
+  async function acknowledgeInFlight(requirement: Requirement, has: boolean) {
     // Flipped locally first. The write is a round-trip to Postgres, and a
     // checkbox that stays where it was for half a second reads as broken —
     // people click it again, which is how a confirmation gets toggled back off
@@ -269,6 +289,9 @@ function ProposalPage() {
   const refreshReadiness = () =>
     run("readiness", async () => {
       if (!proposalId) return;
+      // Any confirmation still travelling to Postgres has to land first, or
+      // the gate answers about a state the consultant has already left.
+      await Promise.allSettled([...pendingAcks.current]);
       const result = await runReadiness({ data: { proposalId, accessToken: await accessToken() } });
       if (!result.ok) throw new Error(result.error);
       setBlockers(result.blockers);
