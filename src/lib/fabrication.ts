@@ -55,6 +55,48 @@ const SPELLED_NUMBERS = [
   "million",
 ] as const;
 
+/**
+ * Digits and words are the same claim.
+ *
+ * A draft restating a supplied "6 sites" as "six sites" is reading, not
+ * inventing — and the first version of this flagged it, because the facts held
+ * a digit and the draft held a word. Nearly every clean draft was scored as a
+ * fabrication and the measured rate was meaningless.
+ */
+const NUMBER_WORDS: Record<string, string> = {
+  one: "1",
+  two: "2",
+  three: "3",
+  four: "4",
+  five: "5",
+  six: "6",
+  seven: "7",
+  eight: "8",
+  nine: "9",
+  ten: "10",
+  eleven: "11",
+  twelve: "12",
+  thirteen: "13",
+  fourteen: "14",
+  fifteen: "15",
+  sixteen: "16",
+  seventeen: "17",
+  eighteen: "18",
+  nineteen: "19",
+  twenty: "20",
+  thirty: "30",
+  forty: "40",
+  fifty: "50",
+  sixty: "60",
+  seventy: "70",
+  eighty: "80",
+  ninety: "90",
+};
+
+const WORD_FOR_DIGIT: Record<string, string> = Object.fromEntries(
+  Object.entries(NUMBER_WORDS).map(([word, digit]) => [digit, word]),
+);
+
 /** Titles that mark what follows as a person rather than a place or a programme. */
 const PERSON_TITLES = ["Dr", "Dr.", "Prof", "Prof.", "Mr", "Mr.", "Ms", "Ms.", "Mrs", "Mrs."];
 
@@ -78,11 +120,20 @@ function withoutGaps(draft: string): string {
 function permittedNumbers(facts: readonly string[]): Set<string> {
   const permitted = new Set<string>();
   for (const fact of facts) {
-    for (const number of fact.match(/\d[\d,]*(?:\.\d+)?/g) ?? []) {
-      permitted.add(number.replace(/,/g, ""));
+    for (const raw of fact.match(/\d[\d,]*(?:\.\d+)?/g) ?? []) {
+      const number = raw.replace(/,/g, "");
+      permitted.add(number);
+      // ...and its spelled form, so restating "6 sites" as "six sites" is not
+      // read as an invention.
+      const word = WORD_FOR_DIGIT[number];
+      if (word) permitted.add(word);
     }
     for (const word of fact.toLowerCase().match(/[a-z]+/g) ?? []) {
-      if ((SPELLED_NUMBERS as readonly string[]).includes(word)) permitted.add(word);
+      if ((SPELLED_NUMBERS as readonly string[]).includes(word)) {
+        permitted.add(word);
+        const digit = NUMBER_WORDS[word];
+        if (digit) permitted.add(digit);
+      }
     }
   }
   return permitted;

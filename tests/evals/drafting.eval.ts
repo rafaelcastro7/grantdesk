@@ -35,6 +35,7 @@ const {
   verdictFor,
 } = await import("./sample-log");
 const { fabrications } = await import("../../src/lib/fabrication");
+const { readFileSync } = await import("node:fs");
 
 /**
  * Where samples accumulate, and what they are samples *of*.
@@ -314,7 +315,16 @@ console.log(`no fabricated numbers:            ${pct(clean)}  (${results.length}
 // Recorded before anything is judged, and only for drafts the intended chain
 // actually wrote: a draft from the local floor is a sample of a different
 // system and pooling it would quietly corrupt the history.
-const variant = variantOf([DRAFT_SYSTEM_PROMPT, "groq/openai/gpt-oss-120b"]);
+// The checker is part of what is being measured, not a neutral observer.
+// Fixing a false positive in it — "six sites" was being scored as an invention
+// because the facts held the digit — changed every past sample's meaning, and
+// pooling across that would have compared two different questions. Its source
+// is fingerprinted alongside the prompt so a change starts a fresh sample.
+const variant = variantOf([
+  DRAFT_SYSTEM_PROMPT,
+  "groq/openai/gpt-oss-120b",
+  readFileSync("src/lib/fabrication.ts", "utf8"),
+]);
 for (const r of results) {
   if (r.by.startsWith("ollama")) continue;
   append(SAMPLE_LOG, {

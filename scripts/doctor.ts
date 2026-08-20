@@ -108,6 +108,68 @@ for (const [model, width, purpose] of [
   }
 }
 
+// ── The local floor ─────────────────────────────────────────────────────────
+// Checked for the same reason the embedders are: it is what runs when
+// everything hosted is unreachable, and a floor that is not installed is a
+// chain with no bottom. This check did not exist while the model was
+// hardcoded, and the default has since changed — a fresh machine would fail
+// every fallback with nothing here saying why.
+//
+// Non-empty content is asserted, not just a 200. Every current small model
+// reasons by default and will otherwise return empty `content` with its whole
+// budget spent in `thinking`, which callLlm reads as a failed provider.
+try {
+  const localEnv = serverEnv();
+  const response = await fetch(`${localEnv.OLLAMA_BASE_URL}/api/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: localEnv.OLLAMA_CHAT_MODEL,
+      messages: [{ role: "user", content: "Say OK." }],
+      stream: false,
+      think: false,
+      keep_alive: "30m",
+      options: { num_predict: 40 },
+    }),
+    signal: AbortSignal.timeout(180_000),
+  });
+
+  const body = (await response.json()) as {
+    message?: { content?: string; thinking?: string };
+    eval_count?: number;
+    eval_duration?: number;
+    error?: string;
+  };
+
+  const label = `local floor ${localEnv.OLLAMA_CHAT_MODEL}`;
+  if (body.error) {
+    record(
+      label,
+      "broken",
+      `${body.error.slice(0, 80)} — ollama pull ${localEnv.OLLAMA_CHAT_MODEL}`,
+    );
+  } else if (!(body.message?.content ?? "").trim()) {
+    record(
+      label,
+      "broken",
+      `empty content${body.message?.thinking ? ", budget spent thinking" : ""} — the fallback would return nothing`,
+    );
+  } else {
+    const perSecond = (body.eval_count ?? 0) / ((body.eval_duration ?? 1) / 1e9);
+    record(
+      label,
+      "ok",
+      `${perSecond.toFixed(1)} tok/s — a 250-word section in ~${Math.round(350 / Math.max(perSecond, 0.1))}s`,
+    );
+  }
+} catch (error) {
+  record(
+    "local floor",
+    "broken",
+    `${error instanceof Error ? error.message : String(error)} — is Ollama running?`,
+  );
+}
+
 // ── The provider chain, per role ────────────────────────────────────────────
 // Probed with a real call, not a models listing. Listing a model is not
 // evidence it can be called: that is exactly how the retired one went

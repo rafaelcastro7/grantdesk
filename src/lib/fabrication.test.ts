@@ -79,3 +79,20 @@ describe("what is not a claim", () => {
     expect(fabrications("We served 4,200 people. All 4,200 of them.", FACTS)).toHaveLength(1);
   });
 });
+
+describe("digits and words are the same claim", () => {
+  it("allows a supplied digit restated as a word", () => {
+    // The false positive that made the measured fabrication rate meaningless:
+    // the facts say "six sites", a draft says "six sites", and the first
+    // version flagged it because the two spellings never met.
+    expect(fabrications("We work across six sites.", FACTS)).toEqual([]);
+  });
+
+  it("allows a supplied word restated as a digit", () => {
+    expect(fabrications("There are 6 sites.", ["We work across six sites."])).toEqual([]);
+  });
+
+  it("still catches a spelled number nobody supplied", () => {
+    expect(fabrications("She has fifteen years of experience.", FACTS)).toHaveLength(1);
+  });
+});
