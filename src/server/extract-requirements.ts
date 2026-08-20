@@ -198,7 +198,7 @@ export async function extractRequirementsFromHtml(
 
 export async function extractRequirementsFromUrl(url: string): Promise<RequirementExtraction> {
   const response = await fetch(url, {
-    headers: { "User-Agent": "GrantDesk/1.0 (+reads public funding calls)" },
+    headers: { "User-Agent": "IIAL-GrantDesk/1.0 (+https://iial.ca; reads public funding calls)" },
     signal: AbortSignal.timeout(30_000),
   });
   if (!response.ok) throw new Error(`could not read ${url}: HTTP ${response.status}`);

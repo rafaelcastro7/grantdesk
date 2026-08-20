@@ -29,8 +29,26 @@ export function Nav() {
       className="border-b border-[var(--color-rule)] bg-[var(--color-surface)]"
     >
       <div className="mx-auto flex max-w-3xl items-baseline gap-6 px-6 py-3">
-        <Link to="/" className="text-sm font-semibold tracking-tight">
-          IIAL <span className="font-normal text-[var(--color-ink-soft)]">Grant Desk</span>
+        <Link to="/" className="flex items-baseline gap-2.5">
+          {/* Their mark, at its native ratio. Height-constrained rather than
+              scaled, so it never renders at a size the original was not drawn
+              for. */}
+          <img
+            src="/brand/iial-logo.png"
+            alt="Institute of Innovation and Advanced Learning"
+            width={161}
+            height={49}
+            className="h-6 w-auto self-center dark:hidden"
+          />
+          <img
+            src="/brand/iial-logo-inverse.png"
+            alt=""
+            aria-hidden="true"
+            width={162}
+            height={51}
+            className="hidden h-6 w-auto self-center dark:block"
+          />
+          <span className="text-sm text-[var(--color-ink-soft)]">Grant Desk</span>
         </Link>
         <div className="flex gap-4">
           {LINKS.map((link) => {

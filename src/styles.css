@@ -1,26 +1,45 @@
 @import "tailwindcss";
 
 @theme {
-  /* Neutrals biased toward the accent rather than pure grey, so surfaces read
-     as chosen. Ink is near-black with a slight cool cast. */
-  --color-ink: oklch(0.19 0.014 240);
-  --color-ink-soft: oklch(0.46 0.018 240);
-  --color-paper: oklch(0.985 0.003 240);
+  /* ── Institute of Innovation and Advanced Learning ────────────────────────
+     Taken from iial.ca rather than approximated: #0c4da2 and #195ec8 are the
+     blues the site actually uses, #222831 its charcoal, #7bc74d its green.
+     Written as hex because these are brand values that must not drift — a
+     colour converted "close enough" is a colour nobody can check against the
+     source. */
+  --color-brand: #0c4da2;
+  --color-brand-bright: #195ec8;
+  --color-brand-deep: #222831;
+  --color-brand-green: #7bc74d;
+
+  /* Neutrals biased toward the brand blue rather than pure grey, so surfaces
+     read as chosen. Ink is near-black with a slight cool cast. */
+  --color-ink: oklch(0.19 0.014 250);
+  --color-ink-soft: oklch(0.46 0.018 250);
+  --color-paper: oklch(0.985 0.003 250);
   --color-surface: oklch(1 0 0);
-  --color-rule: oklch(0.91 0.008 240);
+  --color-rule: oklch(0.91 0.008 250);
 
-  /* One accent, used sparingly. */
-  --color-accent: oklch(0.36 0.11 258);
-  --color-accent-soft: oklch(0.95 0.025 258);
-  /* The deep field the logo sits on, used for the landing's one dark panel. */
-  --color-deep: oklch(0.24 0.06 258);
-  --color-deep-ink: oklch(0.97 0.01 258);
+  /* One accent, used sparingly — the brand blue itself. */
+  --color-accent: #0c4da2;
+  --color-accent-soft: oklch(0.95 0.025 255);
 
-  /* Verdict colours are semantic and deliberately separate from the accent:
-     an eligible/ineligible decision must never be confused with brand. */
+  /* The dark field the inverse logo sits on. */
+  --color-deep: #222831;
+  --color-deep-ink: oklch(0.97 0.006 250);
+
+  /* Verdict colours are semantic and deliberately separate from the brand:
+     an eligible/ineligible decision must never be confused with identity.
+     Green is the one place the two nearly meet, so the eligible green is
+     pulled away from #7bc74d rather than reusing it — a consultant must not
+     read "on brand" as "you may apply". */
   --color-eligible: oklch(0.53 0.12 155);
   --color-ineligible: oklch(0.55 0.15 25);
   --color-needs-input: oklch(0.62 0.12 75);
+
+  /* Montserrat for headings, Roboto for text, as iial.ca uses them. */
+  --font-sans: "Roboto", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: "Montserrat", "Roboto", system-ui, sans-serif;
 }
 
 :root {
@@ -29,22 +48,31 @@
 
 @media (prefers-color-scheme: dark) {
   @theme {
-    --color-ink: oklch(0.94 0.008 240);
-    --color-ink-soft: oklch(0.72 0.014 240);
-    --color-paper: oklch(0.17 0.012 240);
-    --color-surface: oklch(0.21 0.014 240);
-    --color-rule: oklch(0.3 0.016 240);
-    --color-accent: oklch(0.74 0.11 258);
-    --color-accent-soft: oklch(0.27 0.035 258);
-    --color-deep: oklch(0.19 0.045 258);
-    --color-deep-ink: oklch(0.97 0.01 258);
+    --color-ink: oklch(0.94 0.008 250);
+    --color-ink-soft: oklch(0.72 0.014 250);
+    --color-paper: #1a1f27;
+    --color-surface: #222831;
+    --color-rule: oklch(0.34 0.016 250);
+    /* The brand blue is too dark to read on the charcoal, so the brighter of
+       their two blues carries the accent here. Both are theirs. */
+    --color-accent: #4a8ce0;
+    --color-accent-soft: oklch(0.28 0.04 255);
+    --color-deep: #171b21;
+    --color-deep-ink: oklch(0.97 0.006 250);
   }
+}
+
+h1,
+h2,
+h3 {
+  font-family: var(--font-display);
 }
 
 body {
   background: var(--color-paper);
   color: var(--color-ink);
   font-family:
+    "Roboto",
     system-ui,
     -apple-system,
     "Segoe UI",

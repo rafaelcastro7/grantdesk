@@ -45,10 +45,15 @@ export function Landing() {
       {/* ── The one dark panel, where the identity lives ─────────────────── */}
       <section className="bg-[var(--color-deep)] text-[var(--color-deep-ink)]">
         <div className="mx-auto max-w-3xl px-6 pb-16 pt-14">
-          <p className="text-xs font-medium uppercase tracking-[0.18em] opacity-70">
-            Institute of Innovation and Advanced Learning
-          </p>
-          <p className="mt-1 text-sm opacity-60">Empowering Innovation, Elevating Expertise</p>
+          {/* The inverse mark, which is the version drawn for a dark field. */}
+          <img
+            src="/brand/iial-logo-inverse.png"
+            alt="Institute of Innovation and Advanced Learning"
+            width={162}
+            height={51}
+            className="h-11 w-auto"
+          />
+          <p className="mt-4 text-sm opacity-70">Empowering Innovation, Elevating Expertise</p>
 
           <h1 className="mt-8 text-4xl font-semibold leading-[1.08] tracking-tight sm:text-5xl">
             The grant desk for

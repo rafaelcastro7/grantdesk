@@ -156,7 +156,7 @@ export async function extractProfileFromHtml(
 
 export async function extractProfileFromUrl(sourceUrl: string): Promise<ExtractionResult> {
   const response = await fetch(sourceUrl, {
-    headers: { "User-Agent": "GrantDesk/0.1 (+profile extraction)" },
+    headers: { "User-Agent": "IIAL-GrantDesk/1.0 (+https://iial.ca; reads public pages)" },
     signal: AbortSignal.timeout(30_000),
   });
   if (!response.ok) throw new Error(`fetch ${sourceUrl} returned HTTP ${response.status}`);

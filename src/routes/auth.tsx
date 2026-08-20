@@ -50,7 +50,24 @@ function AuthPage() {
 
   return (
     <main className="mx-auto flex min-h-screen max-w-sm flex-col justify-center px-6">
-      <h1 className="text-2xl font-semibold tracking-tight">GrantDesk</h1>
+      {/* The sign-in screen is the one place a visitor may arrive with no
+          navigation above it, so the mark carries the identity here itself. */}
+      <img
+        src="/brand/iial-logo.png"
+        alt="Institute of Innovation and Advanced Learning"
+        width={161}
+        height={49}
+        className="h-9 w-auto dark:hidden"
+      />
+      <img
+        src="/brand/iial-logo-inverse.png"
+        alt=""
+        aria-hidden="true"
+        width={162}
+        height={51}
+        className="hidden h-9 w-auto dark:block"
+      />
+      <h1 className="mt-6 text-2xl font-semibold tracking-tight">Grant Desk</h1>
       <p className="mt-2 text-sm text-[var(--color-ink-soft)]">
         Sign in to your desk. Each client&rsquo;s material stays isolated at the database level.
       </p>
