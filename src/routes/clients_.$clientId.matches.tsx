@@ -5,6 +5,7 @@ import { supabase } from "@/lib/supabase";
 import { accessToken } from "@/lib/session";
 import { useAction } from "@/lib/use-action";
 import { relevanceFrom } from "@/lib/match-explain";
+import { bandOf } from "@/lib/regions";
 import { findMatches } from "@/server/match.functions";
 
 export const Route = createFileRoute("/clients_/$clientId/matches")({ component: MatchesPage });
@@ -83,6 +84,7 @@ function MatchesPage() {
   const runMatching = useServerFn(findMatches);
 
   const [clientName, setClientName] = useState<string>("");
+  const [jurisdictions, setJurisdictions] = useState<string[]>([]);
   const [matches, setMatches] = useState<MatchRow[] | null>(null);
   const { busy, error, note, run, setError } = useAction();
   const [showRuledOut, setShowRuledOut] = useState(false);
@@ -95,6 +97,16 @@ function MatchesPage() {
       .eq("id", clientId)
       .maybeSingle();
     setClientName((client as { name: string } | null)?.name ?? "");
+
+    // Read alongside the client, not alongside each match row: it is one
+    // fact about the client, not one per result, and grouping by it should
+    // not depend on the join surviving a future column rename.
+    const { data: profile } = await supabase()
+      .from("client_profiles")
+      .select("jurisdictions")
+      .eq("client_id", clientId)
+      .maybeSingle();
+    setJurisdictions((profile as { jurisdictions: string[] | null } | null)?.jurisdictions ?? []);
 
     const { data, error: readError } = await supabase()
       .from("matches")
@@ -146,13 +158,38 @@ function MatchesPage() {
       const degraded = !result.usedVector
         ? " Meaning-based search was unavailable, so these are word matches only."
         : "";
+      // Say where the search actually looked, not just how many came back.
+      // A flat count once hid the fact that a Canadian client's own country
+      // was 30% of the ranking and 98% of it went unread — restating the
+      // split every run is what keeps that from happening silently again.
+      const home = result.bands.find((b) => b.key === "home");
+      const where = home
+        ? ` Searched ${home.label} (${home.searched}) and the rest of the Americas ` +
+          `(${result.bands.find((b) => b.key === "americas")?.searched ?? 0}).`
+        : "";
       return (
         `Checked ${result.retrieved} calls: ${result.eligible} to apply for, ` +
-        `${result.needsInput} awaiting an answer, ${result.ineligible} ruled out.${degraded}`
+        `${result.needsInput} awaiting an answer, ${result.ineligible} ruled out.${where}${degraded}`
       );
     });
 
-  const grouped = (verdict: Verdict) => (matches ?? []).filter((m) => m.verdict === verdict);
+  /**
+   * One verdict group, home country first.
+   *
+   * Relevance still orders each half — this does not re-rank anything — but a
+   * consultant serving a Canadian client reads Canadian calls before American
+   * ones regardless of which happened to score higher, because "priority" was
+   * the actual ask and a relevance-only order cannot express it.
+   */
+  const grouped = (verdict: Verdict) =>
+    (matches ?? [])
+      .filter((m) => m.verdict === verdict)
+      .map((m, index) => ({ m, index, band: bandOf(m.grants?.country, jurisdictions) }))
+      .sort((a, b) => {
+        const priority = (band: string) => (band === "home" ? 0 : 1);
+        return priority(a.band) - priority(b.band) || a.index - b.index;
+      })
+      .map(({ m }) => m);
 
   return (
     <main className="mx-auto max-w-3xl px-6 py-12">
@@ -234,7 +271,12 @@ function MatchesPage() {
             {open && (
               <ul className="mt-3 flex flex-col gap-px overflow-hidden rounded-md border border-[var(--color-rule)] bg-[var(--color-rule)]">
                 {visible.map((row) => (
-                  <MatchCard key={row.id} row={row} clientId={clientId} />
+                  <MatchCard
+                    key={row.id}
+                    row={row}
+                    clientId={clientId}
+                    isHome={bandOf(row.grants?.country, jurisdictions) === "home"}
+                  />
                 ))}
                 {visible.length < rows.length && (
                   <li
@@ -270,7 +312,16 @@ function money(row: NonNullable<MatchRow["grants"]>): string | null {
   return null;
 }
 
-function MatchCard({ row, clientId }: { row: MatchRow; clientId: string }) {
+function MatchCard({
+  row,
+  clientId,
+  isHome,
+}: {
+  row: MatchRow;
+  clientId: string;
+  /** This client's own country, shown so priority is visible, not just implied by order. */
+  isHome: boolean;
+}) {
   const grant = row.grants;
   if (!grant) return null;
 
@@ -302,7 +353,14 @@ function MatchCard({ row, clientId }: { row: MatchRow; clientId: string }) {
       </div>
 
       <p className="mt-1 text-xs text-[var(--color-ink-soft)]">
-        {[grant.funders?.name, grant.country, amount, grant.deadline && `closes ${grant.deadline}`]
+        {[
+          grant.funders?.name,
+          // Home is stated, not just implied by list order — the order
+          // survives a re-sort or a copy-paste, the label does not need to.
+          isHome ? `${grant.country} · home country` : grant.country,
+          amount,
+          grant.deadline && `closes ${grant.deadline}`,
+        ]
           .filter(Boolean)
           .join(" · ")}
       </p>

@@ -3,6 +3,7 @@ import { decideEligibility, type Verdict } from "@/lib/eligibility";
 import { hasQueryableProfile, lexicalQuery, semanticQuery } from "@/lib/match-query";
 import { matchedTerms } from "@/lib/match-explain";
 import type { ApplicantType } from "@/lib/applicant-types";
+import { retrievalBands } from "@/lib/regions";
 import { embedOne } from "./embed";
 
 /**
@@ -14,10 +15,18 @@ import { embedOne } from "./embed";
  * every time, and both the verdict and the rule results are written down so
  * "why is this here?" is answerable from the database months later.
  *
- * Retrieval deliberately does *not* filter by country. A grant the client
- * cannot apply for has to come back and be marked ineligible with a reason,
- * because a consultant needs to know it was considered and ruled out — a
- * silently filtered result is indistinguishable from a missing one.
+ * Retrieval deliberately does *not* filter anyone out by country — that is
+ * still the eligibility rules' job, and a grant the client cannot apply for
+ * still comes back marked ineligible with a reason.
+ *
+ * It is banded by country, though, and that took a real measurement to admit
+ * was necessary. A single relevance-ranked search for a Canadian client
+ * returned ten Canadian calls out of sixty, out of 1,321 open ones in the
+ * catalog — not because they were ruled out, but because Canada is ~30% of
+ * the ranking at every depth and the other 1,311 never got looked at. A country
+ * filter would have thrown the rest of the continent away; a relevance boost
+ * would have fixed it by an amount nobody could state. So the budget is split
+ * instead, home country first, by a stated fraction — see regions.ts.
  */
 
 const CANDIDATE_POOL = 300;
@@ -52,6 +61,12 @@ export type MatchRunResult = {
   /** Which halves of retrieval actually ran, so a degraded run is visible. */
   usedLexical: boolean;
   usedVector: boolean;
+  /**
+   * How the retrieval budget was actually spent. Empty when the client has no
+   * recognized home country in the Americas, in which case the whole budget
+   * went to one undifferentiated search.
+   */
+  bands: Array<{ key: "home" | "americas"; label: string; searched: number }>;
   durationMs: number;
 };
 
@@ -120,22 +135,37 @@ export async function runMatch(
   }
   if (!lexical && !embedding) throw new ProfileTooThinError();
 
-  const { data: hits, error: searchError } = await supabase.rpc("search_grants", {
-    q: lexical || null,
-    q_embedding: embedding ? JSON.stringify(embedding) : null,
-    q_language: "en",
-    countries: null,
-    pool: CANDIDATE_POOL,
-    result_limit: options.limit ?? MATCH_LIMIT,
-  });
-  if (searchError) throw new Error(`retrieval failed: ${searchError.message}`);
-
-  const ranked = (hits ?? []) as Array<{
+  type Hit = {
     grant_id: string;
     lexical_rank: number | null;
     vector_rank: number | null;
     score: number;
-  }>;
+  };
+
+  // One call per band, each restricted to its own countries. Bands are
+  // disjoint by construction (regions.ts never repeats a country across
+  // them), so the results need no deduplication — just concatenation.
+  const bands = retrievalBands(profile.jurisdictions, options.limit ?? MATCH_LIMIT);
+  const ranked: Hit[] = [];
+  const bandSummary: MatchRunResult["bands"] = [];
+  for (const band of bands) {
+    if (band.budget <= 0) continue;
+    const { data: hits, error: searchError } = await supabase.rpc("search_grants", {
+      q: lexical || null,
+      q_embedding: embedding ? JSON.stringify(embedding) : null,
+      q_language: "en",
+      countries: band.countries,
+      pool: CANDIDATE_POOL,
+      result_limit: band.budget,
+    });
+    if (searchError) throw new Error(`retrieval failed (${band.label}): ${searchError.message}`);
+    const found = (hits ?? []) as Hit[];
+    ranked.push(...found);
+    // What actually came back, not the budget offered — a band with fewer
+    // candidates than its share is not the same event as one that filled it.
+    bandSummary.push({ key: band.key, label: band.label, searched: found.length });
+  }
+
   if (ranked.length === 0) {
     return {
       clientId,
@@ -145,6 +175,7 @@ export async function runMatch(
       ineligible: 0,
       usedLexical: !!lexical,
       usedVector: !!embedding,
+      bands: bandSummary,
       durationMs: Date.now() - started,
     };
   }
@@ -243,6 +274,7 @@ ${grant.summary ?? ""}`,
     ineligible: decided.filter((m) => m.verdict === "ineligible").length,
     usedLexical: !!lexical,
     usedVector: !!embedding,
+    bands: bandSummary,
     durationMs: Date.now() - started,
   };
 }
