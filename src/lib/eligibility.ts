@@ -65,6 +65,44 @@ export type EligibilityInput = {
 /** Multilateral funders are not bound to one country's applicants. */
 const BORDERLESS = new Set(["INTL", "GLOBAL", "WORLD"]);
 
+/**
+ * "Foreign entities are eligible to apply" — read from the funder's own text,
+ * never guessed from the absence of a restriction.
+ *
+ * The country field we store is the funder's country, not a nationality
+ * restriction, and the two get conflated for exactly one source today: a
+ * US federal call is stored as `country: "US"` whether or not its actual
+ * synopsis restricts applicants to US entities — many explicitly do not. A
+ * consultant serving a Canadian client never sees that distinction, and the
+ * jurisdiction rule would hard-fail every one of those calls the same way it
+ * fails a genuinely domestic one.
+ *
+ * Getting this wrong in either direction is costly, so the bar is deliberately
+ * narrow: only the canonical, unambiguous phrasing federal synopses actually
+ * use, and never when a negation ("not eligible", "except foreign entities")
+ * sits nearby. A hit downgrades a hard fail to a question, never straight to
+ * a pass — the funder's own words are quoted so the consultant can judge it
+ * in ten seconds instead of rereading the full synopsis themselves.
+ */
+export function statesForeignEligibility(text: string | null | undefined): boolean {
+  if (!text) return false;
+  const hay = text.toLowerCase();
+
+  const subject =
+    "(foreign|international|non-u\\.s\\.|non-united states|outside the united states)";
+  const negated = new RegExp(
+    `\\b(not eligible|ineligible|except|excluding|only|restricted to)\\b.{0,40}${subject}` +
+      `|${subject}.{0,40}\\b(not eligible|ineligible|are not|is not|may not)\\b`,
+  ).test(hay);
+  if (negated) return false;
+
+  const affirms = new RegExp(
+    `${subject}.{0,60}\\b(are eligible|is eligible|may apply|entities are eligible|` +
+      `organi[sz]ations are eligible|applicants? (?:are|is) eligible)\\b`,
+  );
+  return affirms.test(hay);
+}
+
 function jurisdictionRule(input: EligibilityInput): RuleResult {
   const grantCountry = input.grant.country?.trim().toUpperCase() ?? "";
   const clientPlaces = (input.client.jurisdictions ?? []).map((j) => j.trim().toUpperCase());
@@ -94,6 +132,16 @@ function jurisdictionRule(input: EligibilityInput): RuleResult {
       status: "pass",
       isHardGate: true,
       detail: `Open to applicants in ${grantCountry}, where this client operates.`,
+    };
+  }
+  if (statesForeignEligibility(input.grant.eligibilityNote)) {
+    return {
+      key: "jurisdiction",
+      status: "unknown",
+      isHardGate: true,
+      detail:
+        `Based in ${grantCountry}, but its own terms say foreign applicants are eligible — ` +
+        `confirm this client qualifies before drafting.`,
     };
   }
   return {

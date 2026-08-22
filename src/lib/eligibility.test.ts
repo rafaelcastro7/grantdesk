@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { decideEligibility, detectCostSharePercent, type EligibilityInput } from "./eligibility";
+import {
+  decideEligibility,
+  detectCostSharePercent,
+  statesForeignEligibility,
+  type EligibilityInput,
+} from "./eligibility";
 
 const TODAY = new Date("2026-08-16T12:00:00Z");
 
@@ -47,6 +52,55 @@ describe("jurisdiction", () => {
   it("asks rather than guesses when the client's location is unknown", () => {
     const decision = decideEligibility(input({ client: { jurisdictions: [] } }));
     expect(decision.verdict).toBe("needs_input");
+  });
+
+  describe("a US call that says foreign applicants may apply", () => {
+    // Real grants.gov synopses distinguish "US federal money" from "US
+    // applicants only", and the two get conflated by the one field we store.
+    // Getting this right matters more than usual: a false "eligible" sends a
+    // consultant to draft against a call that will bounce them, so a hit
+    // downgrades the hard fail to a question rather than clearing it outright.
+    it("turns a hard fail into a question, quoting the funder", () => {
+      const decision = decideEligibility(
+        input({
+          grant: {
+            country: "US",
+            eligibilityNote: "Foreign entities are eligible to apply for this opportunity.",
+          },
+        }),
+      );
+      expect(decision.verdict).toBe("needs_input");
+      const rule = check(decision, "jurisdiction");
+      expect(rule.status).toBe("unknown");
+      expect(rule.detail).toContain("foreign applicants are eligible");
+    });
+
+    it("recognizes the phrasing however it's worded", () => {
+      expect(statesForeignEligibility("International organizations are eligible.")).toBe(true);
+      expect(
+        statesForeignEligibility("Non-U.S. entities are eligible to apply for this program."),
+      ).toBe(true);
+      expect(statesForeignEligibility("Applicants outside the United States may apply.")).toBe(
+        true,
+      );
+    });
+
+    it("never overrides an explicit restriction, even nearby wording", () => {
+      expect(
+        statesForeignEligibility("Foreign entities are not eligible to apply for this program."),
+      ).toBe(false);
+      expect(
+        statesForeignEligibility("This program is restricted to foreign applicants only."),
+      ).toBe(false);
+      expect(statesForeignEligibility("US-based nonprofits are eligible.")).toBe(false);
+    });
+
+    it("stays a hard fail when the call says nothing about nationality", () => {
+      const decision = decideEligibility(
+        input({ grant: { country: "US", eligibilityNote: "Applications are due quarterly." } }),
+      );
+      expect(decision.verdict).toBe("ineligible");
+    });
   });
 });
 

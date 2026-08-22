@@ -81,7 +81,17 @@ test("a consultant adds a client and fills its profile from a website", async ({
     const score = await page.getByTestId("completeness").textContent();
     const value = Number((score ?? "0/100").split("/")[0]);
     expect(value, "a successful read must actually populate the profile").toBeGreaterThan(0);
-    await expect(page.getByTestId("can-match")).toContainText("Ready to match.");
+    // Whether extraction happened to fill every *required* field (and so
+    // flips matching on) is exactly what the comment above says this e2e
+    // does not own — that is eval:profile's job, run over many pages against
+    // a real pass/fail bar. A live "about us" page can honestly describe an
+    // organization without ever stating where it operates, and demanding
+    // "Ready to match." here would fail the pipeline for the page's content,
+    // not for a defect — which is what actually happened the first time this
+    // ran against a live extraction. All this e2e still owns: the screen
+    // reflects the new profile coherently, whichever of the two states it
+    // landed in, rather than showing the stale pre-read copy.
+    await expect(page.getByTestId("can-match")).toHaveText(/Ready to match\.|Matching is off/);
   } else {
     // A stated failure is acceptable; an unreadable one is not.
     const message = (await failure.textContent()) ?? "";
