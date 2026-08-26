@@ -150,10 +150,11 @@ test("a consultant goes from a new client to a recorded submission", async ({ pa
   await page.goto(proposalUrl);
 
   // ── Who has won this before ───────────────────────────────────────────────
-  // Either real recipients, or a statement of why we cannot see them. An empty
-  // list would read as "nobody has ever won this", which is a far stronger
-  // claim than the data supports.
-  await page.getByTestId("past-awards").click();
+  // No click needed: it loads right after the call's requirements do, chained
+  // rather than a separate button, because it is the first thing a consultant
+  // actually asks about a call. Either real recipients, or a statement of why
+  // we cannot see them appear — an empty list would read as "nobody has ever
+  // won this", which is a far stronger claim than the data supports.
   await expect(page.getByTestId("awards-panel")).toBeVisible({ timeout: 60_000 });
 
   // ── It is on the desk before it is sent, too ──────────────────────────────

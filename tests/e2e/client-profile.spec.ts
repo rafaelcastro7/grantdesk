@@ -55,15 +55,14 @@ test("a consultant adds a client and fills its profile from a website", async ({
   await expect(page).toHaveURL(/\/clients\/[0-9a-f-]{36}$/, { timeout: 30_000 });
   await expect(page.getByRole("heading", { name: `Evergreen ${stamp}` })).toBeVisible();
 
-  // Before extraction the profile is empty, matching is refused, and the app
-  // says which single thing to fix rather than listing every gap.
-  await expect(page.getByTestId("completeness")).toHaveText("0/100");
-  await expect(page.getByTestId("can-match")).toContainText("Matching is off");
+  // The read starts on its own — the website was just typed into the "Add
+  // client" form one screen ago, and clicking a second, separate button to
+  // do the thing already asked for was the redundancy this screen used to
+  // have. What the test still owns is the same contract as before the click
+  // was removed: an empty profile and a next-gap prompt while nothing has
+  // happened yet, so a change here that made this run silent instead of
+  // starting the read would still be caught.
   await expect(page.getByTestId("next-gap")).toBeVisible();
-
-  const readButton = page.getByRole("button", { name: "Read the page" });
-  await expect(readButton).toBeEnabled();
-  await readButton.click();
 
   // This step fetches a third-party page and calls a model, so its *quality*
   // is measured by the eval (bun run eval:profile, 3/3 usable) across several

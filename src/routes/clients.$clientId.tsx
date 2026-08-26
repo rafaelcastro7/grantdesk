@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useAction } from "@/lib/use-action";
 import { useServerFn } from "@tanstack/react-start";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { extractProfile } from "@/server/profile.functions";
 import { assessProfile, nextGap, type ProfileFields } from "@/lib/profile-completeness";
@@ -118,6 +118,27 @@ function ClientDetail() {
   }, []);
 
   /**
+   * Run it without being asked, once, the same idiom the matches page uses
+   * for the same reason.
+   *
+   * A website was just typed into the "Add client" form one screen ago. This
+   * screen was then showing that same URL back, already filled in, sitting
+   * next to a button whose only job was to do the thing the consultant had
+   * just told the app to do. That is not a confirmation step — a wrong URL or
+   * an unreadable page is caught by the profile staying empty, not by a
+   * second click — so it fires here instead, and the button stays as "Read
+   * the page again" for a real re-read after the site changes.
+   */
+  const autoRead = useRef(false);
+  useEffect(() => {
+    if (autoRead.current || profile !== null || !sourceUrl || busy) return;
+    autoRead.current = true;
+    void fillFromWebsite(undefined, { auto: true });
+    // `run`/`fillFromWebsite` are stable enough for this one-shot; re-running
+    // on their identity would defeat the guard it depends on.
+  }, [profile, sourceUrl, busy]);
+
+  /**
    * Adding a colleague to a shared client, by email.
    *
    * Looked up rather than invited: find_consultant_by_email() only resolves
@@ -178,11 +199,30 @@ function ClientDetail() {
     });
   }
 
-  async function fillFromWebsite(event: React.FormEvent) {
-    event.preventDefault();
+  async function fillFromWebsite(event?: React.FormEvent, options: { auto?: boolean } = {}) {
+    event?.preventDefault();
     await run("extract", async () => {
       const result = await runExtraction({ data: { url: sourceUrl.trim() } });
       if (!result.ok) throw new Error(result.error);
+
+      // The automatic read and a person typing into the form below it can now
+      // run at the same time — that is the whole point of not making them
+      // wait for each other. But the read is slow (a real fetch plus a model
+      // call) and upsert() replaces the row wholesale, so if someone saves a
+      // profile by hand while it is still in flight, an automatic read that
+      // finishes afterward would silently overwrite what they just typed
+      // with whatever a mostly-empty "About" page produced. A deliberate
+      // "Read the page again" click should still always win — the person
+      // asked for it — but the unsolicited first read never should, once
+      // something else has already put a real profile in place.
+      if (options.auto) {
+        const { data: existing } = await supabase()
+          .from("client_profiles")
+          .select("client_id")
+          .eq("client_id", clientId)
+          .maybeSingle();
+        if (existing) return "Skipped the automatic read — a profile was already saved.";
+      }
 
       const { profile: extracted, provenance } = result;
       const { error: upsertError } = await supabase()
@@ -315,7 +355,11 @@ function ClientDetail() {
             disabled={busy !== null}
             className="rounded-md bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
           >
-            {busy === "extract" ? "Reading…" : "Read the page"}
+            {busy === "extract"
+              ? "Reading…"
+              : profile !== null
+                ? "Read the page again"
+                : "Read the page"}
           </button>
         </form>
         {note && <p className="mt-3 text-sm text-[var(--color-ink-soft)]">{note}</p>}

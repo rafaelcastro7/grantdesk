@@ -151,16 +151,31 @@ function ProposalPage() {
   }, [load]);
 
   /**
-   * Read the call without being asked, once, when we have not read it yet.
+   * Read the call without being asked, once, when we have not read it yet —
+   * then ask who this funder has actually funded before, the other button
+   * that used to sit here for no reason except that clicking it was possible.
    *
-   * Arriving here is the decision; the button was pure latency in front of it.
-   * It stays as "Re-read the call", because re-reading after a funder amends
-   * their notice is a real choice a consultant makes deliberately.
+   * "Who has won this before" is cheap (a lookup, not a model call) and is,
+   * per the comment on its own panel below, the first question a consultant
+   * asks about a call — the same reasoning that already justified reading the
+   * call itself without a click. It is chained after the read rather than
+   * fired alongside it: both actions share one busy slot, and starting a
+   * second one before the first's state update has landed would stomp it —
+   * this page has no per-action tracking to make firing them together safe.
+   *
+   * The read stays "Re-read the call" afterward, because re-reading after a
+   * funder amends their notice is a real choice a consultant makes
+   * deliberately — awards, on the other hand, do not need a re-ask button;
+   * whoever it funded stays fetchable on request from its own button either way.
    */
   useEffect(() => {
-    if (autoRead.current || requirements === null || requirements.length > 0 || busy) return;
+    if (autoRead.current || requirements === null || busy) return;
     autoRead.current = true;
-    void readCall();
+    const afterRead = () => {
+      if (awards === null) void loadAwards();
+    };
+    if (requirements.length > 0) afterRead();
+    else void readCall().then(afterRead);
   }, [requirements, busy]);
 
   const readCall = () =>
