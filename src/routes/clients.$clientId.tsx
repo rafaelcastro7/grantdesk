@@ -8,7 +8,13 @@ import { assessProfile, nextGap, type ProfileFields } from "@/lib/profile-comple
 
 export const Route = createFileRoute("/clients/$clientId")({ component: ClientDetail });
 
-type ClientRow = { id: string; name: string; website: string | null };
+type ClientRow = { id: string; name: string; website: string | null; consultant_id: string };
+
+type TeamMember = {
+  user_id: string;
+  added_at: string;
+  consultants: { email: string; display_name: string | null } | null;
+};
 
 type StoredAnswer = {
   id: string;
@@ -48,11 +54,14 @@ function ClientDetail() {
   const [sourceUrl, setSourceUrl] = useState("");
   const { busy, error, note, run, setError } = useAction();
   const [answers, setAnswers] = useState<StoredAnswer[] | null>(null);
+  const [team, setTeam] = useState<TeamMember[] | null>(null);
+  const [myId, setMyId] = useState<string | null>(null);
+  const [teammateEmail, setTeammateEmail] = useState("");
 
   const load = useCallback(async () => {
     const { data: clientRow, error: clientError } = await supabase()
       .from("clients")
-      .select("id, name, website")
+      .select("id, name, website, consultant_id")
       .eq("id", clientId)
       .maybeSingle();
     if (clientError) {
@@ -61,6 +70,24 @@ function ClientDetail() {
     }
     setClient(clientRow as ClientRow | null);
     if (clientRow?.website && !sourceUrl) setSourceUrl(clientRow.website as string);
+
+    // client_team_members has two foreign keys into consultants (user_id and
+    // added_by), so "consultants(...)" alone is ambiguous to PostgREST — it
+    // errors, and errors on a nested-select like this had no error check
+    // here to catch it, so the team looked empty rather than failing loudly.
+    // Naming the constraint resolves it.
+    const { data: teamRows, error: teamError } = await supabase()
+      .from("client_team_members")
+      .select(
+        "user_id, added_at, consultants!client_team_members_user_id_fkey(email, display_name)",
+      )
+      .eq("client_id", clientId)
+      .order("added_at", { ascending: true });
+    if (teamError) {
+      setError(teamError.message);
+      return;
+    }
+    setTeam((teamRows ?? []) as unknown as TeamMember[]);
 
     const { data: profileRow } = await supabase()
       .from("client_profiles")
@@ -83,6 +110,73 @@ function ClientDetail() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    void supabase()
+      .auth.getUser()
+      .then(({ data }) => setMyId(data.user?.id ?? null));
+  }, []);
+
+  /**
+   * Adding a colleague to a shared client, by email.
+   *
+   * Looked up rather than invited: find_consultant_by_email() only resolves
+   * an id for someone who already has a GrantDesk account, and says so
+   * plainly when it doesn't — building a real invitation flow (send mail to
+   * someone with no account yet, hold a pending grant until they sign up) is
+   * a materially bigger feature nobody asked for yet.
+   */
+  async function addTeammate(event: React.FormEvent) {
+    event.preventDefault();
+    const email = teammateEmail.trim();
+    if (!email) return;
+
+    await run("team", async () => {
+      const { data: foundId, error: lookupError } = await supabase().rpc(
+        "find_consultant_by_email",
+        { target_email: email },
+      );
+      if (lookupError) throw lookupError;
+      if (!foundId) {
+        throw new Error(`No GrantDesk account uses ${email} yet — ask them to sign up first.`);
+      }
+      if (foundId === client?.consultant_id) {
+        throw new Error(`${email} already owns this client.`);
+      }
+      if (foundId === myId) {
+        throw new Error("That's your own account.");
+      }
+
+      const { error: insertError } = await supabase()
+        .from("client_team_members")
+        .insert({ client_id: clientId, user_id: foundId, added_by: myId });
+      if (insertError) {
+        if (insertError.code === "23505") throw new Error(`${email} is already on this team.`);
+        throw insertError;
+      }
+      setTeammateEmail("");
+      await load();
+      return `Added ${email}. They'll see this client next time they sign in.`;
+    });
+  }
+
+  async function removeTeammate(member: TeamMember) {
+    const label = member.consultants?.display_name || member.consultants?.email || "this person";
+    const leaving = member.user_id === myId;
+    setTeam((current) => (current ?? []).filter((m) => m.user_id !== member.user_id));
+    await run("team", async () => {
+      const { error: deleteError } = await supabase()
+        .from("client_team_members")
+        .delete()
+        .eq("client_id", clientId)
+        .eq("user_id", member.user_id);
+      if (deleteError) {
+        await load();
+        throw deleteError;
+      }
+      return leaving ? "You left this client." : `Removed ${label} from this client.`;
+    });
+  }
 
   async function fillFromWebsite(event: React.FormEvent) {
     event.preventDefault();
@@ -328,6 +422,68 @@ function ClientDetail() {
           >
             Find what they can apply for →
           </Link>
+        )}
+      </section>
+
+      <section className="mt-10" data-testid="team">
+        <h2 className="text-sm font-semibold">Who has access</h2>
+        <p className="mt-1 max-w-prose text-sm text-[var(--color-ink-soft)]">
+          Everyone here sees the same matches, drafts and submissions for this client — a shared
+          desk, not separate copies.
+        </p>
+
+        <ul className="mt-3 flex flex-col gap-px overflow-hidden rounded-md border border-[var(--color-rule)] bg-[var(--color-rule)]">
+          <li className="flex items-center justify-between bg-[var(--color-surface)] px-4 py-3 text-sm">
+            <span>{client?.consultant_id === myId ? "You" : "The owner"}</span>
+            <span className="text-xs text-[var(--color-ink-soft)]">Owner</span>
+          </li>
+          {(team ?? []).map((member) => (
+            <li
+              key={member.user_id}
+              data-testid="team-member"
+              className="flex items-center justify-between bg-[var(--color-surface)] px-4 py-3 text-sm"
+            >
+              <span>
+                {member.user_id === myId
+                  ? "You"
+                  : member.consultants?.display_name || member.consultants?.email || "Unknown"}
+              </span>
+              {/* Anyone may leave; only the owner may remove someone else — a
+                  member who could remove other members could quietly narrow
+                  who has access to material they didn't add. */}
+              {(member.user_id === myId || client?.consultant_id === myId) && (
+                <button
+                  type="button"
+                  onClick={() => removeTeammate(member)}
+                  data-testid="remove-teammate"
+                  className="text-xs text-[var(--color-ineligible)]"
+                >
+                  {member.user_id === myId ? "Leave" : "Remove"}
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+
+        {client?.consultant_id === myId && (
+          <form onSubmit={addTeammate} className="mt-3 flex flex-wrap items-center gap-2">
+            <input
+              type="email"
+              name="teammateEmail"
+              value={teammateEmail}
+              onChange={(event) => setTeammateEmail(event.target.value)}
+              placeholder="colleague@yourfirm.com"
+              className="min-w-64 flex-1 rounded-md border border-[var(--color-rule)] bg-[var(--color-surface)] px-3 py-2 text-sm"
+            />
+            <button
+              type="submit"
+              disabled={busy !== null || !teammateEmail.trim()}
+              data-testid="add-teammate"
+              className="rounded-md border border-[var(--color-rule)] px-3 py-2 text-sm font-medium disabled:opacity-50"
+            >
+              Add to this client
+            </button>
+          </form>
         )}
       </section>
 
