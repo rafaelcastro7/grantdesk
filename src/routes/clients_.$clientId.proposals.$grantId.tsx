@@ -285,6 +285,15 @@ function ProposalPage() {
       // with a snapshot taken before this write landed, so ticking several
       // conditions quickly un-ticked the earlier ones in front of the
       // consultant — the write had succeeded and the screen said otherwise.
+      //
+      // Readiness is different: it was cleared above rather than reloaded,
+      // and used to just stay cleared until a separate click asked for it
+      // again — one more click per condition ticked, for a check that costs
+      // nothing to run (it is pure, no model call). refreshReadiness() itself
+      // already waits out every acknowledgement still in flight before it
+      // reads anything, which is exactly what ticking several boxes quickly
+      // needs: the last one to settle is the one whose result sticks.
+      void refreshReadiness();
     } catch (caught) {
       // Revert this one box, and only this one. Re-reading the whole set here
       // clobbered the optimistic state of the acknowledgements still in flight
