@@ -59,52 +59,62 @@ function ClientDetail() {
   const [teammateEmail, setTeammateEmail] = useState("");
 
   const load = useCallback(async () => {
-    const { data: clientRow, error: clientError } = await supabase()
-      .from("clients")
-      .select("id, name, website, consultant_id")
-      .eq("id", clientId)
-      .maybeSingle();
+    // Fetched together rather than one after another. Sequentially, each
+    // `await` hands control back before the next query starts, and the
+    // auto-read effect below runs on every one of those in-between renders —
+    // it saw sourceUrl already set from the client row while profile was
+    // still sitting at its initial null, genuinely indistinguishable from
+    // "no profile exists yet", and fired a real extraction call against a
+    // client that already had one. Resolving all four together means every
+    // field lands in the same render, so that render is never half-true.
+    const [{ data: clientRow, error: clientError }, teamResult, profileResult, answersResult] =
+      await Promise.all([
+        supabase()
+          .from("clients")
+          .select("id, name, website, consultant_id")
+          .eq("id", clientId)
+          .maybeSingle(),
+        // client_team_members has two foreign keys into consultants (user_id
+        // and added_by), so "consultants(...)" alone is ambiguous to
+        // PostgREST — it errors, and errors on a nested-select like this had
+        // no error check here to catch it, so the team looked empty rather
+        // than failing loudly. Naming the constraint resolves it.
+        supabase()
+          .from("client_team_members")
+          .select(
+            "user_id, added_at, consultants!client_team_members_user_id_fkey(email, display_name)",
+          )
+          .eq("client_id", clientId)
+          .order("added_at", { ascending: true }),
+        supabase()
+          .from("client_profiles")
+          .select(
+            "sectors, jurisdictions, stage, annual_budget, capabilities, beneficiaries, reviewed_at",
+          )
+          .eq("client_id", clientId)
+          .maybeSingle(),
+        supabase()
+          .from("answer_library")
+          .select("id, label, content, times_used, last_used_at")
+          .eq("client_id", clientId)
+          .order("times_used", { ascending: false })
+          .order("updated_at", { ascending: false }),
+      ]);
+
     if (clientError) {
       setError(clientError.message);
       return;
     }
-    setClient(clientRow as ClientRow | null);
-    if (clientRow?.website && !sourceUrl) setSourceUrl(clientRow.website as string);
-
-    // client_team_members has two foreign keys into consultants (user_id and
-    // added_by), so "consultants(...)" alone is ambiguous to PostgREST — it
-    // errors, and errors on a nested-select like this had no error check
-    // here to catch it, so the team looked empty rather than failing loudly.
-    // Naming the constraint resolves it.
-    const { data: teamRows, error: teamError } = await supabase()
-      .from("client_team_members")
-      .select(
-        "user_id, added_at, consultants!client_team_members_user_id_fkey(email, display_name)",
-      )
-      .eq("client_id", clientId)
-      .order("added_at", { ascending: true });
-    if (teamError) {
-      setError(teamError.message);
+    if (teamResult.error) {
+      setError(teamResult.error.message);
       return;
     }
-    setTeam((teamRows ?? []) as unknown as TeamMember[]);
 
-    const { data: profileRow } = await supabase()
-      .from("client_profiles")
-      .select(
-        "sectors, jurisdictions, stage, annual_budget, capabilities, beneficiaries, reviewed_at",
-      )
-      .eq("client_id", clientId)
-      .maybeSingle();
-    setProfile((profileRow as StoredProfile | null) ?? null);
-
-    const { data: answerRows } = await supabase()
-      .from("answer_library")
-      .select("id, label, content, times_used, last_used_at")
-      .eq("client_id", clientId)
-      .order("times_used", { ascending: false })
-      .order("updated_at", { ascending: false });
-    setAnswers((answerRows ?? []) as StoredAnswer[]);
+    setClient(clientRow as ClientRow | null);
+    if (clientRow?.website && !sourceUrl) setSourceUrl(clientRow.website as string);
+    setTeam((teamResult.data ?? []) as unknown as TeamMember[]);
+    setProfile((profileResult.data as StoredProfile | null) ?? null);
+    setAnswers((answersResult.data ?? []) as StoredAnswer[]);
   }, [clientId, sourceUrl]);
 
   useEffect(() => {
@@ -202,9 +212,6 @@ function ClientDetail() {
   async function fillFromWebsite(event?: React.FormEvent, options: { auto?: boolean } = {}) {
     event?.preventDefault();
     await run("extract", async () => {
-      const result = await runExtraction({ data: { url: sourceUrl.trim() } });
-      if (!result.ok) throw new Error(result.error);
-
       // The automatic read and a person typing into the form below it can now
       // run at the same time — that is the whole point of not making them
       // wait for each other. But the read is slow (a real fetch plus a model
@@ -215,6 +222,13 @@ function ClientDetail() {
       // "Read the page again" click should still always win — the person
       // asked for it — but the unsolicited first read never should, once
       // something else has already put a real profile in place.
+      //
+      // Checked before spending the fetch and the model call, not after —
+      // load() fetching everything in one Promise.all should already stop
+      // this effect from firing at all once a profile exists, but that made
+      // this check redundant, not wrong to keep: a second, independent guard
+      // that happens to also save the wasted call if the first one is ever
+      // defeated by some future change to load()'s timing.
       if (options.auto) {
         const { data: existing } = await supabase()
           .from("client_profiles")
@@ -223,6 +237,9 @@ function ClientDetail() {
           .maybeSingle();
         if (existing) return "Skipped the automatic read — a profile was already saved.";
       }
+
+      const result = await runExtraction({ data: { url: sourceUrl.trim() } });
+      if (!result.ok) throw new Error(result.error);
 
       const { profile: extracted, provenance } = result;
       const { error: upsertError } = await supabase()
