@@ -6,6 +6,7 @@ const full: ProfileFields = {
   jurisdictions: ["CA", "ON"],
   stage: "sme",
   annualBudget: 750_000,
+  leadTimeWeeks: 4,
   capabilities: "Three prior applied-research projects with university partners.",
   beneficiaries: "Canadian small businesses",
 };
@@ -49,11 +50,17 @@ describe("assessProfile", () => {
     );
   });
 
+  it("counts a missing lead time — every client defaults to a generic 3-week guess without it", () => {
+    const result = assessProfile({ ...full, leadTimeWeeks: null });
+    expect(result.missing.map((m) => m.key)).toContain("leadTimeWeeks");
+    expect(result.canMatch).toBe(true);
+  });
+
   it("scores an empty profile at zero", () => {
     const result = assessProfile({});
     expect(result.score).toBe(0);
     expect(result.canMatch).toBe(false);
-    expect(result.missing).toHaveLength(6);
+    expect(result.missing).toHaveLength(7);
   });
 });
 

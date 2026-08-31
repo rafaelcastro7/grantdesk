@@ -32,6 +32,7 @@ type StoredProfile = {
   capabilities: string | null;
   beneficiaries: string | null;
   reviewed_at: string | null;
+  lead_time_weeks: number | null;
 };
 
 function toFields(profile: StoredProfile | null): ProfileFields {
@@ -42,6 +43,7 @@ function toFields(profile: StoredProfile | null): ProfileFields {
     annualBudget: profile?.annual_budget ?? null,
     capabilities: profile?.capabilities ?? null,
     beneficiaries: profile?.beneficiaries ?? null,
+    leadTimeWeeks: profile?.lead_time_weeks ?? null,
   };
 }
 
@@ -89,7 +91,8 @@ function ClientDetail() {
         supabase()
           .from("client_profiles")
           .select(
-            "sectors, jurisdictions, stage, annual_budget, capabilities, beneficiaries, reviewed_at",
+            "sectors, jurisdictions, stage, annual_budget, capabilities, beneficiaries, " +
+              "reviewed_at, lead_time_weeks",
           )
           .eq("client_id", clientId)
           .maybeSingle(),
@@ -290,6 +293,7 @@ function ClientDetail() {
 
     await run("save", async () => {
       const budget = Number(text("annualBudget").replace(/[,\s$]/g, ""));
+      const leadTime = Number(text("leadTimeWeeks"));
       const { error: saveError } = await supabase()
         .from("client_profiles")
         .upsert(
@@ -303,6 +307,12 @@ function ClientDetail() {
             annual_budget: Number.isFinite(budget) && budget > 0 ? budget : null,
             capabilities: text("capabilities") || null,
             beneficiaries: text("beneficiaries") || null,
+            // Left unset rather than clamped: the column's own 0-52 check
+            // constraint is the actual bound, and clamping a typo like "520"
+            // to 52 here would silently save a number the consultant never
+            // typed rather than telling them the save failed.
+            lead_time_weeks:
+              Number.isFinite(leadTime) && leadTime > 0 && leadTime <= 52 ? leadTime : null,
             // A human just confirmed this, which is exactly what the field means.
             reviewed_at: new Date().toISOString(),
           },
@@ -428,6 +438,12 @@ function ClientDetail() {
             label="Annual budget"
             hint="Approximate, in their own currency"
             defaultValue={fields.annualBudget ? String(fields.annualBudget) : ""}
+          />
+          <EditField
+            name="leadTimeWeeks"
+            label="Lead time"
+            hint="Weeks this client usually needs to write a credible application"
+            defaultValue={fields.leadTimeWeeks ? String(fields.leadTimeWeeks) : ""}
           />
           <EditField
             name="capabilities"

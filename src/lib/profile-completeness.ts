@@ -20,6 +20,7 @@ export type ProfileFields = {
   annualBudget?: number | null;
   capabilities?: string | null;
   beneficiaries?: string | null;
+  leadTimeWeeks?: number | null;
 };
 
 export type FieldWeight = "required" | "important" | "helpful";
@@ -60,15 +61,23 @@ const FIELDS: Array<{
   {
     key: "stage",
     weight: "important",
-    points: 15,
+    points: 10,
     prompt: "Startup, SME, established nonprofit? Many programs are restricted by stage.",
   },
   {
     key: "annualBudget",
     weight: "important",
-    points: 15,
+    points: 10,
     prompt:
       "Roughly what is their annual budget? Some funders screen on size before anything else.",
+  },
+  {
+    key: "leadTimeWeeks",
+    weight: "important",
+    points: 10,
+    prompt:
+      "How many weeks does this client usually need to prepare a credible application? Until " +
+      "this is set, every call is judged against a generic 3-week guess.",
   },
   {
     key: "capabilities",

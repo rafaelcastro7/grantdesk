@@ -42,6 +42,7 @@ test("a consultant goes from a new client to a recorded submission", async ({ pa
   await page.locator('input[name="sectors"]').fill("health-wellbeing, community");
   await page.locator('input[name="stage"]').fill("nonprofit");
   await page.locator('input[name="annualBudget"]').fill("450000");
+  await page.locator('input[name="leadTimeWeeks"]').fill("3");
   await page
     .locator('input[name="capabilities"]')
     .fill("We have run a community clinic since 2011 across 6 sites.");
