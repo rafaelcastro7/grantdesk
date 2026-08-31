@@ -243,7 +243,7 @@ function applicantTypeRule(input: EligibilityInput): RuleResult {
  * awards. Saying "ineligible" here would hide real opportunities.
  */
 function scaleRule(input: EligibilityInput): RuleResult {
-  const { amountMin, currency } = input.grant;
+  const { amountMin, amountMax, currency } = input.grant;
   const budget = input.client.annualBudget;
   if (!amountMin || !budget) {
     return {
@@ -254,12 +254,46 @@ function scaleRule(input: EligibilityInput): RuleResult {
     };
   }
   const unit = currency ?? input.client.currency ?? "";
-  if (amountMin > budget * 2) {
+  const ratio = amountMin / budget;
+
+  // Two bands, not one. The predecessor's own tooling found the line between
+  // "a stretch" and "likely can't co-fund or administer this at all" sits
+  // well past double the budget — a single "> 2x" cutoff called both the same
+  // thing, which buried the more useful warning inside the more common one.
+  if (ratio > 5) {
+    return {
+      key: "scale",
+      status: "fail",
+      isHardGate: false,
+      detail:
+        `The smallest award here (${unit} ${amountMin.toLocaleString()}) is ` +
+        `${ratio.toFixed(1)}x this client's annual budget — likely beyond what it can manage or ` +
+        `co-fund, not just a stretch.`,
+    };
+  }
+  if (ratio > 2) {
     return {
       key: "scale",
       status: "fail",
       isHardGate: false,
       detail: `The smallest award here (${unit} ${amountMin.toLocaleString()}) is more than twice this client's annual budget — winnable, but a stretch.`,
+    };
+  }
+
+  // The opposite failure mode: an award small enough that the application
+  // effort may not be worth it. Judged against the ceiling, not the floor —
+  // the floor already cleared the stretch check above, so what is left to
+  // ask is whether the best case is still a small ask.
+  const ceiling = amountMax ?? amountMin;
+  if (ceiling < budget * 0.02) {
+    return {
+      key: "scale",
+      status: "pass",
+      isHardGate: false,
+      detail:
+        `Award size fits an organization of this client's scale, though the most it pays ` +
+        `(${unit} ${ceiling.toLocaleString()}) is under 2% of annual budget — weigh the ` +
+        `application effort against it.`,
     };
   }
   return {

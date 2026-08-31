@@ -6,6 +6,7 @@ import { accessToken } from "@/lib/session";
 import { useAction } from "@/lib/use-action";
 import { relevanceFrom } from "@/lib/match-explain";
 import { bandOf } from "@/lib/regions";
+import { axisBreakdown } from "@/lib/axis-breakdown";
 import { findMatches } from "@/server/match.functions";
 
 export const Route = createFileRoute("/clients_/$clientId/matches")({ component: MatchesPage });
@@ -335,6 +336,14 @@ function MatchCard({
 
   const amount = money(grant);
   const how = row.retrieval;
+  const axes = axisBreakdown(
+    row.eligibility_checks.map((c) => ({
+      key: c.rule_key,
+      status: c.status,
+      isHardGate: c.is_hard_gate,
+      detail: c.detail,
+    })),
+  );
 
   return (
     <li data-testid="match-card" className="bg-[var(--color-surface)] px-4 py-3">
@@ -375,6 +384,38 @@ function MatchCard({
       <p data-testid="why-relevant" className="mt-1 text-sm text-[var(--color-ink-soft)]">
         {relevanceFrom(row.retrieval?.terms ?? [], row.retrieval).statement}
       </p>
+
+      {/* What kind of thing is settled and what kind is still a judgment
+          call — sorted, not scored. A single number here would have to blend
+          "restricted to a country you're not in" with "this award is a bit
+          large for your budget", and there is no honest way to average a
+          fact with a guess. */}
+      {axes.length > 0 && (
+        <ul data-testid="axis-breakdown" className="mt-2 flex flex-wrap gap-2 text-xs">
+          {axes.map((axis) => (
+            <li
+              key={axis.key}
+              title={axis.reasons.join(" ")}
+              className={`rounded-full border px-2 py-0.5 ${
+                axis.status === "fail"
+                  ? "border-[var(--color-ineligible)] text-[var(--color-ineligible)]"
+                  : axis.status === "pass"
+                    ? "border-[var(--color-eligible)] text-[var(--color-eligible)]"
+                    : "border-[var(--color-rule)] text-[var(--color-ink-soft)]"
+              }`}
+            >
+              {axis.label}
+              {axis.status === "fail"
+                ? " ✗"
+                : axis.status === "pass"
+                  ? " ✓"
+                  : axis.status === "partial"
+                    ? " ~"
+                    : " ?"}
+            </li>
+          ))}
+        </ul>
+      )}
 
       {/* Only where applying is actually possible. Offering to draft against a
           call the rules just ruled out would undo the verdict one line above. */}

@@ -78,6 +78,13 @@ test("a consultant matches a client and sees why each result was ruled in or out
   await expect(why).toBeVisible();
   await expect(why).toContainText(/mentions "|No shared wording/);
 
+  // What's settled and what's a judgment call, sorted into named categories
+  // rather than blended into one number — visible without opening the
+  // per-rule disclosure below it.
+  const axes = page.getByTestId("axis-breakdown").first();
+  await expect(axes).toBeVisible();
+  await expect(axes).toContainText("Eligibility");
+
   const ruledOut = page.getByTestId("group-ineligible");
   await expect(ruledOut).toBeVisible();
   await expect(ruledOut).toContainText("Ruled out");

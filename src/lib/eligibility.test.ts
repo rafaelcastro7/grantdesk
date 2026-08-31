@@ -181,6 +181,45 @@ describe("scale", () => {
     expect(rule.status).toBe("fail");
     expect(rule.isHardGate).toBe(false);
     expect(decision.verdict).toBe("eligible");
+    // Past a certain ratio, "a stretch" undersells it — this is well past.
+    expect(rule.detail).toContain("likely beyond what it can manage");
+  });
+
+  it("calls a smaller multiple a stretch, not a likely impossibility", () => {
+    const decision = decideEligibility(
+      input({
+        grant: { amountMin: 500_000, currency: "CAD" },
+        client: { annualBudget: 200_000 },
+      }),
+    );
+    const rule = check(decision, "scale");
+    expect(rule.status).toBe("fail");
+    expect(rule.detail).toContain("stretch");
+    expect(rule.detail).not.toContain("likely beyond");
+  });
+
+  it("flags an award too small to be worth the application effort, without failing it", () => {
+    const decision = decideEligibility(
+      input({
+        grant: { amountMin: 1_000, amountMax: 3_000, currency: "CAD" },
+        client: { annualBudget: 1_000_000 },
+      }),
+    );
+    const rule = check(decision, "scale");
+    expect(rule.status).toBe("pass");
+    expect(rule.detail).toContain("under 2%");
+  });
+
+  it("says nothing is wrong for an award that is neither a stretch nor too small", () => {
+    const decision = decideEligibility(
+      input({
+        grant: { amountMin: 50_000, amountMax: 100_000, currency: "CAD" },
+        client: { annualBudget: 400_000 },
+      }),
+    );
+    const rule = check(decision, "scale");
+    expect(rule.status).toBe("pass");
+    expect(rule.detail).toBe("Award size fits an organization of this client's scale.");
   });
 });
 

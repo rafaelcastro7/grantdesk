@@ -17,9 +17,14 @@ test("the catalog states its coverage per market", async ({ page }) => {
   const list = page.getByTestId("coverage-list");
   await expect(list).toBeVisible({ timeout: 30_000 });
 
-  // Both ingesting markets are present and described.
-  await expect(list.getByText("Canada")).toBeVisible();
-  await expect(list.getByText("United States")).toBeVisible();
+  // Both ingesting markets are present and described. Exact match: a market
+  // whose own refresh has gone stale says so in a sentence naming its
+  // source ("Innovation Canada has not refreshed..."), and that sentence
+  // contains the market's own name too — a substring match against "Canada"
+  // started matching both the heading and that sentence the moment CA's own
+  // feed went stale enough to grow one.
+  await expect(list.getByText("Canada", { exact: true })).toBeVisible();
+  await expect(list.getByText("United States", { exact: true })).toBeVisible();
 
   const total = await page.getByTestId("total-grants").textContent();
   expect(Number((total ?? "0").replace(/,/g, ""))).toBeGreaterThan(0);
