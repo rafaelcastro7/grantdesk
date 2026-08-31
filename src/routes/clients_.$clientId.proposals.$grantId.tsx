@@ -77,6 +77,7 @@ function ProposalPage() {
   } | null>(null);
   const [blockers, setBlockers] = useState<Blocker[] | null>(null);
   const [awards, setAwards] = useState<PastAwardsResult | null>(null);
+  const [readText, setReadText] = useState<string | null>(null);
   const { busy, error, note, run, setError } = useAction();
   const autoRead = useRef(false);
   /** Acknowledgement writes that have not reached Postgres yet. */
@@ -182,6 +183,19 @@ function ProposalPage() {
     run("read", async () => {
       const result = await runRead({ data: { grantId, accessToken: await accessToken() } });
       if (!result.ok) throw new Error(result.error);
+
+      if (!result.found) {
+        // Real text was read; nothing structured came out of it. Shown in
+        // place of a dead end that used to just point back at the source —
+        // this is what was actually looked at, in the app.
+        setReadText(result.readText);
+        return (
+          `Read ${result.provenance.source}, but could not tell its requirements from its ` +
+          `prose. What was read is shown below — add the headings its form asks for.`
+        );
+      }
+
+      setReadText(null);
       await load();
       return `Read ${result.count} requirements from ${result.provenance.source}.`;
     });
@@ -529,11 +543,21 @@ function ProposalPage() {
         </p>
       )}
 
-      {requirements !== null && requirements.length === 0 && (
-        <p className="mt-8 text-sm text-[var(--color-ink-soft)]">
-          We could not read requirements from this call. Add the headings from the funder's form
-          below and we will draft against them.
-        </p>
+      {/* What the read actually found, shown here rather than only at the
+          source. A consultant should never have to leave the app to see
+          material this system already fetched — the link to the call's own
+          page stays above for when something in here needs double-checking,
+          but reading happens here first. */}
+      {readText && (
+        <section className="mt-8" data-testid="read-text">
+          <h2 className="text-sm font-semibold">What we read from their page</h2>
+          <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
+            No structure came out of this automatically — read it here and add the headings below.
+          </p>
+          <pre className="mt-3 max-h-96 overflow-y-auto whitespace-pre-wrap rounded-md border border-[var(--color-rule)] bg-[var(--color-paper)] p-4 text-sm">
+            {readText}
+          </pre>
+        </section>
       )}
 
       {conditions.length > 0 && (
@@ -575,15 +599,25 @@ function ProposalPage() {
         </section>
       )}
 
-      {requirements !== null && requirements.length > 0 && (
+      {/* Reachable the moment a read has been attempted, whether it found
+          anything or not — this used to require requirements.length > 0,
+          which meant the one call that adds the first section (right below)
+          could never render on a call nothing was extracted from. The
+          consultant was told "add the headings below" on a page with no
+          "below" to add them to: a dead end on exactly the calls where the
+          form matters most, which the honest Business Benefits Finder listing
+          this was found against is a real, common example of — its own URL
+          is an administrator's page, not the opportunity's, so extraction
+          has nothing to read there by design, not by failure. */}
+      {requirements !== null && (
         <section className="mt-10">
           <h2 className="text-sm font-semibold">What they asked you to write</h2>
 
           {writable.length === 0 && (
             <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
-              This call publishes its conditions but not its section list — most funders keep that
-              in the application form or a PDF. Add the headings from the form and we will draft
-              against them.
+              {conditions.length > 0
+                ? "This call publishes its conditions but not its section list — most funders keep that in the application form or a PDF. Add the headings from the form and we will draft against them."
+                : "We could not read requirements from this call's own page — read it yourself below, then add the headings its form asks for and we will draft against them."}
             </p>
           )}
 

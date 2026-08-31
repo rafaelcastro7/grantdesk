@@ -142,6 +142,13 @@ Reply with a single JSON object: {"requirements":[...]} and nothing else.`;
 export type RequirementExtraction = {
   requirements: ExtractedRequirement[];
   provenance: { source: string; title: string | null; extractedAt: string; model: string };
+  /**
+   * The plain text actually fed to the model, truncated for display. Kept so
+   * that a call with nothing structured to extract can still show what was
+   * read, in the app, rather than sending the consultant to the source page
+   * to find out for themselves what we already looked at.
+   */
+  readText: string;
 };
 
 export async function extractRequirementsFromHtml(
@@ -187,6 +194,7 @@ export async function extractRequirementsFromHtml(
 
   return {
     requirements: parseRequirements(response.text),
+    readText: body.slice(0, 4000),
     provenance: {
       source: sourceUrl,
       title: htmlTitle(html),
@@ -257,6 +265,7 @@ export async function extractRequirementsFromText(
 
   return {
     requirements: parseRequirements(response.text),
+    readText: text.slice(0, 4000),
     provenance: {
       source,
       title: title ?? null,
