@@ -114,8 +114,10 @@ describe("readRequirementsForGrant", () => {
     // describing the mechanics of applying must never come back as
     // "section", the kind the drafting pipeline writes narrative prose for.
     const processItems = (stored ?? []).filter((r) => r.kind === "process");
-    expect(processItems.length, `no process-kind requirement found: ${JSON.stringify(stored)}`)
-      .toBeGreaterThan(0);
+    expect(
+      processItems.length,
+      `no process-kind requirement found: ${JSON.stringify(stored)}`,
+    ).toBeGreaterThan(0);
     // "Application for Financial Assistance" could honestly land as
     // "attachment" (it is also literally a form to fill in) — the one kind
     // it must never be is "section", which is what sent this to the drafting

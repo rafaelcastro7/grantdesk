@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { ACCESS_TOKEN_MESSAGE, callerClient } from "./caller";
 import { readRequirementsForGrant } from "./read-requirements";
+import { assessCondition } from "./assess-condition";
 import { draftSection, NoProfileError, saveAnswer, type DraftRequirement } from "./draft";
 
 const auth = z.string().min(10, ACCESS_TOKEN_MESSAGE);
@@ -13,6 +14,70 @@ export const readRequirements = createServerFn({ method: "POST" })
       const result = await readRequirementsForGrant(callerClient(data.accessToken), data.grantId);
       return { ok: true as const, ...result };
     } catch (error) {
+      return { ok: false as const, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+
+/**
+ * Read one condition against the client's profile, once per proposal — the
+ * result is cached in requirement_assessments rather than recomputed on
+ * every visit, since the client's profile and the condition's wording do not
+ * change between page loads and a model call on every render would be pure
+ * waste charged against the same token budget drafting shares.
+ */
+export const assessRequirement = createServerFn({ method: "POST" })
+  .validator(
+    z.object({
+      clientId: z.string().uuid(),
+      proposalId: z.string().uuid(),
+      requirementId: z.string().uuid(),
+      accessToken: auth,
+    }),
+  )
+  .handler(async ({ data }) => {
+    const supabase = callerClient(data.accessToken);
+    try {
+      const { data: cached, error: cacheError } = await supabase
+        .from("requirement_assessments")
+        .select("assessment")
+        .eq("proposal_id", data.proposalId)
+        .eq("requirement_id", data.requirementId)
+        .maybeSingle();
+      if (cacheError) throw new Error(cacheError.message);
+      if (cached)
+        return { ok: true as const, assessment: (cached as { assessment: string }).assessment };
+
+      const { data: req, error: reqError } = await supabase
+        .from("requirements")
+        .select("label, detail, source_quote")
+        .eq("id", data.requirementId)
+        .maybeSingle();
+      if (reqError) throw new Error(reqError.message);
+      if (!req) throw new Error("That requirement no longer exists.");
+
+      const row = req as { label: string; detail: string | null; source_quote: string | null };
+      const result = await assessCondition(supabase, data.clientId, {
+        label: row.label,
+        detail: row.detail,
+        sourceQuote: row.source_quote,
+      });
+
+      const { error: writeError } = await supabase.from("requirement_assessments").upsert(
+        {
+          proposal_id: data.proposalId,
+          requirement_id: data.requirementId,
+          assessment: result.assessment,
+          model: result.model,
+        },
+        { onConflict: "proposal_id, requirement_id" },
+      );
+      if (writeError) throw new Error(writeError.message);
+
+      return { ok: true as const, assessment: result.assessment };
+    } catch (error) {
+      if (error instanceof NoProfileError) {
+        return { ok: false as const, error: "Add more to this client's profile first." };
+      }
       return { ok: false as const, error: error instanceof Error ? error.message : String(error) };
     }
   });

@@ -6,6 +6,7 @@ import { accessToken } from "@/lib/session";
 import { errorMessage } from "@/lib/error-message";
 import { useAction } from "@/lib/use-action";
 import {
+  assessRequirement,
   draftProposalSection,
   readRequirements,
   saveToAnswerLibrary,
@@ -60,6 +61,7 @@ function ProposalPage() {
   const runReadiness = useServerFn(checkReadiness);
   const runSubmit = useServerFn(submitProposal);
   const runPastAwards = useServerFn(getPastAwards);
+  const runAssess = useServerFn(assessRequirement);
 
   const [grant, setGrant] = useState<{
     title: string;
@@ -80,6 +82,8 @@ function ProposalPage() {
   const [blockers, setBlockers] = useState<Blocker[] | null>(null);
   const [awards, setAwards] = useState<PastAwardsResult | null>(null);
   const [readText, setReadText] = useState<string | null>(null);
+  const [assessments, setAssessments] = useState<Record<string, string>>({});
+  const assessing = useRef(new Set<string>());
   const { busy, error, note, run, setError } = useAction();
   const autoRead = useRef(false);
   /** Acknowledgement writes that have not reached Postgres yet. */
@@ -141,6 +145,19 @@ function ProposalPage() {
       new Set(((acks ?? []) as Array<{ requirement_id: string }>).map((a) => a.requirement_id)),
     );
 
+    const { data: assessed } = await supabase()
+      .from("requirement_assessments")
+      .select("requirement_id, assessment")
+      .eq("proposal_id", id);
+    setAssessments(
+      Object.fromEntries(
+        ((assessed ?? []) as Array<{ requirement_id: string; assessment: string }>).map((a) => [
+          a.requirement_id,
+          a.assessment,
+        ]),
+      ),
+    );
+
     const { data: sent } = await supabase()
       .from("submissions")
       .select("submitted_at, outcome, confirmation_number")
@@ -180,6 +197,55 @@ function ProposalPage() {
     if (requirements.length > 0) afterRead();
     else void readCall().then(afterRead);
   }, [requirements, busy]);
+
+  /**
+   * Read every critical condition against this client's profile, without
+   * being asked — the same idiom as the call itself and the awards lookup,
+   * for the same reason: re-reading a funder's "Who can apply?" paragraph
+   * against a client's own profile by hand, once per critical condition, on
+   * every call, was exactly the kind of manual work automating this was for.
+   *
+   * Kept out of the shared busy/run() machinery on purpose. Several
+   * conditions can exist on one call, each needs its own independent request,
+   * and run() only tracks one busy key at a time — the same reason
+   * acknowledging a condition does not use it either. A failure here stays
+   * silent: the funder's own quote and the checkbox are still there
+   * regardless, and a page-wide error for an optional reading aid would
+   * overstate what it is.
+   */
+  useEffect(() => {
+    if (!proposalId || requirements === null) return;
+    for (const requirement of requirements) {
+      if (
+        requirement.is_critical &&
+        (requirement.kind === "eligibility" || requirement.kind === "attachment") &&
+        !assessments[requirement.id] &&
+        !assessing.current.has(requirement.id)
+      ) {
+        void assessOne(requirement);
+      }
+    }
+  }, [proposalId, requirements, assessments]);
+
+  async function assessOne(requirement: Requirement) {
+    if (!proposalId) return;
+    assessing.current.add(requirement.id);
+    try {
+      const result = await runAssess({
+        data: {
+          clientId,
+          proposalId,
+          requirementId: requirement.id,
+          accessToken: await accessToken(),
+        },
+      });
+      if (result.ok) {
+        setAssessments((current) => ({ ...current, [requirement.id]: result.assessment }));
+      }
+    } finally {
+      assessing.current.delete(requirement.id);
+    }
+  }
 
   const readCall = () =>
     run("read", async () => {
@@ -619,6 +685,18 @@ function ProposalPage() {
                 </div>
                 {requirement.detail && (
                   <p className="mt-1 text-sm text-[var(--color-ink-soft)]">{requirement.detail}</p>
+                )}
+                {/* Read against this client's own profile, automatically — the
+                    manual re-check this replaces. Still only a reading aid:
+                    it names what matches and what the profile does not say,
+                    never a verdict, and never ticks the box below itself. */}
+                {assessments[requirement.id] && (
+                  <p
+                    data-testid="condition-assessment"
+                    className="mt-2 rounded-md bg-[var(--color-paper)] p-2 text-sm text-[var(--color-ink-soft)]"
+                  >
+                    {assessments[requirement.id]}
+                  </p>
                 )}
                 {/* Software cannot verify that audited statements exist. What it
                     can do is refuse to call the application ready until a person
