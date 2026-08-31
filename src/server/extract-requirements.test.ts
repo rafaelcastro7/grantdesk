@@ -60,6 +60,24 @@ describe("parseRequirements", () => {
     expect(requirement!.kind).toBe("section");
   });
 
+  it("accepts 'process' for how a call is actually submitted, distinct from a section", () => {
+    // The failure this guards: "How to apply" read as a section produced a
+    // drafted paragraph that just restated "contact your regional office and
+    // submit the form" in first person — there was nothing to compose about
+    // an instruction. Reclassifying it stops it from ever reaching a "Draft"
+    // button.
+    const [requirement] = parseRequirements(
+      payload([
+        {
+          label: "How to apply",
+          kind: "process",
+          sourceQuote: "Contact your nearest office to discuss your project.",
+        },
+      ]),
+    );
+    expect(requirement!.kind).toBe("process");
+  });
+
   it("collapses a heading listed twice into one requirement", () => {
     // Two sections asking the consultant the same question is worse than one.
     const parsed = parseRequirements(

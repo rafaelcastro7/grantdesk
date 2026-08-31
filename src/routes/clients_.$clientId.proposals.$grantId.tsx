@@ -22,7 +22,7 @@ type Requirement = {
   id: string;
   label: string;
   detail: string | null;
-  kind: "section" | "eligibility" | "attachment" | "criterion";
+  kind: "section" | "eligibility" | "attachment" | "criterion" | "process";
   word_limit: number | null;
   evaluation_note: string | null;
   source_quote: string | null;
@@ -65,6 +65,8 @@ function ProposalPage() {
     title: string;
     url: string;
     deadline: string | null;
+    summary: string | null;
+    eligibility_note: string | null;
   } | null>(null);
   const [proposalId, setProposalId] = useState<string | null>(null);
   const [requirements, setRequirements] = useState<Requirement[] | null>(null);
@@ -86,7 +88,7 @@ function ProposalPage() {
   const load = useCallback(async () => {
     const { data: grantRow } = await supabase()
       .from("grants")
-      .select("title, url, deadline")
+      .select("title, url, deadline, summary, eligibility_note")
       .eq("id", grantId)
       .maybeSingle();
     setGrant(grantRow as typeof grant);
@@ -436,7 +438,13 @@ function ProposalPage() {
   }
 
   const writable = (requirements ?? []).filter((r) => r.kind === "section");
-  const conditions = (requirements ?? []).filter((r) => r.kind !== "section");
+  const conditions = (requirements ?? []).filter(
+    (r) => r.kind !== "section" && r.kind !== "process",
+  );
+  // Instructions about the mechanics of submitting, not something drafted or
+  // confirmed — "how to apply" is read, not written. Kept out of both
+  // `writable` (nothing to compose) and `conditions` (nothing to check off).
+  const process = (requirements ?? []).filter((r) => r.kind === "process");
   const drafted = writable.filter((r) => sections[r.id]?.content).length;
 
   return (
@@ -462,6 +470,20 @@ function ProposalPage() {
           The call itself
         </a>
       </p>
+
+      {/* What this actually is, before anything about how to apply for it —
+          in the funder's own words, already sitting in the catalog from
+          ingestion. Reading it required opening "The call itself" until now,
+          which is exactly the kind of thing this app should never make a
+          consultant leave it to go find out. */}
+      {(grant?.summary || grant?.eligibility_note) && (
+        <div className="mt-4 max-w-prose rounded-md border border-[var(--color-rule)] bg-[var(--color-surface)] p-4">
+          {grant?.summary && <p className="text-sm">{grant.summary}</p>}
+          {grant?.eligibility_note && (
+            <p className="mt-2 text-sm text-[var(--color-ink-soft)]">{grant.eligibility_note}</p>
+          )}
+        </div>
+      )}
 
       <div className="mt-6 flex flex-wrap items-center gap-3">
         <button
@@ -557,6 +579,25 @@ function ProposalPage() {
           <pre className="mt-3 max-h-96 overflow-y-auto whitespace-pre-wrap rounded-md border border-[var(--color-rule)] bg-[var(--color-paper)] p-4 text-sm">
             {readText}
           </pre>
+        </section>
+      )}
+
+      {/* Read, not drafted. This used to be classified as a section and
+          handed to the model, which duly wrote a paragraph elaborating on a
+          one-sentence instruction — "contact your regional office and submit
+          the form" restated in first person, with nothing in it a consultant
+          couldn't already read here in ten seconds. */}
+      {process.length > 0 && (
+        <section className="mt-10" data-testid="process-steps">
+          <h2 className="text-sm font-semibold">How this call is submitted</h2>
+          <ul className="mt-3 flex flex-col gap-px overflow-hidden rounded-md border border-[var(--color-rule)] bg-[var(--color-rule)]">
+            {process.map((requirement) => (
+              <li key={requirement.id} className="bg-[var(--color-surface)] px-4 py-3">
+                <span className="text-sm font-medium">{requirement.label}</span>
+                <p className="mt-1 text-sm">{requirement.source_quote ?? requirement.detail}</p>
+              </li>
+            ))}
+          </ul>
         </section>
       )}
 

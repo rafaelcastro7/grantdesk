@@ -30,7 +30,7 @@ const ResponseSchema = z.object({
   requirements: z.array(RequirementSchema).default([]),
 });
 
-export type RequirementKind = "section" | "eligibility" | "attachment" | "criterion";
+export type RequirementKind = "section" | "eligibility" | "attachment" | "criterion" | "process";
 
 export type ExtractedRequirement = {
   label: string;
@@ -43,7 +43,13 @@ export type ExtractedRequirement = {
   sortOrder: number;
 };
 
-const KINDS = new Set<RequirementKind>(["section", "eligibility", "attachment", "criterion"]);
+const KINDS = new Set<RequirementKind>([
+  "section",
+  "eligibility",
+  "attachment",
+  "criterion",
+  "process",
+]);
 
 function text(value: unknown, max: number): string | null {
   if (typeof value !== "string") return null;
@@ -119,10 +125,17 @@ has — a requirement that is not on this page is a defect, not a helpful defaul
 For each requirement:
 - label: the funder's own heading, as short as it appears (e.g. "Project Description").
 - kind: one of
-    "section"     — narrative the applicant writes
+    "section"     — narrative the applicant writes and submits as part of the application
     "attachment"  — a document to upload (budget, financial statements, letters)
     "eligibility" — a condition the applicant must meet to apply at all
     "criterion"   — something the funder says they will score
+    "process"     — instructions about the mechanics of applying itself: who to
+                    contact, which form to fill in, where or how to submit it,
+                    what happens after submission. Never "section" — there is
+                    nothing to compose about "contact your regional office and
+                    submit the form", and writing a paragraph elaborating on it
+                    invents persuasive content around an instruction, not an
+                    answer to anything the funder asked.
 - detail: what the call says this must cover, in one or two sentences.
 - wordLimit: the stated limit if there is one, otherwise null. Do not invent one.
 - evaluationNote: how the funder says this will be assessed, if stated.
