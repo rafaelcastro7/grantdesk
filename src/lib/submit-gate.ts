@@ -73,11 +73,21 @@ export function assessSubmission(candidate: SubmitCandidate): {
         "The rules ruled this client out of this call. Submitting would waste the client's time and the funder's.",
       isHard: true,
     });
-  } else if (candidate.verdict === "needs_input" || candidate.verdict === null) {
+  } else if (candidate.verdict === "needs_input") {
     blockers.push({
       key: "unverified_eligibility",
       detail:
         "Eligibility has not been settled for this client. Run matching, or fill the profile field it is waiting on.",
+      isHard: false,
+    });
+  } else if (candidate.verdict === null) {
+    // Distinct from "needs_input": that means matching ran and found a gap in
+    // the profile. This means matching never ran at all for this pairing —
+    // reached by a direct link, not the catalog — so nobody has looked at
+    // eligibility yet, not even partially.
+    blockers.push({
+      key: "never_matched",
+      detail: "Eligibility was never checked for this client and call. Run matching first.",
       isHard: false,
     });
   }

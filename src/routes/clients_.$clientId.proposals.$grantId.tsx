@@ -492,6 +492,16 @@ function ProposalPage() {
 
   async function saveEdit(requirement: Requirement, content: string) {
     if (!proposalId) return;
+    const previous = sections[requirement.id];
+    if (previous?.content?.trim()) {
+      await supabase().from("proposal_section_revisions").insert({
+        proposal_id: proposalId,
+        requirement_id: requirement.id,
+        content: previous.content,
+        word_count: previous.word_count,
+        drafted_by: previous.drafted_by,
+      });
+    }
     const { error: saveError } = await supabase()
       .from("proposal_sections")
       .upsert(
@@ -526,144 +536,148 @@ function ProposalPage() {
   const drafted = writable.filter((r) => sections[r.id]?.content).length;
 
   return (
-    <main className="mx-auto max-w-3xl px-6 py-12">
-      <Link
-        to="/clients/$clientId/matches"
-        params={{ clientId }}
-        className="text-sm text-[var(--color-accent)]"
-      >
-        ← Matches
-      </Link>
-      <h1 className="mt-3 text-2xl font-semibold tracking-tight">
-        {grant?.title ?? "Application"}
-      </h1>
-      <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
-        {grant?.deadline ? `Closes ${grant.deadline}. ` : ""}
-        <a
-          href={grant?.url}
-          target="_blank"
-          rel="noreferrer"
-          className="text-[var(--color-accent)]"
+    <>
+      <main className="mx-auto max-w-3xl px-6 py-12 print:hidden">
+        <Link
+          to="/clients/$clientId/matches"
+          params={{ clientId }}
+          className="text-sm text-[var(--color-accent)]"
         >
-          The call itself
-        </a>
-      </p>
+          ← Matches
+        </Link>
+        <h1 className="mt-3 text-2xl font-semibold tracking-tight">
+          {grant?.title ?? "Application"}
+        </h1>
+        <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
+          {grant?.deadline ? `Closes ${grant.deadline}. ` : ""}
+          <a
+            href={grant?.url}
+            target="_blank"
+            rel="noreferrer"
+            className="text-[var(--color-accent)]"
+          >
+            The call itself
+          </a>
+        </p>
 
-      {/* What this actually is, before anything about how to apply for it —
+        {/* What this actually is, before anything about how to apply for it —
           in the funder's own words, already sitting in the catalog from
           ingestion. Reading it required opening "The call itself" until now,
           which is exactly the kind of thing this app should never make a
           consultant leave it to go find out. */}
-      {(grant?.summary || grant?.eligibility_note) && (
-        <div className="mt-4 max-w-prose rounded-md border border-[var(--color-rule)] bg-[var(--color-surface)] p-4">
-          {grant?.summary && <p className="text-sm">{grant.summary}</p>}
-          {grant?.eligibility_note && (
-            <p className="mt-2 text-sm text-[var(--color-ink-soft)]">{grant.eligibility_note}</p>
+        {(grant?.summary || grant?.eligibility_note) && (
+          <div className="mt-4 max-w-prose rounded-md border border-[var(--color-rule)] bg-[var(--color-surface)] p-4">
+            {grant?.summary && <p className="text-sm">{grant.summary}</p>}
+            {grant?.eligibility_note && (
+              <p className="mt-2 text-sm text-[var(--color-ink-soft)]">{grant.eligibility_note}</p>
+            )}
+          </div>
+        )}
+
+        <div className="mt-6 flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={readCall}
+            disabled={busy !== null}
+            data-testid="read-call"
+            className="rounded-md bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+          >
+            {busy === "read"
+              ? "Reading the call…"
+              : requirements?.length
+                ? "Re-read the call"
+                : "Read what this call requires"}
+          </button>
+          <button
+            type="button"
+            onClick={loadAwards}
+            disabled={busy !== null}
+            data-testid="past-awards"
+            className="rounded-md border border-[var(--color-rule)] px-4 py-2 text-sm font-medium disabled:opacity-50"
+          >
+            {busy === "awards" ? "Looking up…" : "Who has won this before"}
+          </button>
+          {writable.length > 0 && (
+            <span data-testid="draft-progress" className="text-sm text-[var(--color-ink-soft)]">
+              {drafted} of {writable.length} sections drafted
+            </span>
           )}
         </div>
-      )}
 
-      <div className="mt-6 flex flex-wrap items-center gap-3">
-        <button
-          type="button"
-          onClick={readCall}
-          disabled={busy !== null}
-          data-testid="read-call"
-          className="rounded-md bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-        >
-          {busy === "read"
-            ? "Reading the call…"
-            : requirements?.length
-              ? "Re-read the call"
-              : "Read what this call requires"}
-        </button>
-        <button
-          type="button"
-          onClick={loadAwards}
-          disabled={busy !== null}
-          data-testid="past-awards"
-          className="rounded-md border border-[var(--color-rule)] px-4 py-2 text-sm font-medium disabled:opacity-50"
-        >
-          {busy === "awards" ? "Looking up…" : "Who has won this before"}
-        </button>
-        {writable.length > 0 && (
-          <span data-testid="draft-progress" className="text-sm text-[var(--color-ink-soft)]">
-            {drafted} of {writable.length} sections drafted
-          </span>
-        )}
-      </div>
-
-      {/* A second, independent pass's remaining doubts about the read above —
+        {/* A second, independent pass's remaining doubts about the read above —
           not a rule this app is refusing to state, a genuine "go check this"
           from a critic that read the same pages with no memory of having
           produced the extraction it is reviewing. Shown plainly rather than
           resolved automatically: a third round chasing one concern on the
           same two pages would rarely find more than a person can in ten
           seconds by looking. */}
-      {concerns.length > 0 && (
-        <section className="mt-6" data-testid="extraction-concerns">
-          <h2 className="text-sm font-semibold text-[var(--color-needs-input)]">
-            Worth double-checking
-          </h2>
-          <ul className="mt-2 flex flex-col gap-1 text-sm text-[var(--color-ink-soft)]">
-            {concerns.map((concern, index) => (
-              <li key={index}>• {concern}</li>
-            ))}
-          </ul>
-        </section>
-      )}
+        {concerns.length > 0 && (
+          <section className="mt-6" data-testid="extraction-concerns">
+            <h2 className="text-sm font-semibold text-[var(--color-needs-input)]">
+              Worth double-checking
+            </h2>
+            <ul className="mt-2 flex flex-col gap-1 text-sm text-[var(--color-ink-soft)]">
+              {concerns.map((concern, index) => (
+                <li key={index}>• {concern}</li>
+              ))}
+            </ul>
+          </section>
+        )}
 
-      {/* The first question a consultant asks about a call: does this funder
+        {/* The first question a consultant asks about a call: does this funder
           give to organizations like mine, or to hospitals and universities? */}
-      {awards && (
-        <section className="mt-6" data-testid="awards-panel">
-          {awards.known ? (
-            awards.awards.length > 0 ? (
-              <>
+        {awards && (
+          <section className="mt-6" data-testid="awards-panel">
+            {awards.known ? (
+              awards.awards.length > 0 ? (
+                <>
+                  <p className="text-sm text-[var(--color-ink-soft)]">
+                    Largest recent awards under assistance listing {awards.listing}:
+                  </p>
+                  <ul className="mt-2 flex flex-col gap-px overflow-hidden rounded-md border border-[var(--color-rule)] bg-[var(--color-rule)]">
+                    {awards.awards.slice(0, 8).map((award) => (
+                      <li
+                        key={award.externalId}
+                        className="flex items-baseline justify-between gap-3 bg-[var(--color-surface)] px-4 py-2 text-sm"
+                      >
+                        <span>
+                          {award.recipientName}
+                          {award.location && (
+                            <span className="text-[var(--color-ink-soft)]">
+                              {" "}
+                              · {award.location}
+                            </span>
+                          )}
+                        </span>
+                        <span className="shrink-0 font-mono text-xs tabular-nums text-[var(--color-ink-soft)]">
+                          {award.amount ? `$${Math.round(award.amount).toLocaleString()}` : "—"}
+                          {award.awardedOn && ` · ${award.awardedOn.slice(0, 4)}`}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              ) : (
                 <p className="text-sm text-[var(--color-ink-soft)]">
-                  Largest recent awards under assistance listing {awards.listing}:
+                  No awards are published under listing {awards.listing} yet.
                 </p>
-                <ul className="mt-2 flex flex-col gap-px overflow-hidden rounded-md border border-[var(--color-rule)] bg-[var(--color-rule)]">
-                  {awards.awards.slice(0, 8).map((award) => (
-                    <li
-                      key={award.externalId}
-                      className="flex items-baseline justify-between gap-3 bg-[var(--color-surface)] px-4 py-2 text-sm"
-                    >
-                      <span>
-                        {award.recipientName}
-                        {award.location && (
-                          <span className="text-[var(--color-ink-soft)]"> · {award.location}</span>
-                        )}
-                      </span>
-                      <span className="shrink-0 font-mono text-xs tabular-nums text-[var(--color-ink-soft)]">
-                        {award.amount ? `$${Math.round(award.amount).toLocaleString()}` : "—"}
-                        {award.awardedOn && ` · ${award.awardedOn.slice(0, 4)}`}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              </>
+              )
             ) : (
-              <p className="text-sm text-[var(--color-ink-soft)]">
-                No awards are published under listing {awards.listing} yet.
-              </p>
-            )
-          ) : (
-            // Not an empty list: "nobody has ever won this" is a much stronger
-            // claim than "we cannot see it", and only one of them is true.
-            <p className="text-sm text-[var(--color-ink-soft)]">{awards.reason}</p>
-          )}
-        </section>
-      )}
+              // Not an empty list: "nobody has ever won this" is a much stronger
+              // claim than "we cannot see it", and only one of them is true.
+              <p className="text-sm text-[var(--color-ink-soft)]">{awards.reason}</p>
+            )}
+          </section>
+        )}
 
-      {note && <p className="mt-3 text-sm text-[var(--color-ink-soft)]">{note}</p>}
-      {error && (
-        <p role="alert" className="mt-3 text-sm text-[var(--color-ineligible)]">
-          {error}
-        </p>
-      )}
+        {note && <p className="mt-3 text-sm text-[var(--color-ink-soft)]">{note}</p>}
+        {error && (
+          <p role="alert" className="mt-3 text-sm text-[var(--color-ineligible)]">
+            {error}
+          </p>
+        )}
 
-      {/* What the read actually found, shown here rather than only at the
+        {/* What the read actually found, shown here rather than only at the
           source. A consultant should never have to leave the app to see
           material this system already fetched — the link to the call's own
           page stays above for when something in here needs double-checking,
@@ -673,91 +687,93 @@ function ProposalPage() {
           publish a section list at all (most keep that in the application
           form or a PDF), which used to leave "Add a section" a blind guess
           even though the raw text was already sitting in readText. */}
-      {readText && writable.length === 0 && (
-        <section className="mt-8" data-testid="read-text">
-          <h2 className="text-sm font-semibold">What we read from their page</h2>
-          <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
-            {requirements !== null && requirements.length > 0
-              ? "No section list came out of this automatically — read it here and add the headings below."
-              : "No structure came out of this automatically — read it here and add the headings below."}
-          </p>
-          <pre className="mt-3 max-h-96 overflow-y-auto whitespace-pre-wrap rounded-md border border-[var(--color-rule)] bg-[var(--color-paper)] p-4 text-sm">
-            {readText}
-          </pre>
-        </section>
-      )}
+        {readText && writable.length === 0 && (
+          <section className="mt-8" data-testid="read-text">
+            <h2 className="text-sm font-semibold">What we read from their page</h2>
+            <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
+              {requirements !== null && requirements.length > 0
+                ? "No section list came out of this automatically — read it here and add the headings below."
+                : "No structure came out of this automatically — read it here and add the headings below."}
+            </p>
+            <pre className="mt-3 max-h-96 overflow-y-auto whitespace-pre-wrap rounded-md border border-[var(--color-rule)] bg-[var(--color-paper)] p-4 text-sm">
+              {readText}
+            </pre>
+          </section>
+        )}
 
-      {/* Read, not drafted. This used to be classified as a section and
+        {/* Read, not drafted. This used to be classified as a section and
           handed to the model, which duly wrote a paragraph elaborating on a
           one-sentence instruction — "contact your regional office and submit
           the form" restated in first person, with nothing in it a consultant
           couldn't already read here in ten seconds. */}
-      {process.length > 0 && (
-        <section className="mt-10" data-testid="process-steps">
-          <h2 className="text-sm font-semibold">How this call is submitted</h2>
-          <ul className="mt-3 flex flex-col gap-px overflow-hidden rounded-md border border-[var(--color-rule)] bg-[var(--color-rule)]">
-            {process.map((requirement) => (
-              <li key={requirement.id} className="bg-[var(--color-surface)] px-4 py-3">
-                <span className="text-sm font-medium">{requirement.label}</span>
-                <p className="mt-1 text-sm">{requirement.source_quote ?? requirement.detail}</p>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-
-      {conditions.length > 0 && (
-        <section className="mt-10" data-testid="conditions">
-          <h2 className="text-sm font-semibold">Before you write</h2>
-          <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
-            Conditions and attachments the call names. Nothing here is drafted — these are things
-            only you can produce.
-          </p>
-          <ul className="mt-3 flex flex-col gap-px overflow-hidden rounded-md border border-[var(--color-rule)] bg-[var(--color-rule)]">
-            {conditions.map((requirement) => (
-              <li key={requirement.id} className="bg-[var(--color-surface)] px-4 py-3">
-                <div className="flex items-baseline justify-between gap-3">
+        {process.length > 0 && (
+          <section className="mt-10" data-testid="process-steps">
+            <h2 className="text-sm font-semibold">How this call is submitted</h2>
+            <ul className="mt-3 flex flex-col gap-px overflow-hidden rounded-md border border-[var(--color-rule)] bg-[var(--color-rule)]">
+              {process.map((requirement) => (
+                <li key={requirement.id} className="bg-[var(--color-surface)] px-4 py-3">
                   <span className="text-sm font-medium">{requirement.label}</span>
-                  <span className="shrink-0 text-xs uppercase tracking-wide text-[var(--color-ink-soft)]">
-                    {requirement.is_critical ? "required" : requirement.kind}
-                  </span>
-                </div>
-                {requirement.detail && (
-                  <p className="mt-1 text-sm text-[var(--color-ink-soft)]">{requirement.detail}</p>
-                )}
-                {/* Read against this client's own profile, automatically — the
+                  <p className="mt-1 text-sm">{requirement.source_quote ?? requirement.detail}</p>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+
+        {conditions.length > 0 && (
+          <section className="mt-10" data-testid="conditions">
+            <h2 className="text-sm font-semibold">Before you write</h2>
+            <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
+              Conditions and attachments the call names. Nothing here is drafted — these are things
+              only you can produce.
+            </p>
+            <ul className="mt-3 flex flex-col gap-px overflow-hidden rounded-md border border-[var(--color-rule)] bg-[var(--color-rule)]">
+              {conditions.map((requirement) => (
+                <li key={requirement.id} className="bg-[var(--color-surface)] px-4 py-3">
+                  <div className="flex items-baseline justify-between gap-3">
+                    <span className="text-sm font-medium">{requirement.label}</span>
+                    <span className="shrink-0 text-xs uppercase tracking-wide text-[var(--color-ink-soft)]">
+                      {requirement.is_critical ? "required" : requirement.kind}
+                    </span>
+                  </div>
+                  {requirement.detail && (
+                    <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
+                      {requirement.detail}
+                    </p>
+                  )}
+                  {/* Read against this client's own profile, automatically — the
                     manual re-check this replaces. Still only a reading aid:
                     it names what matches and what the profile does not say,
                     never a verdict, and never ticks the box below itself. */}
-                {assessments[requirement.id] && (
-                  <p
-                    data-testid="condition-assessment"
-                    className="mt-2 rounded-md bg-[var(--color-paper)] p-2 text-sm text-[var(--color-ink-soft)]"
-                  >
-                    {assessments[requirement.id]}
-                  </p>
-                )}
-                {/* Software cannot verify that audited statements exist. What it
+                  {assessments[requirement.id] && (
+                    <p
+                      data-testid="condition-assessment"
+                      className="mt-2 rounded-md bg-[var(--color-paper)] p-2 text-sm text-[var(--color-ink-soft)]"
+                    >
+                      {assessments[requirement.id]}
+                    </p>
+                  )}
+                  {/* Software cannot verify that audited statements exist. What it
                     can do is refuse to call the application ready until a person
                     says they have them — and record who said so. */}
-                {requirement.is_critical && (
-                  <label className="mt-2 flex items-center gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={acknowledged.has(requirement.id)}
-                      onChange={(event) => acknowledge(requirement, event.target.checked)}
-                      disabled={!!submission}
-                    />
-                    I have this
-                  </label>
-                )}
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
+                  {requirement.is_critical && (
+                    <label className="mt-2 flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={acknowledged.has(requirement.id)}
+                        onChange={(event) => acknowledge(requirement, event.target.checked)}
+                        disabled={!!submission}
+                      />
+                      I have this
+                    </label>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
 
-      {/* Reachable the moment a read has been attempted, whether it found
+        {/* Reachable the moment a read has been attempted, whether it found
           anything or not — this used to require requirements.length > 0,
           which meant the one call that adds the first section (right below)
           could never render on a call nothing was extracted from. The
@@ -767,209 +783,252 @@ function ProposalPage() {
           this was found against is a real, common example of — its own URL
           is an administrator's page, not the opportunity's, so extraction
           has nothing to read there by design, not by failure. */}
-      {requirements !== null && (
-        <section className="mt-10">
-          <h2 className="text-sm font-semibold">What they asked you to write</h2>
+        {requirements !== null && (
+          <section className="mt-10">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-sm font-semibold">What they asked you to write</h2>
+              {drafted > 0 && (
+                <button
+                  type="button"
+                  onClick={() => window.print()}
+                  data-testid="export-print"
+                  className="rounded-md border border-[var(--color-rule)] px-3 py-1.5 text-xs font-medium"
+                >
+                  Export as document
+                </button>
+              )}
+            </div>
 
-          {writable.length === 0 && (
-            <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
-              {conditions.length > 0
-                ? "This call publishes its conditions but not its section list — most funders keep that in the application form or a PDF. Add the headings from the form and we will draft against them."
-                : "We could not read requirements from this call's own page — read it yourself below, then add the headings its form asks for and we will draft against them."}
-            </p>
-          )}
+            {writable.length === 0 && (
+              <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
+                {conditions.length > 0
+                  ? "This call publishes its conditions but not its section list — most funders keep that in the application form or a PDF. Add the headings from the form and we will draft against them."
+                  : "We could not read requirements from this call's own page — read it yourself below, then add the headings its form asks for and we will draft against them."}
+              </p>
+            )}
 
-          <ul className="mt-3 flex flex-col gap-4">
-            {writable.map((requirement) => (
-              <SectionCard
-                key={requirement.id}
-                requirement={requirement}
-                section={sections[requirement.id]}
-                busy={busy === requirement.id}
-                disabled={busy !== null}
-                onDraft={() => draft(requirement)}
-                onSave={(content) => saveEdit(requirement, content)}
-                onKeep={(content) => keepAnswer(requirement, content)}
-              />
-            ))}
-          </ul>
+            <ul className="mt-3 flex flex-col gap-4">
+              {writable.map((requirement) => (
+                <SectionCard
+                  key={requirement.id}
+                  proposalId={proposalId!}
+                  requirement={requirement}
+                  section={sections[requirement.id]}
+                  busy={busy === requirement.id}
+                  disabled={busy !== null}
+                  onDraft={() => draft(requirement)}
+                  onSave={(content) => saveEdit(requirement, content)}
+                  onKeep={(content) => keepAnswer(requirement, content)}
+                />
+              ))}
+            </ul>
 
-          {/* The escape hatch that makes this usable on real calls. Extraction
+            {/* The escape hatch that makes this usable on real calls. Extraction
               reads what the funder published on the web; the section list often
               lives in the form itself, and without this the consultant is stuck
               looking at a correct but useless page. */}
-          <form onSubmit={addSection} className="mt-4 flex flex-wrap items-end gap-2">
-            <div className="min-w-64 flex-1">
-              <label
-                htmlFor="new-section"
-                className="text-xs uppercase tracking-wide text-[var(--color-ink-soft)]"
-              >
-                Add a section from their form
-              </label>
+            <form onSubmit={addSection} className="mt-4 flex flex-wrap items-end gap-2">
+              <div className="min-w-64 flex-1">
+                <label
+                  htmlFor="new-section"
+                  className="text-xs uppercase tracking-wide text-[var(--color-ink-soft)]"
+                >
+                  Add a section from their form
+                </label>
+                <input
+                  id="new-section"
+                  name="label"
+                  required
+                  placeholder="Project Description"
+                  className="mt-1 w-full rounded-md border border-[var(--color-rule)] bg-[var(--color-paper)] px-3 py-2 text-sm"
+                />
+              </div>
               <input
-                id="new-section"
-                name="label"
-                required
-                placeholder="Project Description"
-                className="mt-1 w-full rounded-md border border-[var(--color-rule)] bg-[var(--color-paper)] px-3 py-2 text-sm"
+                name="wordLimit"
+                inputMode="numeric"
+                placeholder="Word limit"
+                aria-label="Word limit"
+                className="w-32 rounded-md border border-[var(--color-rule)] bg-[var(--color-paper)] px-3 py-2 text-sm"
               />
-            </div>
-            <input
-              name="wordLimit"
-              inputMode="numeric"
-              placeholder="Word limit"
-              aria-label="Word limit"
-              className="w-32 rounded-md border border-[var(--color-rule)] bg-[var(--color-paper)] px-3 py-2 text-sm"
-            />
-            <button
-              type="submit"
-              disabled={busy !== null}
-              data-testid="add-section"
-              className="rounded-md border border-[var(--color-rule)] px-3 py-2 text-sm font-medium disabled:opacity-50"
-            >
-              Add section
-            </button>
-          </form>
-        </section>
-      )}
+              <button
+                type="submit"
+                disabled={busy !== null}
+                data-testid="add-section"
+                className="rounded-md border border-[var(--color-rule)] px-3 py-2 text-sm font-medium disabled:opacity-50"
+              >
+                Add section
+              </button>
+            </form>
+          </section>
+        )}
 
-      {requirements !== null && requirements.length > 0 && (
-        <section className="mt-12 border-t border-[var(--color-rule)] pt-8" data-testid="send">
-          <h2 className="text-sm font-semibold">Ready to send?</h2>
+        {requirements !== null && requirements.length > 0 && (
+          <section className="mt-12 border-t border-[var(--color-rule)] pt-8" data-testid="send">
+            <h2 className="text-sm font-semibold">Ready to send?</h2>
 
-          {submission ? (
-            <>
-              <p data-testid="submitted" className="mt-2 text-sm">
-                <span className="font-medium text-[var(--color-eligible)]">Submitted</span>{" "}
-                {new Date(submission.submitted_at).toLocaleDateString()} · {submission.outcome}
-                {submission.confirmation_number && ` · ref ${submission.confirmation_number}`}
-              </p>
+            {submission ? (
+              <>
+                <p data-testid="submitted" className="mt-2 text-sm">
+                  <span className="font-medium text-[var(--color-eligible)]">Submitted</span>{" "}
+                  {new Date(submission.submitted_at).toLocaleDateString()} · {submission.outcome}
+                  {submission.confirmation_number && ` · ref ${submission.confirmation_number}`}
+                </p>
 
-              {/* The other half of "submit and track". Without this, outcome had
+                {/* The other half of "submit and track". Without this, outcome had
                   four states and exactly one reachable: the product claimed to
                   track what happened and could only ever say "awaiting". A
                   consultant updates this months later, between other work,
                   which is why it is two fields rather than a workflow. */}
-              <form
-                onSubmit={updateOutcome}
-                data-testid="outcome-form"
-                className="mt-4 flex flex-wrap items-end gap-2"
-              >
-                <div>
-                  <label
-                    htmlFor="outcome"
-                    className="text-xs uppercase tracking-wide text-[var(--color-ink-soft)]"
-                  >
-                    What happened
-                  </label>
-                  <select
-                    id="outcome"
-                    name="outcome"
-                    key={submission.outcome ?? "awaiting"}
-                    defaultValue={submission.outcome ?? "awaiting"}
-                    className="mt-1 block rounded-md border border-[var(--color-rule)] bg-[var(--color-paper)] px-3 py-2 text-sm"
-                  >
-                    <option value="awaiting">Awaiting a decision</option>
-                    <option value="awarded">Awarded</option>
-                    <option value="declined">Declined</option>
-                    <option value="withdrawn">Withdrawn</option>
-                  </select>
-                </div>
-                <div className="min-w-48 flex-1">
-                  <label
-                    htmlFor="confirmation"
-                    className="text-xs uppercase tracking-wide text-[var(--color-ink-soft)]"
-                  >
-                    Their reference number
-                  </label>
-                  <input
-                    id="confirmation"
-                    name="confirmationNumber"
-                    key={submission.confirmation_number ?? ""}
-                    defaultValue={submission.confirmation_number ?? ""}
-                    placeholder="From their acknowledgement email"
-                    className="mt-1 w-full rounded-md border border-[var(--color-rule)] bg-[var(--color-paper)] px-3 py-2 text-sm"
-                  />
-                </div>
-                <button
-                  type="submit"
-                  disabled={busy !== null}
-                  data-testid="save-outcome"
-                  className="rounded-md border border-[var(--color-rule)] px-3 py-2 text-sm font-medium disabled:opacity-50"
+                <form
+                  onSubmit={updateOutcome}
+                  data-testid="outcome-form"
+                  className="mt-4 flex flex-wrap items-end gap-2"
                 >
-                  {busy === "outcome" ? "Saving…" : "Save"}
-                </button>
-              </form>
-            </>
-          ) : (
-            <>
-              <p className="mt-1 max-w-prose text-sm text-[var(--color-ink-soft)]">
-                Every check below is decided from what is in the application, not from an opinion
-                about it. The last one is you.
-              </p>
+                  <div>
+                    <label
+                      htmlFor="outcome"
+                      className="text-xs uppercase tracking-wide text-[var(--color-ink-soft)]"
+                    >
+                      What happened
+                    </label>
+                    <select
+                      id="outcome"
+                      name="outcome"
+                      key={submission.outcome ?? "awaiting"}
+                      defaultValue={submission.outcome ?? "awaiting"}
+                      className="mt-1 block rounded-md border border-[var(--color-rule)] bg-[var(--color-paper)] px-3 py-2 text-sm"
+                    >
+                      <option value="awaiting">Awaiting a decision</option>
+                      <option value="awarded">Awarded</option>
+                      <option value="declined">Declined</option>
+                      <option value="withdrawn">Withdrawn</option>
+                    </select>
+                  </div>
+                  <div className="min-w-48 flex-1">
+                    <label
+                      htmlFor="confirmation"
+                      className="text-xs uppercase tracking-wide text-[var(--color-ink-soft)]"
+                    >
+                      Their reference number
+                    </label>
+                    <input
+                      id="confirmation"
+                      name="confirmationNumber"
+                      key={submission.confirmation_number ?? ""}
+                      defaultValue={submission.confirmation_number ?? ""}
+                      placeholder="From their acknowledgement email"
+                      className="mt-1 w-full rounded-md border border-[var(--color-rule)] bg-[var(--color-paper)] px-3 py-2 text-sm"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={busy !== null}
+                    data-testid="save-outcome"
+                    className="rounded-md border border-[var(--color-rule)] px-3 py-2 text-sm font-medium disabled:opacity-50"
+                  >
+                    {busy === "outcome" ? "Saving…" : "Save"}
+                  </button>
+                </form>
+              </>
+            ) : (
+              <>
+                <p className="mt-1 max-w-prose text-sm text-[var(--color-ink-soft)]">
+                  Every check below is decided from what is in the application, not from an opinion
+                  about it. The last one is you.
+                </p>
 
-              <div className="mt-4 flex flex-wrap items-center gap-3">
-                <button
-                  type="button"
-                  onClick={refreshReadiness}
-                  disabled={busy !== null}
-                  data-testid="check-readiness"
-                  className="rounded-md border border-[var(--color-rule)] px-4 py-2 text-sm font-medium disabled:opacity-50"
-                >
-                  {busy === "readiness" ? "Checking…" : "Check what is left"}
-                </button>
-
-                {blockers !== null && (
+                <div className="mt-4 flex flex-wrap items-center gap-3">
                   <button
                     type="button"
-                    onClick={() => send(blockers.some((b) => b.key !== "not_reviewed"))}
-                    disabled={
-                      busy !== null || blockers.some((b) => b.isHard && b.key !== "not_reviewed")
-                    }
-                    data-testid="submit-proposal"
-                    className="rounded-md bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+                    onClick={refreshReadiness}
+                    disabled={busy !== null}
+                    data-testid="check-readiness"
+                    className="rounded-md border border-[var(--color-rule)] px-4 py-2 text-sm font-medium disabled:opacity-50"
                   >
-                    {busy === "submit"
-                      ? "Recording…"
-                      : blockers.some((b) => b.key !== "not_reviewed")
-                        ? "I have read it — submit anyway"
-                        : "I have read it — record as submitted"}
+                    {busy === "readiness" ? "Checking…" : "Check what is left"}
                   </button>
-                )}
-              </div>
 
-              {blockers !== null && (
-                <ul data-testid="blockers" className="mt-4 flex flex-col gap-2">
-                  {blockers.length === 0 && (
-                    <li className="text-sm text-[var(--color-eligible)]">
-                      Nothing is outstanding. Confirming above records the submission.
-                    </li>
+                  {blockers !== null && (
+                    <button
+                      type="button"
+                      onClick={() => send(blockers.some((b) => b.key !== "not_reviewed"))}
+                      disabled={
+                        busy !== null || blockers.some((b) => b.isHard && b.key !== "not_reviewed")
+                      }
+                      data-testid="submit-proposal"
+                      className="rounded-md bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+                    >
+                      {busy === "submit"
+                        ? "Recording…"
+                        : blockers.some((b) => b.key !== "not_reviewed")
+                          ? "I have read it — submit anyway"
+                          : "I have read it — record as submitted"}
+                    </button>
                   )}
-                  {blockers.map((blocker) => (
-                    <li key={blocker.key} className="flex gap-2 text-sm">
-                      <span
-                        className={
-                          blocker.isHard
-                            ? "text-[var(--color-ineligible)]"
-                            : "text-[var(--color-needs-input)]"
-                        }
-                      >
-                        {blocker.isHard ? "✗" : "!"}
-                      </span>
-                      <span>{blocker.detail}</span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </>
-          )}
-        </section>
-      )}
-    </main>
+                </div>
+
+                {blockers !== null && (
+                  <ul data-testid="blockers" className="mt-4 flex flex-col gap-2">
+                    {blockers.length === 0 && (
+                      <li className="text-sm text-[var(--color-eligible)]">
+                        Nothing is outstanding. Confirming above records the submission.
+                      </li>
+                    )}
+                    {blockers.map((blocker) => (
+                      <li key={blocker.key} className="flex gap-2 text-sm">
+                        <span
+                          className={
+                            blocker.isHard
+                              ? "text-[var(--color-ineligible)]"
+                              : "text-[var(--color-needs-input)]"
+                          }
+                        >
+                          {blocker.isHard ? "✗" : "!"}
+                        </span>
+                        <span>{blocker.detail}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </>
+            )}
+          </section>
+        )}
+      </main>
+
+      {/* Print-only: assembled as a plain document rather than mirroring the
+        editing UI — buttons, badges and "double-check" warnings mean nothing
+        on a page headed for a funder's portal. window.print() on the export
+        button above is the trigger; @media print in index.css hides
+        everything but this block. */}
+      <div className="hidden print:block print:px-0 print:py-0">
+        <h1 className="text-xl font-semibold">{grant?.title ?? "Application"}</h1>
+        <p className="mt-1 text-sm">{grant?.deadline ? `Closes ${grant.deadline}` : ""}</p>
+        {writable.map((requirement) => {
+          const section = sections[requirement.id];
+          if (!section?.content?.trim()) return null;
+          return (
+            <section key={requirement.id} className="mt-6 break-inside-avoid">
+              <h2 className="text-base font-semibold">{requirement.label}</h2>
+              <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed">{section.content}</p>
+            </section>
+          );
+        })}
+      </div>
+    </>
   );
 }
 
+type Revision = {
+  id: string;
+  content: string;
+  word_count: number | null;
+  drafted_by: string | null;
+  created_at: string;
+};
+
 function SectionCard({
+  proposalId,
   requirement,
   section,
   busy,
@@ -978,6 +1037,7 @@ function SectionCard({
   onSave,
   onKeep,
 }: {
+  proposalId: string;
   requirement: Requirement;
   section: Section | undefined;
   busy: boolean;
@@ -988,6 +1048,32 @@ function SectionCard({
 }) {
   const [text, setText] = useState(section?.content ?? "");
   const [dirty, setDirty] = useState(false);
+  const [revisions, setRevisions] = useState<Revision[] | null>(null);
+  const [showHistory, setShowHistory] = useState(false);
+
+  async function toggleHistory() {
+    if (showHistory) {
+      setShowHistory(false);
+      return;
+    }
+    if (revisions === null) {
+      const { data } = await supabase()
+        .from("proposal_section_revisions")
+        .select("id, content, word_count, drafted_by, created_at")
+        .eq("proposal_id", proposalId)
+        .eq("requirement_id", requirement.id)
+        .order("created_at", { ascending: false })
+        .limit(10);
+      setRevisions((data as Revision[] | null) ?? []);
+    }
+    setShowHistory(true);
+  }
+
+  function restore(revision: Revision) {
+    setText(revision.content);
+    setDirty(true);
+    setShowHistory(false);
+  }
 
   useEffect(() => {
     if (!dirty) setText(section?.content ?? "");
@@ -1088,6 +1174,15 @@ function SectionCard({
             Keep for next time
           </button>
         )}
+        {section?.content && (
+          <button
+            type="button"
+            onClick={toggleHistory}
+            className="rounded-md border border-[var(--color-rule)] px-3 py-1.5 text-xs"
+          >
+            {showHistory ? "Hide history" : "History"}
+          </button>
+        )}
         {section?.drafted_by && (
           <span className="text-xs text-[var(--color-ink-soft)]">
             Drafted by {section.drafted_by}
@@ -1131,6 +1226,48 @@ function SectionCard({
               </li>
             ))}
           </ul>
+        </div>
+      )}
+
+      {showHistory && (
+        <div
+          data-testid="section-history"
+          className="mt-3 rounded-md border border-[var(--color-rule)] p-3"
+        >
+          {revisions === null ? (
+            <p className="text-sm text-[var(--color-ink-soft)]">Loading…</p>
+          ) : revisions.length === 0 ? (
+            <p className="text-sm text-[var(--color-ink-soft)]">
+              No earlier version — this is the only one.
+            </p>
+          ) : (
+            <ul className="flex flex-col gap-2">
+              {revisions.map((revision) => (
+                <li
+                  key={revision.id}
+                  className="flex items-start justify-between gap-3 border-t border-[var(--color-rule)] pt-2 first:border-t-0 first:pt-0"
+                >
+                  <div className="min-w-0">
+                    <p className="text-xs text-[var(--color-ink-soft)]">
+                      {new Date(revision.created_at).toLocaleString()}
+                      {revision.word_count ? ` · ${revision.word_count} words` : ""}
+                      {revision.drafted_by ? ` · ${revision.drafted_by}` : " · edited by hand"}
+                    </p>
+                    <p className="mt-1 truncate text-sm text-[var(--color-ink-soft)]">
+                      {revision.content}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => restore(revision)}
+                    className="shrink-0 rounded-md border border-[var(--color-rule)] px-2 py-1 text-xs"
+                  >
+                    Restore
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
     </li>

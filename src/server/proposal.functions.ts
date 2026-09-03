@@ -144,6 +144,25 @@ export const draftProposalSection = createServerFn({ method: "POST" })
 
       const result = await draftSection(supabase, data.clientId, target);
 
+      // Captured before the overwrite below, so a re-draft that turns out
+      // worse than the last one is a click to go back to, not a rewrite from
+      // scratch.
+      const { data: previous } = await supabase
+        .from("proposal_sections")
+        .select("content, word_count, drafted_by")
+        .eq("proposal_id", data.proposalId)
+        .eq("requirement_id", data.requirementId)
+        .maybeSingle();
+      if (previous?.content?.trim()) {
+        await supabase.from("proposal_section_revisions").insert({
+          proposal_id: data.proposalId,
+          requirement_id: data.requirementId,
+          content: previous.content,
+          word_count: previous.word_count,
+          drafted_by: previous.drafted_by,
+        });
+      }
+
       const { error: writeError } = await supabase.from("proposal_sections").upsert(
         {
           proposal_id: data.proposalId,

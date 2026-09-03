@@ -154,6 +154,20 @@ describe("soft blockers", () => {
     expect(result.canOverride).toBe(true);
   });
 
+  it("says matching never ran, not that it ran and found a gap", () => {
+    // A grant reached by direct link, never sent through matching, is a
+    // different fact than one matching genuinely could not settle — the
+    // first means "nobody has looked", the second means "the profile is
+    // missing something specific". Collapsing them into one message told a
+    // consultant to "fill the profile field it is waiting on" when no field
+    // had ever been identified as missing.
+    const never = assessSubmission(candidate({ verdict: null }));
+    expect(never.blockers.map((b) => b.key)).toContain("never_matched");
+
+    const needsInput = assessSubmission(candidate({ verdict: "needs_input" }));
+    expect(needsInput.blockers.map((b) => b.key)).toContain("unverified_eligibility");
+  });
+
   it("states an over-limit section without enforcing it", () => {
     // Some funders truncate and some reject; we cannot know which, so we say
     // it rather than decide it.
