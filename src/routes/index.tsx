@@ -128,6 +128,27 @@ function Home() {
       {sent.length > 0 && (
         <section className="mt-10" data-testid="sent-list">
           <h2 className="text-sm font-semibold">Sent</h2>
+          {/* A win rate over "everything ever sent" answers a different
+              question than a consultant actually asks — "awaiting" is not
+              yet a result, and folding it in permanently understates a
+              track record right after a busy month of submissions. Counted
+              only over outcomes that have actually landed. */}
+          {(() => {
+            const decided = sent.filter(
+              (r) =>
+                r.submissions[0]?.outcome === "awarded" || r.submissions[0]?.outcome === "declined",
+            );
+            const awarded = decided.filter((r) => r.submissions[0]?.outcome === "awarded").length;
+            const awaiting = sent.filter((r) => r.submissions[0]?.outcome === "awaiting").length;
+            if (decided.length === 0) return null;
+            return (
+              <p data-testid="win-rate" className="mt-1 text-sm text-[var(--color-ink-soft)]">
+                {awarded} of {decided.length} decided applications awarded (
+                {Math.round((awarded / decided.length) * 100)}%)
+                {awaiting > 0 ? ` · ${awaiting} still awaiting` : ""}.
+              </p>
+            );
+          })()}
           <ul className="mt-3 flex flex-col gap-px overflow-hidden rounded-md border border-[var(--color-rule)] bg-[var(--color-rule)]">
             {sent.map((row) => (
               <li
