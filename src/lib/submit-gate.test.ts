@@ -168,6 +168,24 @@ describe("soft blockers", () => {
     expect(needsInput.blockers.map((b) => b.key)).toContain("unverified_eligibility");
   });
 
+  it("counts every over-limit section, not just the first", () => {
+    // Naming only the first one meant fixing it just surfaced a second
+    // section over the limit for the first time on the next check — the
+    // same failure empty_sections and unfilled_gaps already avoid by
+    // counting.
+    const result = assessSubmission(
+      candidate({
+        sections: [
+          { label: "Project Description", content: "long", wordLimit: 100, wordCount: 150 },
+          { label: "Budget Narrative", content: "long", wordLimit: 100, wordCount: 120 },
+        ],
+      }),
+    );
+    const blocker = result.blockers.find((b) => b.key === "over_limit")!;
+    expect(blocker.detail).toContain("2 sections");
+    expect(blocker.detail).toContain("Project Description");
+  });
+
   it("states an over-limit section without enforcing it", () => {
     // Some funders truncate and some reject; we cannot know which, so we say
     // it rather than decide it.

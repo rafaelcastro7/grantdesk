@@ -108,16 +108,23 @@ function ClientDetail() {
       setError(clientError.message);
       return;
     }
+
+    // Committed regardless of whether the team query below succeeded — all
+    // four queries ran in the same Promise.all, so a transient failure on
+    // just the team join (the ambiguous-FK class of error the comment above
+    // already names) used to return here before any of these ran, blanking
+    // the client name, profile and answer library too even though they had
+    // already come back fine.
+    setClient(clientRow as ClientRow | null);
+    if (clientRow?.website && !sourceUrl) setSourceUrl(clientRow.website as string);
+    setProfile((profileResult.data as StoredProfile | null) ?? null);
+    setAnswers((answersResult.data ?? []) as StoredAnswer[]);
+
     if (teamResult.error) {
       setError(teamResult.error.message);
       return;
     }
-
-    setClient(clientRow as ClientRow | null);
-    if (clientRow?.website && !sourceUrl) setSourceUrl(clientRow.website as string);
     setTeam((teamResult.data ?? []) as unknown as TeamMember[]);
-    setProfile((profileResult.data as StoredProfile | null) ?? null);
-    setAnswers((answersResult.data ?? []) as StoredAnswer[]);
   }, [clientId, sourceUrl]);
 
   useEffect(() => {
@@ -211,6 +218,13 @@ function ClientDetail() {
   async function removeTeammate(member: TeamMember) {
     const label = member.consultants?.display_name || member.consultants?.email || "this person";
     const leaving = member.user_id === myId;
+    // Only for removing someone else — the list re-renders in added_at
+    // order, not a stable screen position, so a click meant for one row can
+    // land on the row above or below it after the state updates. A colleague
+    // cut off from a client's live drafts and matches by that misclick has
+    // no undo; leaving yourself is the one case where a mistaken click is
+    // still trivially reversible by whoever owns the client re-adding you.
+    if (!leaving && !window.confirm(`Remove ${label} from this client?`)) return;
     setTeam((current) => (current ?? []).filter((m) => m.user_id !== member.user_id));
     await run("team", async () => {
       const { error: deleteError } = await supabase()

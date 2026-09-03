@@ -133,9 +133,16 @@ export function assessSubmission(candidate: SubmitCandidate): {
   );
   if (over.length > 0) {
     const first = over[0]!;
+    const overBy = `${(first.wordCount ?? 0) - first.wordLimit!} words over the funder's limit of ${first.wordLimit}`;
     blockers.push({
       key: "over_limit",
-      detail: `"${first.label}" is ${(first.wordCount ?? 0) - first.wordLimit!} words over the funder's limit of ${first.wordLimit}.`,
+      // Named like empty_sections and unfilled_gaps below: a count, not just
+      // the first offender, so fixing the one named here does not surface a
+      // second one for the first time on the next check.
+      detail:
+        over.length === 1
+          ? `"${first.label}" is ${overBy}.`
+          : `${over.length} sections are over the funder's word limit, starting with "${first.label}" (${overBy}).`,
       // Some funders truncate, some reject. We cannot know which, so this is
       // stated rather than enforced.
       isHard: false,
