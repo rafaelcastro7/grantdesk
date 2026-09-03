@@ -252,18 +252,22 @@ function ProposalPage() {
       const result = await runRead({ data: { grantId, accessToken: await accessToken() } });
       if (!result.ok) throw new Error(result.error);
 
+      // Kept regardless of whether structure came out of it — a call that
+      // publishes its conditions clearly and its section list nowhere at all
+      // leaves "Add a section" to a guess otherwise, and the raw text was
+      // already read to get here either way.
+      setReadText(result.readText);
+
       if (!result.found) {
         // Real text was read; nothing structured came out of it. Shown in
         // place of a dead end that used to just point back at the source —
         // this is what was actually looked at, in the app.
-        setReadText(result.readText);
         return (
           `Read ${result.provenance.source}, but could not tell its requirements from its ` +
           `prose. What was read is shown below — add the headings its form asks for.`
         );
       }
 
-      setReadText(null);
       await load();
       return `Read ${result.count} requirements from ${result.provenance.source}.`;
     });
@@ -635,12 +639,19 @@ function ProposalPage() {
           source. A consultant should never have to leave the app to see
           material this system already fetched — the link to the call's own
           page stays above for when something in here needs double-checking,
-          but reading happens here first. */}
-      {readText && (
+          but reading happens here first.
+          Shown whenever there is no section list to draft against, not only
+          on a total miss: a call can name its conditions clearly and never
+          publish a section list at all (most keep that in the application
+          form or a PDF), which used to leave "Add a section" a blind guess
+          even though the raw text was already sitting in readText. */}
+      {readText && writable.length === 0 && (
         <section className="mt-8" data-testid="read-text">
           <h2 className="text-sm font-semibold">What we read from their page</h2>
           <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
-            No structure came out of this automatically — read it here and add the headings below.
+            {requirements !== null && requirements.length > 0
+              ? "No section list came out of this automatically — read it here and add the headings below."
+              : "No structure came out of this automatically — read it here and add the headings below."}
           </p>
           <pre className="mt-3 max-h-96 overflow-y-auto whitespace-pre-wrap rounded-md border border-[var(--color-rule)] bg-[var(--color-paper)] p-4 text-sm">
             {readText}

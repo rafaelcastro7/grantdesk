@@ -26,7 +26,9 @@ let thinClientId: string;
 beforeAll(async () => {
   expect(ANON, "SUPABASE_ANON_KEY must be set — is .env loaded?").not.toBe("");
 
-  consultant = createClient(URL, ANON, { auth: { persistSession: false, autoRefreshToken: false } });
+  consultant = createClient(URL, ANON, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
   const { error: signUpError } = await consultant.auth.signUp(CREDS);
   if (signUpError && !/already registered/i.test(signUpError.message)) throw signUpError;
   const { data: session, error: signInError } = await consultant.auth.signInWithPassword(CREDS);
@@ -84,9 +86,7 @@ describe("assessCondition", () => {
     // What must never happen is claiming the profile confirms it.
     const text = result.assessment.toLowerCase();
     expect(text).toMatch(/does not (state|say|mention)|no mention|not (stated|mentioned)|unclear/);
-    expect(text).not.toMatch(
-      /(profile|client) (states|confirms|has|shows).{0,40}carbon capture/,
-    );
+    expect(text).not.toMatch(/(profile|client) (states|confirms|has|shows).{0,40}carbon capture/);
   }, 30_000);
 
   it("refuses to guess against a profile too thin to say anything", async () => {

@@ -85,5 +85,11 @@ export async function readRequirementsForGrant(supabase: SupabaseClient, grantId
   );
   if (writeError) throw new Error(writeError.message);
 
-  return { found: true as const, count: requirements.length, provenance };
+  // Returned even on a real, structured read — not only the empty case. A
+  // call can publish its conditions clearly and its section list nowhere at
+  // all (most funders keep that in the application form or a PDF), and the
+  // consultant then has to guess the headings for "Add a section" blind. The
+  // raw text was already read to get here; handing it over costs nothing
+  // extra and turns that guess into something they can actually check against.
+  return { found: true as const, count: requirements.length, provenance, readText };
 }

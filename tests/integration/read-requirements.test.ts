@@ -128,5 +128,12 @@ describe("readRequirementsForGrant", () => {
     for (const item of contactOrSubmitSteps) {
       expect(item.kind, `"${item.label}" was classified as ${item.kind}`).not.toBe("section");
     }
+
+    // The raw text is available here too, not only on a total miss — this
+    // call names its conditions clearly but never publishes a section list,
+    // and "Add a section" used to be a blind guess even though the page had
+    // already been read to get this far.
+    if (!result.found) throw new Error("unreachable");
+    expect(result.readText.length).toBeGreaterThan(200);
   }, 30_000);
 });
