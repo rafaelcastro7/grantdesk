@@ -286,48 +286,31 @@ ${grant.summary ?? ""}`,
  * decisions behind that no longer follow from any rule — a consultant reading
  * a reason that contradicts the current profile has no way to tell which is
  * right. Checks cascade from the match rows, so deleting matches clears them.
+ *
+ * Done as one call into replace_matches (a single transaction, serialized per
+ * client by an advisory lock), not three separate delete/insert/insert round
+ * trips from here. Those three used to race: a double-clicked "Find matches",
+ * or a manual run overlapping a profile-driven re-check, could interleave —
+ * both deletes racing, then both inserts landing as duplicates, or one run's
+ * delete firing after the other's insert and silently wiping a result set
+ * the consultant had just been told succeeded.
  */
 async function persist(supabase: SupabaseClient, clientId: string, rows: MatchRow[]) {
-  const { error: clearError } = await supabase.from("matches").delete().eq("client_id", clientId);
-  if (clearError) throw new Error(`could not clear previous matches: ${clearError.message}`);
-  if (rows.length === 0) return;
-
-  const now = new Date().toISOString();
-  const inserted: Array<{ id: string; grant_id: string }> = [];
-
-  for (let i = 0; i < rows.length; i += 100) {
-    const { data, error } = await supabase
-      .from("matches")
-      .insert(
-        rows.slice(i, i + 100).map((row) => ({
-          client_id: clientId,
-          grant_id: row.grantId,
-          verdict: row.verdict,
-          relevance: row.relevance,
-          retrieval: row.retrieval,
-          matched_at: now,
-        })),
-      )
-      .select("id, grant_id");
-    if (error) throw new Error(`could not store matches: ${error.message}`);
-    inserted.push(...((data ?? []) as Array<{ id: string; grant_id: string }>));
-  }
-
-  const matchId = new Map(inserted.map((m) => [m.grant_id, m.id]));
-  const checks = rows.flatMap((row) => {
-    const id = matchId.get(row.grantId);
-    if (!id) return [];
-    return row.checks.map((check) => ({
-      match_id: id,
-      rule_key: check.key,
-      status: check.status,
-      is_hard_gate: check.isHardGate,
-      detail: check.detail,
-    }));
+  const { error } = await supabase.rpc("replace_matches", {
+    target_client: clientId,
+    match_rows: rows.map((row) => ({
+      grant_id: row.grantId,
+      verdict: row.verdict,
+      relevance: row.relevance,
+      retrieval: row.retrieval,
+      checks: row.checks.map((check) => ({
+        rule_key: check.key,
+        status: check.status,
+        is_hard_gate: check.isHardGate,
+        detail: check.detail,
+      })),
+    })),
+    matched_at: new Date().toISOString(),
   });
-
-  for (let i = 0; i < checks.length; i += 200) {
-    const { error } = await supabase.from("eligibility_checks").insert(checks.slice(i, i + 200));
-    if (error) throw new Error(`could not store rule results: ${error.message}`);
-  }
+  if (error) throw new Error(`could not store matches: ${error.message}`);
 }
