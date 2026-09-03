@@ -6,6 +6,8 @@ const TODAY = new Date("2026-08-16T12:00:00Z");
 function candidate(over: Partial<SubmitCandidate> = {}): SubmitCandidate {
   return {
     verdict: "eligible",
+    verdictAt: "2026-08-01T00:00:00Z",
+    profileUpdatedAt: "2026-07-01T00:00:00Z",
     deadline: "2026-12-01",
     sections: [
       { label: "Project Description", content: "A complete answer.", wordLimit: 500, wordCount: 3 },
@@ -184,6 +186,28 @@ describe("soft blockers", () => {
     const blocker = result.blockers.find((b) => b.key === "over_limit")!;
     expect(blocker.detail).toContain("2 sections");
     expect(blocker.detail).toContain("Project Description");
+  });
+
+  it("flags an eligible verdict left over from before a profile edit", () => {
+    // Matching ran, found "eligible", and nothing re-ran it since — but the
+    // profile it ran against is not the one that exists now. Silence here
+    // would let a since-invalidated "yes" sit next to the submit button
+    // looking exactly like a current one.
+    const stale = candidate({
+      verdictAt: "2026-08-01T00:00:00Z",
+      profileUpdatedAt: "2026-08-15T00:00:00Z",
+    });
+    const result = assessSubmission(stale);
+    expect(result.blockers.map((b) => b.key)).toContain("stale_eligibility");
+    expect(result.canOverride).toBe(true);
+  });
+
+  it("does not flag an eligible verdict computed after the profile's last edit", () => {
+    expect(
+      keys(
+        candidate({ verdictAt: "2026-08-15T00:00:00Z", profileUpdatedAt: "2026-08-01T00:00:00Z" }),
+      ),
+    ).not.toContain("stale_eligibility");
   });
 
   it("states an over-limit section without enforcing it", () => {

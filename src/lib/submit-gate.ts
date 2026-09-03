@@ -26,6 +26,17 @@ export type Blocker = {
 
 export type SubmitCandidate = {
   verdict: "eligible" | "ineligible" | "needs_input" | null;
+  /**
+   * When matching last produced that verdict, and when the client's profile
+   * last changed — both null-able independently, since a profile can exist
+   * with no match ever run and a match can predate this column existing.
+   * Compared to catch a verdict left over from before a profile edit: a
+   * consultant who corrects `jurisdictions` after drafting has no reason to
+   * remember that matching does not re-run itself, and "eligible" sitting
+   * next to a submit button reads as current whether or not it still is.
+   */
+  verdictAt: string | null;
+  profileUpdatedAt: string | null;
   deadline: string | null;
   /** Requirements the funder stated, split by what we can and cannot draft. */
   sections: Array<{
@@ -88,6 +99,23 @@ export function assessSubmission(candidate: SubmitCandidate): {
     blockers.push({
       key: "never_matched",
       detail: "Eligibility was never checked for this client and call. Run matching first.",
+      isHard: false,
+    });
+  } else if (
+    // A settled verdict (eligible or ineligible, not the branches above) can
+    // still be stale: the check ran, but the profile it ran against is not
+    // the one that exists now. Ineligible already hard-blocks above and this
+    // adds nothing there; eligible is the case where staying silent would
+    // let a since-invalidated "yes" reach the submit button unchallenged.
+    candidate.verdict === "eligible" &&
+    candidate.verdictAt &&
+    candidate.profileUpdatedAt &&
+    new Date(candidate.profileUpdatedAt).getTime() > new Date(candidate.verdictAt).getTime()
+  ) {
+    blockers.push({
+      key: "stale_eligibility",
+      detail:
+        "This client's profile changed after eligibility was last checked. Re-run matching to confirm it still applies.",
       isHard: false,
     });
   }

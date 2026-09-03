@@ -27,31 +27,42 @@ async function buildCandidate(
     grants: { deadline: string | null } | null;
   };
 
-  const [{ data: requirements }, { data: sections }, { data: match }, { data: acks }, { count }] =
-    await Promise.all([
-      supabase
-        .from("requirements")
-        .select("id, label, kind, word_limit, is_critical")
-        .eq("grant_id", row.grant_id),
-      supabase
-        .from("proposal_sections")
-        .select("requirement_id, content, word_count, drafted_by")
-        .eq("proposal_id", proposalId),
-      supabase
-        .from("matches")
-        .select("verdict")
-        .eq("client_id", row.client_id)
-        .eq("grant_id", row.grant_id)
-        .maybeSingle(),
-      supabase
-        .from("requirement_acknowledgements")
-        .select("requirement_id")
-        .eq("proposal_id", proposalId),
-      supabase
-        .from("submissions")
-        .select("id", { count: "exact", head: true })
-        .eq("proposal_id", proposalId),
-    ]);
+  const [
+    { data: requirements },
+    { data: sections },
+    { data: match },
+    { data: acks },
+    { count },
+    { data: profile },
+  ] = await Promise.all([
+    supabase
+      .from("requirements")
+      .select("id, label, kind, word_limit, is_critical")
+      .eq("grant_id", row.grant_id),
+    supabase
+      .from("proposal_sections")
+      .select("requirement_id, content, word_count, drafted_by")
+      .eq("proposal_id", proposalId),
+    supabase
+      .from("matches")
+      .select("verdict, matched_at")
+      .eq("client_id", row.client_id)
+      .eq("grant_id", row.grant_id)
+      .maybeSingle(),
+    supabase
+      .from("requirement_acknowledgements")
+      .select("requirement_id")
+      .eq("proposal_id", proposalId),
+    supabase
+      .from("submissions")
+      .select("id", { count: "exact", head: true })
+      .eq("proposal_id", proposalId),
+    supabase
+      .from("client_profiles")
+      .select("updated_at")
+      .eq("client_id", row.client_id)
+      .maybeSingle(),
+  ]);
 
   const reqs = (requirements ?? []) as Array<{
     id: string;
@@ -79,6 +90,8 @@ async function buildCandidate(
     grantId: row.grant_id,
     candidate: {
       verdict: (match as { verdict: SubmitCandidate["verdict"] } | null)?.verdict ?? null,
+      verdictAt: (match as { matched_at: string } | null)?.matched_at ?? null,
+      profileUpdatedAt: (profile as { updated_at: string } | null)?.updated_at ?? null,
       deadline: row.grants?.deadline ?? null,
       sections: reqs
         .filter((r) => r.kind === "section")
