@@ -1,0 +1,13 @@
+-- A required attachment (budget PDF, board list, IRS letter) was tracked as
+-- a bare "I have this" checkbox — true, but disconnected from where the file
+-- actually is. The file itself living in email or a shared drive, with
+-- nothing in the app pointing at it, means the one place a consultant looks
+-- to check "is everything ready to send" cannot tell them where to find the
+-- thing it is asking about.
+--
+-- Standing up real file storage (a Supabase Storage bucket, its own RLS,
+-- upload UI) is real infrastructure this stack does not run yet — this is
+-- the leaner version: a place to record *where* the file is (a Drive link,
+-- a local path, "in the shared folder"), which costs nothing to add and
+-- turns the checklist from a promise into a place to actually find it again.
+alter table requirement_acknowledgements add column if not exists location text;

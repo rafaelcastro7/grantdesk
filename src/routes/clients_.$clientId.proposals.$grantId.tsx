@@ -75,6 +75,7 @@ function ProposalPage() {
   const [requirements, setRequirements] = useState<Requirement[] | null>(null);
   const [sections, setSections] = useState<Record<string, Section>>({});
   const [acknowledged, setAcknowledged] = useState<Set<string>>(new Set());
+  const [locations, setLocations] = useState<Record<string, string>>({});
   const [submission, setSubmission] = useState<{
     submitted_at: string;
     outcome: string | null;
@@ -143,10 +144,14 @@ function ProposalPage() {
 
     const { data: acks } = await supabase()
       .from("requirement_acknowledgements")
-      .select("requirement_id")
+      .select("requirement_id, location")
       .eq("proposal_id", id);
-    setAcknowledged(
-      new Set(((acks ?? []) as Array<{ requirement_id: string }>).map((a) => a.requirement_id)),
+    const ackRows = (acks ?? []) as Array<{ requirement_id: string; location: string | null }>;
+    setAcknowledged(new Set(ackRows.map((a) => a.requirement_id)));
+    setLocations(
+      Object.fromEntries(
+        ackRows.filter((a) => a.location).map((a) => [a.requirement_id, a.location!]),
+      ),
     );
 
     const { data: assessed } = await supabase()
@@ -324,6 +329,23 @@ function ProposalPage() {
     pendingAcks.current.add(settled);
     void settled.finally(() => pendingAcks.current.delete(settled));
     await settled;
+  }
+
+  /**
+   * Where the file actually is — a Drive link, a shared-folder path, "with
+   * the bookkeeper" — recorded against the same acknowledgement row rather
+   * than only a checkbox saying it exists. No file storage runs in this
+   * stack yet, so this is the leaner form of the same idea: a checklist that
+   * says where to look, not just that something was once confirmed.
+   */
+  async function saveLocation(requirement: Requirement, location: string) {
+    if (!proposalId || !acknowledged.has(requirement.id)) return;
+    setLocations((current) => ({ ...current, [requirement.id]: location }));
+    await supabase()
+      .from("requirement_acknowledgements")
+      .update({ location: location.trim() || null })
+      .eq("proposal_id", proposalId)
+      .eq("requirement_id", requirement.id);
   }
 
   /**
@@ -757,15 +779,28 @@ function ProposalPage() {
                     can do is refuse to call the application ready until a person
                     says they have them — and record who said so. */}
                   {requirement.is_critical && (
-                    <label className="mt-2 flex items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={acknowledged.has(requirement.id)}
-                        onChange={(event) => acknowledge(requirement, event.target.checked)}
-                        disabled={!!submission}
-                      />
-                      I have this
-                    </label>
+                    <>
+                      <label className="mt-2 flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={acknowledged.has(requirement.id)}
+                          onChange={(event) => acknowledge(requirement, event.target.checked)}
+                          disabled={!!submission}
+                        />
+                        I have this
+                      </label>
+                      {requirement.kind === "attachment" && acknowledged.has(requirement.id) && (
+                        <input
+                          type="text"
+                          defaultValue={locations[requirement.id] ?? ""}
+                          onBlur={(event) => saveLocation(requirement, event.target.value)}
+                          disabled={!!submission}
+                          placeholder="Where is it? A Drive link, a folder, who has it…"
+                          aria-label={`Where to find "${requirement.label}"`}
+                          className="mt-2 w-full rounded-md border border-[var(--color-rule)] bg-[var(--color-paper)] px-2 py-1 text-sm"
+                        />
+                      )}
+                    </>
                   )}
                 </li>
               ))}
