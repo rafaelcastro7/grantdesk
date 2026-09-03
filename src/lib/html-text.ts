@@ -96,3 +96,54 @@ export function htmlTitle(html: string): string | null {
   const title = decodeEntities(match[1]).replace(/\s+/g, " ").trim();
   return title.length > 0 ? title : null;
 }
+
+/** How keen this link's own words are to be an application/eligibility page. */
+const RELATED_PATTERN =
+  /how to apply|application (form|process|guide|guidelines)|apply now|eligib|guideline|criteria|application requirements|submission (process|guide)|how to submit|instructions/i;
+
+/**
+ * Links on a funder's page worth reading too, before deciding a call has
+ * nothing more to say. A funding notice frequently states the offer and
+ * points elsewhere for "How to Apply" or the eligibility rules — reading
+ * only the page the catalog happened to store then makes a real, published
+ * requirement look like it was never stated anywhere.
+ *
+ * Bounded twice over: only the same site (a link to an unrelated domain is
+ * exactly the kind of thing worth NOT fetching automatically), and only
+ * links whose own text says what this is for — a wall of navigation links to
+ * "Contact us" or "Privacy Policy" is not read just because it exists on the
+ * page.
+ */
+export function relatedLinks(html: string, baseUrl: string, limit = 3): string[] {
+  let origin: string;
+  try {
+    origin = new URL(baseUrl).origin;
+  } catch {
+    return [];
+  }
+
+  const found = new Set<string>();
+  const pattern = /<a\b[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(html)) && found.size < limit) {
+    const [, href, rawText] = match;
+    if (!href || !rawText) continue;
+    const text = decodeEntities(rawText.replace(/<[^>]+>/g, " "))
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!RELATED_PATTERN.test(text)) continue;
+
+    let resolved: URL;
+    try {
+      resolved = new URL(href, baseUrl);
+    } catch {
+      continue;
+    }
+    if (resolved.origin !== origin) continue;
+    resolved.hash = "";
+    const url = resolved.toString();
+    if (url === baseUrl) continue;
+    found.add(url);
+  }
+  return [...found];
+}

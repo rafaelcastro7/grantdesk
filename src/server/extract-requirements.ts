@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { htmlToText, htmlTitle } from "@/lib/html-text";
+import { htmlToText, htmlTitle, relatedLinks } from "@/lib/html-text";
 import { callLlm } from "./llm";
 
 /**
@@ -119,8 +119,16 @@ export function parseRequirements(raw: string): ExtractedRequirement[] {
 
 const SYSTEM = `You read a funding call and list exactly what an applicant must provide.
 
+You may be given more than one page — a funder's notice frequently states the
+offer and links elsewhere for "How to Apply" or the eligibility rules, and
+each page you are given is marked with its own "Source:" line. Read all of
+them as one call. A requirement stated on the second page is exactly as real
+as one stated on the first; do not treat the first page as primary and the
+rest as background.
+
 Record only what the call states. Do not add the sections a proposal "usually"
-has — a requirement that is not on this page is a defect, not a helpful default.
+has — a requirement that is not on any given page is a defect, not a helpful
+default.
 
 For each requirement:
 - label: the funder's own heading, as short as it appears (e.g. "Project Description").
@@ -139,8 +147,8 @@ For each requirement:
 - detail: what the call says this must cover, in one or two sentences.
 - wordLimit: the stated limit if there is one, otherwise null. Do not invent one.
 - evaluationNote: how the funder says this will be assessed, if stated.
-- sourceQuote: a short verbatim quote from the page for this requirement. Copy
-  it exactly. This is checked against the page.
+- sourceQuote: a short verbatim quote for this requirement, from whichever
+  given page states it. Copy it exactly. This is checked against the page.
 - isCritical: true only if the call says the application is rejected without it.
 
 Merge conditions that restate one rule. A call that says an applicant must be a
@@ -164,16 +172,20 @@ export type RequirementExtraction = {
   readText: string;
 };
 
-export async function extractRequirementsFromHtml(
-  html: string,
-  sourceUrl: string,
-): Promise<RequirementExtraction> {
-  const body = htmlToText(html);
-  if (body.length < 200) {
-    throw new Error(
-      `not enough readable text at ${sourceUrl} (${body.length} chars) — the call may be a PDF or script-rendered`,
-    );
-  }
+type Page = { url: string; title: string | null; text: string };
+
+const FETCH_HEADERS = {
+  "User-Agent": "IIAL-GrantDesk/1.0 (+https://iial.ca; reads public funding calls)",
+};
+
+/**
+ * The actual extraction call, over however many pages were read. Everything
+ * above this decides *which* pages; this only ever sees plain text already
+ * labeled by source, so it does not care whether that text came from one
+ * fetch or four.
+ */
+async function extractFromPages(pages: Page[]): Promise<RequirementExtraction> {
+  const primary = pages[0]!;
 
   const response = await callLlm({
     role: "extract",
@@ -184,15 +196,19 @@ export async function extractRequirementsFromHtml(
       { role: "system", content: SYSTEM },
       {
         role: "user",
-        content: [
-          `Source: ${sourceUrl}`,
-          htmlTitle(html) ? `Page title: ${htmlTitle(html)}` : null,
-          "",
-          "Call text:",
-          body.slice(0, 24_000),
-        ]
-          .filter((line) => line !== null)
-          .join("\n"),
+        content: pages
+          .map((page) =>
+            [
+              `Source: ${page.url}`,
+              page.title ? `Page title: ${page.title}` : null,
+              "",
+              "Call text:",
+              page.text,
+            ]
+              .filter((line) => line !== null)
+              .join("\n"),
+          )
+          .join("\n\n---\n\n"),
       },
     ],
     validate: (candidate) => {
@@ -207,23 +223,83 @@ export async function extractRequirementsFromHtml(
 
   return {
     requirements: parseRequirements(response.text),
-    readText: body.slice(0, 4000),
+    // Every page read, labeled, not only the primary one — a consultant
+    // checking "what did it actually read" has to see all of it, or a
+    // requirement sourced from the second page looks unverifiable.
+    readText: pages.map((page) => `=== ${page.url} ===\n${page.text.slice(0, 4000)}`).join("\n\n"),
     provenance: {
-      source: sourceUrl,
-      title: htmlTitle(html),
+      source: primary.url,
+      title: primary.title,
       extractedAt: new Date().toISOString(),
       model: `${response.provider}/${response.model}`,
     },
   };
 }
 
+export async function extractRequirementsFromHtml(
+  html: string,
+  sourceUrl: string,
+): Promise<RequirementExtraction> {
+  const body = htmlToText(html);
+  if (body.length < 200) {
+    throw new Error(
+      `not enough readable text at ${sourceUrl} (${body.length} chars) — the call may be a PDF or script-rendered`,
+    );
+  }
+  return extractFromPages([
+    { url: sourceUrl, title: htmlTitle(html), text: body.slice(0, 24_000) },
+  ]);
+}
+
+/**
+ * Read the call's own page, and up to two pages it points to for "How to
+ * Apply" or eligibility rules — recursively, in the sense that matters here:
+ * a funding notice is frequently a summary that states the offer and defers
+ * the actual requirements to a linked page, and reading only the page the
+ * catalog happened to store made a real, published requirement look like it
+ * was never stated anywhere. Bounded on purpose (src/lib/html-text.ts's
+ * relatedLinks: same site only, keyword-matched anchor text only, capped) —
+ * this follows a funder's own signposting, not an open crawl.
+ *
+ * A failed secondary fetch is not fatal to the whole read: the primary page
+ * is what the catalog trusts enough to store, and one broken link on a
+ * government site should not turn a real call into a reported failure.
+ */
 export async function extractRequirementsFromUrl(url: string): Promise<RequirementExtraction> {
   const response = await fetch(url, {
-    headers: { "User-Agent": "IIAL-GrantDesk/1.0 (+https://iial.ca; reads public funding calls)" },
+    headers: FETCH_HEADERS,
     signal: AbortSignal.timeout(30_000),
   });
   if (!response.ok) throw new Error(`could not read ${url}: HTTP ${response.status}`);
-  return extractRequirementsFromHtml(await response.text(), url);
+  const html = await response.text();
+  const body = htmlToText(html);
+  if (body.length < 200) {
+    throw new Error(
+      `not enough readable text at ${url} (${body.length} chars) — the call may be a PDF or script-rendered`,
+    );
+  }
+
+  const pages: Page[] = [{ url, title: htmlTitle(html), text: body.slice(0, 16_000) }];
+
+  const follow = relatedLinks(html, url);
+  const fetched = await Promise.allSettled(
+    follow.map(async (link) => {
+      const linkResponse = await fetch(link, {
+        headers: FETCH_HEADERS,
+        signal: AbortSignal.timeout(20_000),
+      });
+      if (!linkResponse.ok) throw new Error(`HTTP ${linkResponse.status}`);
+      const linkHtml = await linkResponse.text();
+      const linkBody = htmlToText(linkHtml);
+      if (linkBody.length < 100) throw new Error("too little text to be worth adding");
+      return { url: link, title: htmlTitle(linkHtml), text: linkBody.slice(0, 8_000) };
+    }),
+  );
+  for (const outcome of fetched) {
+    if (outcome.status === "fulfilled") pages.push(outcome.value);
+  }
+
+  return extractFromPages(pages);
 }
 
 /**
