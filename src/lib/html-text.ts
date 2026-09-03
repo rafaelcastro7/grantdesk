@@ -102,6 +102,25 @@ const RELATED_PATTERN =
   /how to apply|application (form|process|guide|guidelines)|apply now|eligib|guideline|criteria|application requirements|submission (process|guide)|how to submit|instructions/i;
 
 /**
+ * A second, looser pass for when the narrow pattern already proved this page
+ * is a real funding call worth digging into further, but still turned up
+ * nothing about how to actually apply. Still same-origin only — that
+ * boundary never loosens — only the wording bar drops, to the kind of link
+ * text a funder actually uses for "read more here" without saying the word
+ * "apply": "program details", "funding guide", "learn more", "requirements".
+ */
+const BROAD_RELATED_PATTERN =
+  /details|learn more|requirements|program guide|funding guide|read more|full (details|guidelines)|more information/i;
+
+export type RelatedLinksOptions = {
+  limit?: number;
+  /** URLs already fetched in an earlier pass — never suggested again. */
+  exclude?: ReadonlySet<string>;
+  /** Use the looser wording bar for a second pass over the same page. */
+  broad?: boolean;
+};
+
+/**
  * Links on a funder's page worth reading too, before deciding a call has
  * nothing more to say. A funding notice frequently states the offer and
  * points elsewhere for "How to Apply" or the eligibility rules — reading
@@ -114,7 +133,14 @@ const RELATED_PATTERN =
  * "Contact us" or "Privacy Policy" is not read just because it exists on the
  * page.
  */
-export function relatedLinks(html: string, baseUrl: string, limit = 3): string[] {
+export function relatedLinks(
+  html: string,
+  baseUrl: string,
+  options: RelatedLinksOptions = {},
+): string[] {
+  const { limit = 3, exclude, broad = false } = options;
+  const wordBar = broad ? BROAD_RELATED_PATTERN : RELATED_PATTERN;
+
   let origin: string;
   try {
     origin = new URL(baseUrl).origin;
@@ -131,7 +157,7 @@ export function relatedLinks(html: string, baseUrl: string, limit = 3): string[]
     const text = decodeEntities(rawText.replace(/<[^>]+>/g, " "))
       .replace(/\s+/g, " ")
       .trim();
-    if (!RELATED_PATTERN.test(text)) continue;
+    if (!wordBar.test(text)) continue;
 
     let resolved: URL;
     try {
@@ -143,6 +169,7 @@ export function relatedLinks(html: string, baseUrl: string, limit = 3): string[]
     resolved.hash = "";
     const url = resolved.toString();
     if (url === baseUrl) continue;
+    if (exclude?.has(url)) continue;
     found.add(url);
   }
   return [...found];

@@ -170,9 +170,13 @@ export type RequirementExtraction = {
    * to find out for themselves what we already looked at.
    */
   readText: string;
+  /** Every URL actually fetched, in the order read — the primary page first. */
+  sourcesRead: string[];
 };
 
 type Page = { url: string; title: string | null; text: string };
+/** A fetched page, before its text is trimmed to the extraction budget. */
+type FetchedPage = Page & { html: string };
 
 const FETCH_HEADERS = {
   "User-Agent": "IIAL-GrantDesk/1.0 (+https://iial.ca; reads public funding calls)",
@@ -227,6 +231,7 @@ async function extractFromPages(pages: Page[]): Promise<RequirementExtraction> {
     // checking "what did it actually read" has to see all of it, or a
     // requirement sourced from the second page looks unverifiable.
     readText: pages.map((page) => `=== ${page.url} ===\n${page.text.slice(0, 4000)}`).join("\n\n"),
+    sourcesRead: pages.map((page) => page.url),
     provenance: {
       source: primary.url,
       title: primary.title,
@@ -251,55 +256,88 @@ export async function extractRequirementsFromHtml(
   ]);
 }
 
+async function fetchPage(url: string, timeoutMs: number, minChars: number): Promise<FetchedPage> {
+  const response = await fetch(url, {
+    headers: FETCH_HEADERS,
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const html = await response.text();
+  const body = htmlToText(html);
+  if (body.length < minChars) {
+    throw new Error(`too little text to be worth adding (${body.length} chars)`);
+  }
+  return { url, title: htmlTitle(html), text: body, html };
+}
+
+/** Fetch several links in parallel; a failed one is dropped, not fatal. */
+async function fetchLinks(links: string[], timeoutMs: number, charBudget: number): Promise<Page[]> {
+  const fetched = await Promise.allSettled(links.map((link) => fetchPage(link, timeoutMs, 100)));
+  return fetched
+    .filter(
+      (outcome): outcome is PromiseFulfilledResult<FetchedPage> => outcome.status === "fulfilled",
+    )
+    .map(({ value }) => ({
+      url: value.url,
+      title: value.title,
+      text: value.text.slice(0, charBudget),
+    }));
+}
+
 /**
- * Read the call's own page, and up to two pages it points to for "How to
- * Apply" or eligibility rules — recursively, in the sense that matters here:
- * a funding notice is frequently a summary that states the offer and defers
- * the actual requirements to a linked page, and reading only the page the
- * catalog happened to store made a real, published requirement look like it
- * was never stated anywhere. Bounded on purpose (src/lib/html-text.ts's
- * relatedLinks: same site only, keyword-matched anchor text only, capped) —
- * this follows a funder's own signposting, not an open crawl.
+ * Read the call's own page, and pages it points to for "How to Apply" or
+ * eligibility rules — recursively, in the sense that matters here: a funding
+ * notice is frequently a summary that states the offer and defers the actual
+ * requirements to a linked page, and reading only the page the catalog
+ * happened to store made a real, published requirement look like it was
+ * never stated anywhere.
+ *
+ * Two rounds, not one, and the second only runs when the first gives a
+ * concrete reason to look further: no "process" requirement (how to apply)
+ * came out of a page that is clearly a real, substantial funding notice. That
+ * is exactly the shape of a summary page deferring the mechanics elsewhere,
+ * so the second round widens the wording bar for what counts as a link worth
+ * following (src/lib/html-text.ts's `broad` option) rather than trying the
+ * same narrow search again. Bounded throughout — same site only at every
+ * pass, a hard cap on pages per round, two rounds total — this follows a
+ * funder's own signposting more persistently, not an open crawl.
  *
  * A failed secondary fetch is not fatal to the whole read: the primary page
  * is what the catalog trusts enough to store, and one broken link on a
  * government site should not turn a real call into a reported failure.
  */
 export async function extractRequirementsFromUrl(url: string): Promise<RequirementExtraction> {
-  const response = await fetch(url, {
-    headers: FETCH_HEADERS,
-    signal: AbortSignal.timeout(30_000),
+  const primary = await fetchPage(url, 30_000, 200).catch((cause: unknown) => {
+    const reason = cause instanceof Error ? cause.message : String(cause);
+    throw new Error(`could not read ${url}: ${reason} — the call may be a PDF or script-rendered`);
   });
-  if (!response.ok) throw new Error(`could not read ${url}: HTTP ${response.status}`);
-  const html = await response.text();
-  const body = htmlToText(html);
-  if (body.length < 200) {
-    throw new Error(
-      `not enough readable text at ${url} (${body.length} chars) — the call may be a PDF or script-rendered`,
-    );
+  const pages: Page[] = [
+    { url: primary.url, title: primary.title, text: primary.text.slice(0, 16_000) },
+  ];
+  const read = new Set([url]);
+
+  const firstLinks = relatedLinks(primary.html, url, { limit: 3 });
+  pages.push(...(await fetchLinks(firstLinks, 20_000, 8_000)));
+  for (const page of pages) read.add(page.url);
+
+  let result = await extractFromPages(pages);
+
+  // The one category most often deferred to a separate page is exactly the
+  // one this whole feature exists for — "how to apply" — so its absence,
+  // on a page substantial enough to be a real call, is the concrete signal
+  // that there is more to find rather than a guess that there might be.
+  const foundProcess = result.requirements.some((r) => r.kind === "process");
+  const worthDiggingFurther = pages[0]!.text.length > 800;
+  if (!foundProcess && worthDiggingFurther) {
+    const secondLinks = relatedLinks(primary.html, url, { limit: 3, exclude: read, broad: true });
+    const more = await fetchLinks(secondLinks, 20_000, 8_000);
+    if (more.length > 0) {
+      pages.push(...more);
+      result = await extractFromPages(pages);
+    }
   }
 
-  const pages: Page[] = [{ url, title: htmlTitle(html), text: body.slice(0, 16_000) }];
-
-  const follow = relatedLinks(html, url);
-  const fetched = await Promise.allSettled(
-    follow.map(async (link) => {
-      const linkResponse = await fetch(link, {
-        headers: FETCH_HEADERS,
-        signal: AbortSignal.timeout(20_000),
-      });
-      if (!linkResponse.ok) throw new Error(`HTTP ${linkResponse.status}`);
-      const linkHtml = await linkResponse.text();
-      const linkBody = htmlToText(linkHtml);
-      if (linkBody.length < 100) throw new Error("too little text to be worth adding");
-      return { url: link, title: htmlTitle(linkHtml), text: linkBody.slice(0, 8_000) };
-    }),
-  );
-  for (const outcome of fetched) {
-    if (outcome.status === "fulfilled") pages.push(outcome.value);
-  }
-
-  return extractFromPages(pages);
+  return result;
 }
 
 /**
@@ -355,6 +393,7 @@ export async function extractRequirementsFromText(
   return {
     requirements: parseRequirements(response.text),
     readText: text.slice(0, 4000),
+    sourcesRead: [source],
     provenance: {
       source,
       title: title ?? null,

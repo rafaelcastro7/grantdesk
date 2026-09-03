@@ -109,6 +109,32 @@ describe("relatedLinks", () => {
       <a href="/eligibility">Eligibility</a>
       <a href="/guidelines">Guidelines</a>
     `;
-    expect(relatedLinks(html, BASE, 2)).toHaveLength(2);
+    expect(relatedLinks(html, BASE, { limit: 2 })).toHaveLength(2);
+  });
+
+  it("never re-suggests a link already read in an earlier pass", () => {
+    const html = `
+      <a href="/eligibility">Eligibility</a>
+      <a href="/guidelines">Guidelines</a>
+    `;
+    const already = new Set(["https://example.gov/eligibility"]);
+    expect(relatedLinks(html, BASE, { exclude: already })).toEqual([
+      "https://example.gov/guidelines",
+    ]);
+  });
+
+  it("only widens to the loose wording bar when asked for it", () => {
+    const html = `<a href="/program-details">Program Details</a>`;
+    expect(relatedLinks(html, BASE)).toEqual([]);
+    expect(relatedLinks(html, BASE, { broad: true })).toEqual([
+      "https://example.gov/program-details",
+    ]);
+  });
+
+  it("still refuses an off-site link on the loose pass", () => {
+    // The wording bar is the only thing a second pass relaxes — the
+    // same-origin boundary is not up for negotiation at any pass.
+    const html = `<a href="https://elsewhere.example/full-guidelines">Full Guidelines</a>`;
+    expect(relatedLinks(html, BASE, { broad: true })).toEqual([]);
   });
 });
