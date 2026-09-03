@@ -26,7 +26,12 @@ export function Nav() {
     <nav
       data-testid="nav"
       aria-label="Main"
-      className="border-b border-[var(--color-rule)] bg-[var(--color-surface)]"
+      // print:hidden — the "Export as document" button on a proposal prints
+      // just its own print-only block, but that block renders inside the
+      // page, below this global bar. Without this, "export the proposal"
+      // produced a PDF headed by the app's own logo and nav links, not the
+      // funder-ready document it was supposed to be.
+      className="border-b border-[var(--color-rule)] bg-[var(--color-surface)] print:hidden"
     >
       <div className="mx-auto flex max-w-3xl items-baseline gap-6 px-6 py-3">
         <Link to="/" className="flex items-baseline gap-2.5">
