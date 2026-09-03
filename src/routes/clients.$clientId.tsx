@@ -131,6 +131,20 @@ function ClientDetail() {
   }, []);
 
   /**
+   * Arrived here from the matches page's "one fact decides it" link, naming
+   * exactly which field to fill in — but a hash-only jump just scrolls, and
+   * gives no visual signal for which of seven identical-looking fields is
+   * the one the consultant actually came here to fix. Focusing it is the
+   * difference between "here's the form" and "here's the field".
+   */
+  useEffect(() => {
+    if (profile === null) return;
+    const id = window.location.hash.slice(1);
+    if (!id) return;
+    document.getElementById(id)?.focus();
+  }, [profile]);
+
+  /**
    * Run it without being asked, once, the same idiom the matches page uses
    * for the same reason.
    *

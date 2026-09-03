@@ -297,6 +297,16 @@ function MatchesPage() {
   );
 }
 
+/**
+ * Which profile field a hard-gate "unknown" is actually waiting on. Only the
+ * checks that can produce a needs_input verdict (assessSubmission's gates)
+ * need an entry — the others never leave a client stuck on this screen.
+ */
+const FIELD_FOR_RULE: Partial<Record<string, string>> = {
+  jurisdiction: "profile-jurisdictions",
+  applicant_type: "profile-stage",
+};
+
 const VERDICT_COLOR: Record<Verdict, string> = {
   eligible: "text-[var(--color-eligible)]",
   needs_input: "text-[var(--color-needs-input)]",
@@ -374,7 +384,24 @@ function MatchCard({
           .join(" · ")}
       </p>
 
-      {deciding && <p className="mt-2 text-sm">{deciding.detail}</p>}
+      {deciding && (
+        <p className="mt-2 text-sm">
+          {deciding.detail}
+          {row.verdict === "needs_input" && FIELD_FOR_RULE[deciding.rule_key] && (
+            <>
+              {" "}
+              <Link
+                to="/clients/$clientId"
+                params={{ clientId }}
+                hash={FIELD_FOR_RULE[deciding.rule_key]}
+                className="font-medium text-[var(--color-accent)]"
+              >
+                Fill it in →
+              </Link>
+            </>
+          )}
+        </p>
+      )}
 
       {/* Eligibility and relevance are different questions and are never
           blurred into one number. The incumbent shows a match score with
