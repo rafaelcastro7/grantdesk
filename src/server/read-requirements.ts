@@ -37,7 +37,7 @@ export async function readRequirementsForGrant(supabase: SupabaseClient, grantId
   // in our own table. Re-fetching to read text we already hold would be
   // slower, more fragile and worse.
   const held = [row.summary, row.eligibility_note].filter(Boolean).join("\n\n");
-  const { requirements, provenance, readText } =
+  const { requirements, provenance, readText, concerns } =
     held.trim().length >= 400
       ? await extractRequirementsFromText(held, row.url, row.title)
       : await extractRequirementsFromUrl(row.url);
@@ -49,7 +49,7 @@ export async function readRequirementsForGrant(supabase: SupabaseClient, grantId
   // them back to the source to find out for themselves what this system
   // already looked at.
   if (requirements.length === 0) {
-    return { found: false as const, count: 0, provenance, readText };
+    return { found: false as const, count: 0, provenance, readText, concerns };
   }
 
   // Replace what a previous read extracted, rather than merging into it.
@@ -91,5 +91,9 @@ export async function readRequirementsForGrant(supabase: SupabaseClient, grantId
   // consultant then has to guess the headings for "Add a section" blind. The
   // raw text was already read to get here; handing it over costs nothing
   // extra and turns that guess into something they can actually check against.
-  return { found: true as const, count: requirements.length, provenance, readText };
+  // The critic's remaining doubts, if any, travel with the result rather
+  // than being resolved or discarded here — a consultant reading "the page
+  // also mentions a required financial statement" can check the source in
+  // ten seconds; this function has no way to judge whether that's real.
+  return { found: true as const, count: requirements.length, provenance, readText, concerns };
 }

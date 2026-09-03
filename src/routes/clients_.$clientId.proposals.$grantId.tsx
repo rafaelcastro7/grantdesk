@@ -82,6 +82,7 @@ function ProposalPage() {
   const [blockers, setBlockers] = useState<Blocker[] | null>(null);
   const [awards, setAwards] = useState<PastAwardsResult | null>(null);
   const [readText, setReadText] = useState<string | null>(null);
+  const [concerns, setConcerns] = useState<string[]>([]);
   const [assessments, setAssessments] = useState<Record<string, string>>({});
   const assessing = useRef(new Set<string>());
   const { busy, error, note, run, setError } = useAction();
@@ -257,6 +258,7 @@ function ProposalPage() {
       // leaves "Add a section" to a guess otherwise, and the raw text was
       // already read to get here either way.
       setReadText(result.readText);
+      setConcerns(result.concerns);
 
       if (!result.found) {
         // Real text was read; nothing structured came out of it. Shown in
@@ -584,6 +586,26 @@ function ProposalPage() {
           </span>
         )}
       </div>
+
+      {/* A second, independent pass's remaining doubts about the read above —
+          not a rule this app is refusing to state, a genuine "go check this"
+          from a critic that read the same pages with no memory of having
+          produced the extraction it is reviewing. Shown plainly rather than
+          resolved automatically: a third round chasing one concern on the
+          same two pages would rarely find more than a person can in ten
+          seconds by looking. */}
+      {concerns.length > 0 && (
+        <section className="mt-6" data-testid="extraction-concerns">
+          <h2 className="text-sm font-semibold text-[var(--color-needs-input)]">
+            Worth double-checking
+          </h2>
+          <ul className="mt-2 flex flex-col gap-1 text-sm text-[var(--color-ink-soft)]">
+            {concerns.map((concern, index) => (
+              <li key={index}>• {concern}</li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       {/* The first question a consultant asks about a call: does this funder
           give to organizations like mine, or to hospitals and universities? */}

@@ -172,9 +172,18 @@ export type RequirementExtraction = {
   readText: string;
   /** Every URL actually fetched, in the order read — the primary page first. */
   sourcesRead: string[];
+  /**
+   * A second, independent pass's remaining doubts about this exact list,
+   * against these exact pages — populated only when extractRequirementsFromUrl
+   * ran the critic (extractRequirementsFromHtml and extractRequirementsFromText
+   * do not, since they are not the network-facing paths this was built for).
+   * Empty does not mean "verified" — it means nothing was checked, or the
+   * check found nothing to raise.
+   */
+  concerns: string[];
 };
 
-type Page = { url: string; title: string | null; text: string };
+export type Page = { url: string; title: string | null; text: string };
 /** A fetched page, before its text is trimmed to the extraction budget. */
 type FetchedPage = Page & { html: string };
 
@@ -232,6 +241,7 @@ async function extractFromPages(pages: Page[]): Promise<RequirementExtraction> {
     // requirement sourced from the second page looks unverifiable.
     readText: pages.map((page) => `=== ${page.url} ===\n${page.text.slice(0, 4000)}`).join("\n\n"),
     sourcesRead: pages.map((page) => page.url),
+    concerns: [],
     provenance: {
       source: primary.url,
       title: primary.title,
@@ -239,6 +249,105 @@ async function extractFromPages(pages: Page[]): Promise<RequirementExtraction> {
       model: `${response.provider}/${response.model}`,
     },
   };
+}
+
+const CRITIC_SYSTEM = `You are the second reader, not the first. Another pass already extracted a list of requirements from a funding call's own pages. Your only job is to check that work against the same pages — not to re-extract, and not to be agreeable.
+
+Look for exactly two things:
+1. Something the pages clearly state that the list does not capture — a
+   document to attach, an eligibility rule, a deadline detail, a scoring
+   criterion, how to apply. Name it specifically, quoting the page's own
+   words.
+2. Something in the list that the pages do not actually say — a fabricated
+   detail, a wrong word limit, an invented evaluation note. Name exactly
+   what and why.
+
+Do not invent a gap that is not there. If the list genuinely covers what the
+pages state, say so plainly — "complete" is a real, valid answer, not a
+failure to find something wrong.
+
+Reply with a single JSON object: {"complete": true|false, "concerns": ["..."]}.
+concerns is empty when complete is true. At most five concerns; the most
+important ones, not an exhaustive list.`;
+
+export type ExtractionCritique = { complete: boolean; concerns: string[] };
+
+/**
+ * A second, independent pass over the same pages, checking the first pass's
+ * work rather than repeating it — the generator/critic pattern the better
+ * multi-agent systems use for exactly this reason: a model checking its own
+ * output for gaps is checking against what it already decided to say, while
+ * a fresh call given the source and the result, with no memory of producing
+ * either, catches what agreeing with yourself cannot.
+ *
+ * Failure here is never fatal to the read itself. The critic is a second
+ * opinion, not a gate — if it cannot be reached or answers something
+ * unusable, the extraction that already succeeded should not be thrown away
+ * over it, and a caller correctly treats "critic unavailable" as
+ * "unconfirmed", not "wrong".
+ */
+export async function critiqueExtraction(
+  pages: Page[],
+  requirements: ExtractedRequirement[],
+): Promise<ExtractionCritique> {
+  const listing =
+    requirements.length > 0
+      ? requirements
+          .map(
+            (r) => `- [${r.kind}] ${r.label}: ${r.detail ?? r.sourceQuote ?? "(no detail given)"}`,
+          )
+          .join("\n")
+      : "(nothing was extracted)";
+
+  const parse = (raw: string): { complete: unknown; concerns: unknown } =>
+    JSON.parse(
+      raw
+        .trim()
+        .replace(/^```(?:json)?\s*/i, "")
+        .replace(/\s*```$/, ""),
+    );
+
+  try {
+    const response = await callLlm(
+      {
+        role: "judge",
+        json: true,
+        temperature: 0.1,
+        maxTokens: 800,
+        messages: [
+          { role: "system", content: CRITIC_SYSTEM },
+          {
+            role: "user",
+            content: [
+              pages.map((page) => `Source: ${page.url}\n\n${page.text}`).join("\n\n---\n\n"),
+              "",
+              "Extracted requirements:",
+              listing,
+            ].join("\n"),
+          },
+        ],
+        validate: (candidate) => {
+          try {
+            const parsed = parse(candidate);
+            return typeof parsed.complete === "boolean" && Array.isArray(parsed.concerns);
+          } catch {
+            return false;
+          }
+        },
+      },
+      { timeoutMs: 45_000 },
+    );
+
+    const parsed = parse(response.text);
+    return {
+      complete: parsed.complete === true,
+      concerns: Array.isArray(parsed.concerns)
+        ? parsed.concerns.filter((c): c is string => typeof c === "string").slice(0, 5)
+        : [],
+    };
+  } catch {
+    return { complete: true, concerns: [] };
+  }
 }
 
 export async function extractRequirementsFromHtml(
@@ -322,22 +431,41 @@ export async function extractRequirementsFromUrl(url: string): Promise<Requireme
 
   let result = await extractFromPages(pages);
 
-  // The one category most often deferred to a separate page is exactly the
-  // one this whole feature exists for — "how to apply" — so its absence,
-  // on a page substantial enough to be a real call, is the concrete signal
-  // that there is more to find rather than a guess that there might be.
+  // Two independent reasons to look further, not one. The first is a
+  // concrete pattern this feature exists for: no "process" requirement
+  // (how to apply) on a page substantial enough to be a real funding
+  // notice. The second is a genuinely different check — a critic pass, with
+  // no memory of having written the extraction, reading the same pages
+  // against the same list specifically to find what it missed. The two
+  // catch different failures: the first catches "the mechanics are on
+  // another page"; the critic catches everything else — an eligibility
+  // rule stated in a sentence the extractor skipped, a document mentioned
+  // once in passing, a detail invented that the pages never said.
   const foundProcess = result.requirements.some((r) => r.kind === "process");
   const worthDiggingFurther = pages[0]!.text.length > 800;
-  if (!foundProcess && worthDiggingFurther) {
+  let critique = worthDiggingFurther
+    ? await critiqueExtraction(pages, result.requirements)
+    : { complete: true, concerns: [] as string[] };
+
+  if ((!foundProcess || !critique.complete) && worthDiggingFurther) {
     const secondLinks = relatedLinks(primary.html, url, { limit: 3, exclude: read, broad: true });
     const more = await fetchLinks(secondLinks, 20_000, 8_000);
     if (more.length > 0) {
       pages.push(...more);
       result = await extractFromPages(pages);
+      // Checked again against the now-larger page set — concerns raised
+      // against pages that were never fetched in the first pass would be
+      // stale by construction.
+      critique = await critiqueExtraction(pages, result.requirements);
     }
   }
 
-  return result;
+  // Surfaced rather than acted on further: the critic is a second opinion
+  // for the consultant to weigh, not a loop that keeps spending model calls
+  // chasing a concern that may not resolve. A human who reads "the page
+  // mentions a required financial statement not listed here" can go look in
+  // ten seconds; a third automated round on the same two pages could not.
+  return { ...result, concerns: critique.concerns };
 }
 
 /**
@@ -394,6 +522,7 @@ export async function extractRequirementsFromText(
     requirements: parseRequirements(response.text),
     readText: text.slice(0, 4000),
     sourcesRead: [source],
+    concerns: [],
     provenance: {
       source,
       title: title ?? null,

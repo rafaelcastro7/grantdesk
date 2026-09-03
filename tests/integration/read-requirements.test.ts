@@ -97,7 +97,7 @@ describe("readRequirementsForGrant", () => {
     // here would be indistinguishable from a real, if sparse, extraction.
     const { data: stored } = await admin.from("requirements").select("id").eq("grant_id", grantId);
     expect(stored).toHaveLength(0);
-  }, 30_000);
+  }, 60_000);
 
   it("classifies how a call is submitted as 'process', never a drafted section", async () => {
     const result = await readRequirementsForGrant(admin, processGrantId);
@@ -135,5 +135,5 @@ describe("readRequirementsForGrant", () => {
     // already been read to get this far.
     if (!result.found) throw new Error("unreachable");
     expect(result.readText.length).toBeGreaterThan(200);
-  }, 30_000);
+  }, 60_000);
 });
