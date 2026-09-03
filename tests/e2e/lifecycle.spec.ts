@@ -108,6 +108,15 @@ test("a consultant goes from a new client to a recorded submission", async ({ pa
   await expect(card).toContainText(/\d+\/250 words/);
   await expect(page.getByTestId("draft-progress")).toContainText(/of \d+ sections drafted/);
 
+  // "Export as document" only appears once something has actually been
+  // drafted — nothing to export from a blank application. Clicking it opens
+  // the browser's print dialog, which Playwright's headless Chromium does
+  // not block on, so this only proves the control exists and is wired,
+  // not what the printed page looks like (that is print:hidden/print:block
+  // CSS, checked by hand).
+  await expect(page.getByTestId("export-print")).toBeVisible();
+  await page.getByTestId("export-print").click();
+
   // ── Filling what the draft admitted it did not know ───────────────────────
   // The model marks a missing fact as [NEED: ...] rather than inventing one,
   // and the submit gate refuses to send while any remain — a literal
@@ -124,6 +133,19 @@ test("a consultant goes from a new client to a recorded submission", async ({ pa
     await section.getByRole("button", { name: "Save" }).click();
     await expect(section.getByRole("button", { name: "Save" })).toBeHidden({ timeout: 30_000 });
   }
+
+  // ── A drafted section's history panel opens and reports itself honestly ───
+  // proposal_section_revisions only gets a row once something is overwritten
+  // — whether this particular section was one of those depends on whether
+  // its own draft happened to contain a [NEED:...] marker above, so this
+  // only proves the panel loads and renders one of its two honest states,
+  // not that a specific number of revisions exists.
+  await card.getByRole("button", { name: "History" }).click();
+  const panel = card.getByTestId("section-history");
+  await expect(panel).toBeVisible();
+  await expect(
+    panel.getByRole("button", { name: "Restore" }).or(panel.getByText("No earlier version")),
+  ).toBeVisible({ timeout: 10_000 });
 
   // Kept for reuse — the whole promised time saving on the next call.
   await card.getByRole("button", { name: "Keep for next time" }).click();
