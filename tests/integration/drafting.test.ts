@@ -283,6 +283,11 @@ describe("drafting", () => {
     // scratch, which costs more than writing it did.
     expect(result.draftedBy).toMatch(/\w+\/\w+/);
     expect(result.reusedAnswers.length).toBeGreaterThan(0);
+    // fabrications() itself is proven separately (tests/evals/drafting.eval.ts,
+    // src/lib/fabrication.test.ts); the point here is that a real draft, from
+    // real profile facts and a real answer, actually gets run through it —
+    // draftSection wired it in for the first time this session.
+    expect(Array.isArray(result.fabrications)).toBe(true);
   }, 180_000);
 
   it("counts each reuse, so the library can show what earns its keep", async () => {

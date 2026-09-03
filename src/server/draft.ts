@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { callLlm } from "./llm";
 import { ANSWER_EMBED_MODEL, embedOne } from "./embed";
 import { listPlaces } from "@/lib/applicant-types";
+import { fabrications, type Fabrication } from "@/lib/fabrication";
 
 /**
  * Draft one section, against one requirement.
@@ -72,6 +73,19 @@ export type DraftResult = {
    * anywhere said which had happened.
    */
   attempts: string[];
+  /**
+   * Anything the draft states that nobody told it — a name, a credential, a
+   * figure outside what the client's profile, their stored answers, or this
+   * call's own numbers actually say. Checked live now, not only in
+   * tests/evals/drafting.eval.ts's offline measurement: that eval proved the
+   * checker works, but a real consultant's draft was never actually run
+   * through it before this — measuring a fabrication rate and catching an
+   * individual fabrication are two different things, and only the first
+   * existed. Empty means none were found, not that every fact was verified
+   * against reality — a plausible number the profile happens to also state
+   * elsewhere is still not this checker's job.
+   */
+  fabrications: Fabrication[];
 };
 
 /**
@@ -317,12 +331,34 @@ export async function draftSection(
     await supabase.rpc("record_answer_use", { answer_ids: reused.map((a) => a.id) });
   }
 
+  // Every fact the model was actually shown, in both the raw and
+  // thousands-formatted shape it might reasonably render a number in —
+  // tests/evals/drafting.eval.ts's offline measurement proved this checker
+  // catches a real fabrication; nothing before this call ever ran a real
+  // consultant's draft through it, only synthetic eval fixtures.
+  const facts = [
+    client.capabilities,
+    client.beneficiaries,
+    ...reused.map((answer) => answer.content),
+    client.annualBudget?.toString(),
+    client.annualBudget?.toLocaleString("en-US"),
+    requirement.wordLimit?.toString(),
+    requirement.grant?.title,
+    requirement.grant?.funder,
+    requirement.grant?.deadline,
+    requirement.grant?.amountMin?.toString(),
+    requirement.grant?.amountMin?.toLocaleString("en-US"),
+    requirement.grant?.amountMax?.toString(),
+    requirement.grant?.amountMax?.toLocaleString("en-US"),
+  ].filter((fact): fact is string => typeof fact === "string" && fact.length > 0);
+
   return {
     content,
     wordCount: countWords(content),
     reusedAnswers: reused,
     draftedBy: `${response.provider}/${response.model}`,
     attempts: response.attempts,
+    fabrications: fabrications(content, facts),
   };
 }
 

@@ -153,6 +153,7 @@ export const draftProposalSection = createServerFn({ method: "POST" })
           reused_answer_ids: result.reusedAnswers.map((a) => a.id),
           drafted_by: result.draftedBy,
           word_count: result.wordCount,
+          fabrication_concerns: result.fabrications,
           sort_order: 0,
           updated_at: new Date().toISOString(),
         },
@@ -168,6 +169,7 @@ export const draftProposalSection = createServerFn({ method: "POST" })
           similarity: Number(a.similarity.toFixed(2)),
         })),
         draftedBy: result.draftedBy,
+        fabrications: result.fabrications,
       };
     } catch (caught) {
       if (caught instanceof NoProfileError) {

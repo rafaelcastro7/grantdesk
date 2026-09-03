@@ -39,6 +39,7 @@ type Section = {
   word_count: number | null;
   drafted_by: string | null;
   reused_answer_ids: string[];
+  fabrication_concerns: { kind: "number" | "spelled-number" | "person"; text: string }[];
 };
 
 /**
@@ -129,7 +130,9 @@ function ProposalPage() {
 
     const { data: secs } = await supabase()
       .from("proposal_sections")
-      .select("id, requirement_id, heading, content, word_count, drafted_by, reused_answer_ids")
+      .select(
+        "id, requirement_id, heading, content, word_count, drafted_by, reused_answer_ids, fabrication_concerns",
+      )
       .eq("proposal_id", id);
 
     const byRequirement: Record<string, Section> = {};
@@ -501,6 +504,9 @@ function ProposalPage() {
           // Edited by a person, so the previous model attribution no longer
           // describes it. Leaving it would misattribute the consultant's words.
           drafted_by: null,
+          // The fabrication check ran against the model's draft, not this
+          // edit — carrying it forward would flag text the consultant wrote.
+          fabrication_concerns: [],
           updated_at: new Date().toISOString(),
         },
         { onConflict: "proposal_id, requirement_id" },
@@ -1102,6 +1108,30 @@ function SectionCard({
           The usual models were unreachable, so this was written by the small local one. Read it
           closely before it goes anywhere, or draft it again now.
         </p>
+      )}
+
+      {/* Checked live now against everything the model was actually given —
+          the client's profile, their reused answers, this call's own
+          numbers — not only measured offline in tests/evals/drafting.eval.ts.
+          A hit here means the draft states something nobody told it, which
+          is exactly the thing a consultant cannot see by reading confident
+          prose. */}
+      {section && section.fabrication_concerns.length > 0 && (
+        <div
+          data-testid="fabrication-warning"
+          className="mt-2 rounded-md border border-[var(--color-needs-input)] bg-[var(--color-needs-input)]/10 p-3 text-sm"
+        >
+          <p className="font-medium text-[var(--color-needs-input)]">
+            Double-check before sending — this draft says things nobody gave it:
+          </p>
+          <ul className="mt-1 list-disc pl-5">
+            {section.fabrication_concerns.map((f, index) => (
+              <li key={index}>
+                {f.kind === "person" ? `Names someone unverified: "${f.text}"` : `"${f.text}"`}
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
     </li>
   );
