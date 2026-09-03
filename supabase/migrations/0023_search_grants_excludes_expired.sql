@@ -1,0 +1,19 @@
+-- 210 rows in the live catalog were status='open' with a deadline already in
+-- the past — confirmed directly against the database.
+--
+-- The first version of this migration also excluded expired-but-still-open
+-- grants from search_grants's own candidate pool, on the theory that they
+-- were diluting retrieval's fixed pool budget ahead of real opportunities.
+-- That broke tests/integration/match-verdicts.test.ts's "rules out a closed
+-- call and says when it closed" — deliberately, it turns out: match.ts's own
+-- comment states the product's actual policy is that retrieval never
+-- silently drops a result the client cannot get, it comes back marked
+-- ineligible with a stated reason instead (decideEligibility's deadlineRule
+-- already catches every one of these correctly, regardless of the stale
+-- status column). Excluding them from retrieval would have made a rejected
+-- result invisible instead of shown-with-reason, the opposite of that
+-- policy. Reverted; this migration keeps only the one-time data cleanup,
+-- which is genuinely just hygiene — it does not change what any consultant
+-- sees, since a closed-but-marked-open grant was already computed
+-- ineligible before this ran.
+update grants set status = 'closed' where status = 'open' and deadline < current_date;
