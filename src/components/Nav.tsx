@@ -10,6 +10,7 @@ const LINKS: Array<{ to: string; label: string; badge?: string }> = [
   { to: "/", label: "Due Radar", badge: "Live" },
   { to: "/clients", label: "Clients" },
   { to: "/catalog", label: "Funder Coverage" },
+  { to: "/design-system", label: "Design Tokens" },
 ];
 
 export function Nav() {

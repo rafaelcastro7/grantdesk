@@ -7,6 +7,7 @@ import { extractProfile } from "@/server/profile.functions";
 import { assessProfile, nextGap, type ProfileFields } from "@/lib/profile-completeness";
 import { ProposalPipelineBoard } from "@/components/ProposalPipelineBoard";
 import { GrantBudgetPlanner } from "@/components/GrantBudgetPlanner";
+import { GrantPrioritizationMatrix } from "@/components/GrantPrioritizationMatrix";
 
 export const Route = createFileRoute("/clients/$clientId")({ component: ClientDetail });
 
@@ -670,6 +671,39 @@ function ClientDetail() {
           ]}
         />
         <GrantBudgetPlanner grantMaxAmount={150000} />
+
+        {/* Prioritization Matrix */}
+        <GrantPrioritizationMatrix
+          grants={[
+            {
+              id: "m1",
+              title: "Clean Technology Innovation Program",
+              funderName: "Innovation Canada",
+              amountMax: 150000,
+              relevance: 0.92,
+              requirementCount: 3,
+              deadline: "2026-11-30",
+            },
+            {
+              id: "m2",
+              title: "Community Green Infrastructure Grant",
+              funderName: "Ontario Trillium Foundation",
+              amountMax: 75000,
+              relevance: 0.88,
+              requirementCount: 2,
+              deadline: "2026-10-15",
+            },
+            {
+              id: "m3",
+              title: "Subsidies for Youth Employment",
+              funderName: "ESDC Canada",
+              amountMax: 35000,
+              relevance: 0.75,
+              requirementCount: 4,
+              deadline: "2026-12-01",
+            },
+          ]}
+        />
       </section>
     </main>
   );

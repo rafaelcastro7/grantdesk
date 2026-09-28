@@ -1,6 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { ProposalApprovalWorkflow } from "@/components/ProposalApprovalWorkflow";
 import { GrantBudgetPlanner } from "@/components/GrantBudgetPlanner";
+import { ProposalDocumentExporter } from "@/components/ProposalDocumentExporter";
 import { useServerFn } from "@tanstack/react-start";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
@@ -1049,6 +1050,20 @@ function ProposalPage() {
             onStageChange={(newStage) => console.log("Stage changed to:", newStage)}
           />
           <GrantBudgetPlanner grantMaxAmount={100000} />
+
+          <ProposalDocumentExporter
+            clientName="Client Organization"
+            grantTitle={grant?.title || "Grant Proposal"}
+            funderName="Funder Program"
+            sections={
+              Array.isArray(sections)
+                ? sections.map((s: { heading?: string; content?: string | null }) => ({
+                    heading: s.heading || "Section",
+                    content: s.content ?? null,
+                  }))
+                : []
+            }
+          />
         </div>
       </main>
 
