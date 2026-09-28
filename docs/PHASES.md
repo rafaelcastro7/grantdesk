@@ -151,6 +151,7 @@ ever won this".
 **Done when:** RLS isolation tests prove tenant data is completely invisible to other tenants, discovery cycles run idempotently with 0 duplicate grant rows, and `bun run verify` passes 100%.
 
 **Closed.**
+
 - `tests/integration/tenant-isolation.test.ts` verified RLS isolation.
 - `tests/integration/continuous-discovery.test.ts` verified 0 duplicate growth on re-runs.
 - `src/server/notifications.test.ts` verified high-fidelity responsive email templates.

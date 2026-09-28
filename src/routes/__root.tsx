@@ -3,6 +3,7 @@ import { createRootRoute, HeadContent, Outlet, Scripts } from "@tanstack/react-r
 import { useEffect, type ReactNode } from "react";
 import styles from "../styles.css?url";
 import { Nav } from "@/components/Nav";
+import { AskGrantDeskChat } from "@/components/AskGrantDeskChat";
 
 export const Route = createRootRoute({
   head: () => ({
@@ -32,6 +33,7 @@ function RootComponent() {
   return (
     <RootDocument>
       <Nav />
+      <AskGrantDeskChat />
       <Outlet />
     </RootDocument>
   );

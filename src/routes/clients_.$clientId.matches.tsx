@@ -8,6 +8,7 @@ import { relevanceFrom } from "@/lib/match-explain";
 import { bandOf } from "@/lib/regions";
 import { axisBreakdown } from "@/lib/axis-breakdown";
 import { findMatches } from "@/server/match.functions";
+import { ExplainableFitScorecard } from "@/components/ExplainableFitScorecard";
 
 export const Route = createFileRoute("/clients_/$clientId/matches")({ component: MatchesPage });
 
@@ -417,6 +418,9 @@ function MatchCard({
           "restricted to a country you're not in" with "this award is a bit
           large for your budget", and there is no honest way to average a
           fact with a guess. */}
+      <div className="mt-3">
+        <ExplainableFitScorecard relevance={row.relevance} verdict={row.verdict} axes={axes} />
+      </div>
       {axes.length > 0 && (
         <ul data-testid="axis-breakdown" className="mt-2 flex flex-wrap gap-2 text-xs">
           {axes.map((axis) => (

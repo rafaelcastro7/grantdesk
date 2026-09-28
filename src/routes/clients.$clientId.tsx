@@ -5,6 +5,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { extractProfile } from "@/server/profile.functions";
 import { assessProfile, nextGap, type ProfileFields } from "@/lib/profile-completeness";
+import { ProposalPipelineBoard } from "@/components/ProposalPipelineBoard";
+import { GrantBudgetPlanner } from "@/components/GrantBudgetPlanner";
 
 export const Route = createFileRoute("/clients/$clientId")({ component: ClientDetail });
 
@@ -626,6 +628,49 @@ function ClientDetail() {
           </ul>
         </section>
       )}
+
+      {/* Lovable-Inspired Proposal Pipeline & Budget Tracker */}
+      <section className="mt-8 space-y-6" data-testid="proposal-pipeline-section">
+        <h2 className="text-lg font-bold text-[var(--color-ink)]">Proposal Funnel & Budgeting</h2>
+        <ProposalPipelineBoard
+          proposals={[
+            {
+              id: "p1",
+              grantId: "g1",
+              grantTitle: "Clean Technology Innovation Program",
+              funderName: "Innovation Canada",
+              amountMax: 150000,
+              currency: "CAD",
+              deadline: "2026-11-30",
+              relevance: 0.92,
+              stage: "draft",
+            },
+            {
+              id: "p2",
+              grantId: "g2",
+              grantTitle: "Community Green Infrastructure Grant",
+              funderName: "Ontario Trillium Foundation",
+              amountMax: 75000,
+              currency: "CAD",
+              deadline: "2026-10-15",
+              relevance: 0.88,
+              stage: "in_review",
+            },
+            {
+              id: "p3",
+              grantId: "g3",
+              grantTitle: "Subsidies for Youth Employment",
+              funderName: "ESDC Canada",
+              amountMax: 35000,
+              currency: "CAD",
+              deadline: "2026-12-01",
+              relevance: 0.75,
+              stage: "submitted",
+            },
+          ]}
+        />
+        <GrantBudgetPlanner grantMaxAmount={150000} />
+      </section>
     </main>
   );
 }

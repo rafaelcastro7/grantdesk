@@ -1,4 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { ProposalApprovalWorkflow } from "@/components/ProposalApprovalWorkflow";
+import { GrantBudgetPlanner } from "@/components/GrantBudgetPlanner";
 import { useServerFn } from "@tanstack/react-start";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
@@ -1029,6 +1031,25 @@ function ProposalPage() {
             )}
           </section>
         )}
+
+        {/* SmartRoute Workflow & Budget Planner */}
+        <div className="mt-6 space-y-6">
+          <ProposalApprovalWorkflow
+            currentStage="draft"
+            wordCount={
+              Array.isArray(sections)
+                ? sections.reduce(
+                    (sum: number, s: { word_count?: number | null }) => sum + (s.word_count || 0),
+                    0,
+                  )
+                : 0
+            }
+            wordLimit={5000}
+            unacknowledgedCount={0}
+            onStageChange={(newStage) => console.log("Stage changed to:", newStage)}
+          />
+          <GrantBudgetPlanner grantMaxAmount={100000} />
+        </div>
       </main>
 
       {/* Print-only: assembled as a plain document rather than mirroring the
