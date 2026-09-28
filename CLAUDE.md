@@ -16,9 +16,11 @@ bun run dev            # app on 5180
 bun run refresh        # read whatever is due by its own cadence, then embed. Hourly-safe.
 bun run ingest         # every source now, ignoring cadence
 bun run embed          # brings embeddings up to date (only re-embeds changed text)
+bun run scripts/daemon-continuous-discovery.ts        # 24/7 continuous discovery + email alert daemon
+bun run scripts/daemon-continuous-discovery.ts --once # single discovery pass and exit
 ```
 
-Prefer `refresh` — it is the one that leaves the catalog *searchable*. Ingestion
+Prefer `refresh` — it is the one that leaves the catalog _searchable_. Ingestion
 and embedding used to be separate commands, so a freshly ingested call was
 invisible to meaning-based search until someone ran the second one, and the
 eval shows the vector side is what finds vocabulary gaps and cross-language
@@ -51,7 +53,7 @@ bun run benchmark        # which provider should lead each role, measured today
 retired a model, Cerebras ran out of quota, and every call fell through to the
 small local model while every screen reported an ordinary success. It probes
 with real calls — listing a model is not evidence it can be called — and
-separates *broken* from *degraded*, exiting non-zero only for the first. A
+separates _broken_ from _degraded_, exiting non-zero only for the first. A
 check that cries wolf gets run with `|| true` within a week.
 
 `verify` must never depend on the network. A gate people learn to re-run is not
@@ -119,6 +121,22 @@ silently disappears is indistinguishable from one we never found.
   one failed write clobbers the optimistic state of the writes still in flight
   beside it. Three separate bugs on the proposal screen were this same shape: a
   read returning a snapshot older than the writes around it.
+
+- **Postgres unique index expressions must be strictly IMMUTABLE.**
+  Casting `(created_at::date)` in a unique index throws
+  "functions in index expression must be marked IMMUTABLE". Use an explicit
+  column such as `created_date date not null default current_date` and index
+  the plain column.
+- **Deduplicate alerts at the outbox layer.**
+  A continuous 24/7 discovery daemon re-evaluating matches can easily spam
+  consultants. An `email_outbox` table with a daily deduplication index
+  `(recipient_email, kind, grant_id, client_id, created_date)` prevents
+  repetitive notifications on identical days.
+- **Tenant subdomains and RLS.**
+  Subdomains (`iial.grantdesk.app`, `acme.grantdesk.ca`) route into
+  `src/lib/tenant.ts` and map to tenant isolation in PostgreSQL via
+  `public.belongs_to_tenant(tenant_id)`. Never let a query bypass tenant
+  scoping.
 
 ## House style
 

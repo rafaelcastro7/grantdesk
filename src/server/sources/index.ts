@@ -1,6 +1,7 @@
 import type { SourceAdapter } from "./types";
 import { grantsGov } from "./grants-gov";
 import { businessBenefitsFinder } from "./business-benefits-finder";
+import { craFoundations } from "./cra-foundations";
 
 /**
  * Every source the catalog draws on, and nothing else.
@@ -10,10 +11,15 @@ import { businessBenefitsFinder } from "./business-benefits-finder";
  * funder by hand without a source behind it is how the predecessor ended up
  * advertising 699 funders that search could not reach.
  */
-export const SOURCES: readonly SourceAdapter[] = [grantsGov, businessBenefitsFinder];
+export const SOURCES: readonly SourceAdapter[] = [
+  grantsGov,
+  businessBenefitsFinder,
+  craFoundations,
+];
 
 export function sourceByKey(key: string): SourceAdapter | undefined {
   return SOURCES.find((source) => source.key === key);
 }
 
 export type { SourceAdapter, SourceGrant, SourceFunder, SourceHarvest } from "./types";
+export { craFoundations };

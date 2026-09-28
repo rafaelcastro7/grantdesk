@@ -4,7 +4,7 @@
 
 ## Context
 
-GrantDesk replaces a system whose *engine* was sound and whose *surface* was not.
+GrantDesk replaces a system whose _engine_ was sound and whose _surface_ was not.
 An audit of the predecessor proved the pipeline end to end: 452 unit tests, 39
 e2e specs, a real proposal drafted and submitted, 3,014 ingested grants. The
 problems were organizational — two parallel UIs, documentation that contradicted

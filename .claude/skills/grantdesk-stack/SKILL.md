@@ -136,12 +136,12 @@ returns confident nonsense instead of an error.
   bounded by a small worker pool.
 - **Forecasted opportunities publish under `forecast`, not `synopsis`.** Reading
   only the latter silently dropped a third of the feed's descriptions.
-- **Detail *pages* are JavaScript shells.** Fetching a Grants.gov opportunity
+- **Detail _pages_ are JavaScript shells.** Fetching a Grants.gov opportunity
   URL returns a document containing none of its own requirements. Read from the
   text ingestion already captured; fall back to the URL only when we hold
   nothing.
 - **Never infer structured eligibility from prose.** A false positive there
-  creates a *hard gate* that wrongly rules a client out. Innovation Canada's
+  creates a _hard gate_ that wrongly rules a client out. Innovation Canada's
   workbook publishes no applicant list, so Canadian calls report applicant type
   as unverified — an honest asymmetry, surfaced rather than smoothed over.
 - **Prior winners come from USAspending**, keyed on the Assistance Listing
@@ -212,7 +212,7 @@ const INVISIBLES = new RegExp(["\\uFEFF", "\\u200B", "\\u200C"].join("|"), "g");
 ## This machine has no GPU, and that decides the local model
 
 An i7-6700HQ from 2015, four physical cores, 48 GB of RAM, Intel HD 530
-integrated graphics. Everything runs on CPU, so a model's size *is* its speed
+integrated graphics. Everything runs on CPU, so a model's size _is_ its speed
 and speed is a quality attribute rather than a comfort: a draft nobody waits
 for was not produced.
 
@@ -225,7 +225,7 @@ Measured (`bun run benchmark:local`):
 This is why a lifecycle e2e run that falls through to the local model takes
 five minutes. It is physics, not a defect.
 
-Two things that are *not* the model:
+Two things that are _not_ the model:
 
 - **Load time was half the cost.** A cold load is 6.9s before a single token;
   warm is 0.8s. Ollama unloads after five minutes idle, which is exactly the
@@ -266,3 +266,10 @@ Once applied anywhere, a migration is history — add a new one rather than
 editing it, or the file disagrees with every database that ran it.
 `bun run db:migrate` will not re-run an applied file, so an edit simply never
 takes effect.
+
+## Subdomain Multi-Tenancy & Email Outbox Deduplication
+
+- **Subdomain Routing**: `src/lib/tenant.ts` extracts tenant slug from hostname (`iial.grantdesk.app`, `iial.localhost:5180`), search param (`?tenant=iial`), or header (`x-tenant-slug`).
+- **Tenant RLS Guard**: Postgres migration `0025_tenants_and_subdomains.sql` implements `public.belongs_to_tenant(tenant_id)` as `security definer` avoiding recursion.
+- **Continuous 24/7 Discovery**: `scripts/daemon-continuous-discovery.ts` runs periodic loops. Grants are deduplicated via deterministic SHA-256 `sourceHash(sourceKey, externalId)`.
+- **Email Deduplication**: `0026_discovery_alerts_and_outbox.sql` creates `email_outbox` with unique index on `(recipient_email, kind, grant_id, client_id, created_date)`. Avoid casting `(created_at::date)` inside Postgres index definitions.

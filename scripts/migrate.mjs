@@ -18,16 +18,48 @@ const CONTAINER = "grantdesk-db";
 const STATUS_ONLY = process.argv.includes("--status");
 
 function psql(sql) {
-  return execFileSync("docker", ["exec", "-i", CONTAINER, "psql", "-U", "postgres", "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-t", "-A", "-c", sql], {
-    encoding: "utf8",
-    maxBuffer: 32 * 1024 * 1024,
-  }).trim();
+  return execFileSync(
+    "docker",
+    [
+      "exec",
+      "-i",
+      CONTAINER,
+      "psql",
+      "-U",
+      "postgres",
+      "-d",
+      "postgres",
+      "-v",
+      "ON_ERROR_STOP=1",
+      "-t",
+      "-A",
+      "-c",
+      sql,
+    ],
+    {
+      encoding: "utf8",
+      maxBuffer: 32 * 1024 * 1024,
+    },
+  ).trim();
 }
 
 function psqlFile(sqlText) {
   execFileSync(
     "docker",
-    ["exec", "-i", CONTAINER, "psql", "-U", "postgres", "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-f", "-"],
+    [
+      "exec",
+      "-i",
+      CONTAINER,
+      "psql",
+      "-U",
+      "postgres",
+      "-d",
+      "postgres",
+      "-v",
+      "ON_ERROR_STOP=1",
+      "-f",
+      "-",
+    ],
     { input: sqlText, stdio: ["pipe", "inherit", "inherit"], maxBuffer: 32 * 1024 * 1024 },
   );
 }

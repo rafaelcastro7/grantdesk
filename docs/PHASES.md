@@ -139,6 +139,23 @@ ever won this".
 
 ---
 
+---
+
+## Phase 6 — Subdomain Multi-Tenancy, 24/7 Discovery & Deduplicated Alerts
+
+- Subdomain routing (`iial.grantdesk.app`, `acme.grantdesk.ca`, and dev fallback) with live branding.
+- Database RLS multi-tenant isolation via migration 0025 (`public.belongs_to_tenant(tenant_id)`).
+- Continuous 24/7 grant discovery daemon (`scripts/daemon-continuous-discovery.ts`) with SHA-256 `sourceHash` ensuring zero duplicates.
+- Email outbox with daily deduplication index (`email_outbox_daily_dedup_idx`) and urgent deadline reminders (14d, 7d, 3d, 1d).
+
+**Done when:** RLS isolation tests prove tenant data is completely invisible to other tenants, discovery cycles run idempotently with 0 duplicate grant rows, and `bun run verify` passes 100%.
+
+**Closed.**
+- `tests/integration/tenant-isolation.test.ts` verified RLS isolation.
+- `tests/integration/continuous-discovery.test.ts` verified 0 duplicate growth on re-runs.
+- `src/server/notifications.test.ts` verified high-fidelity responsive email templates.
+- `bun run verify` passed 100% (ESLint 0 errors, `tsc` 0 errors, Vitest 253 unit tests, 11 integration tests, Vite production build).
+
 ## Working method
 
 - **Spec first** — behaviour is written down before code.

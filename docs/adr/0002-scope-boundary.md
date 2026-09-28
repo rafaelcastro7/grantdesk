@@ -7,7 +7,7 @@
 The predecessor reached 39 authenticated pages, 59 database tables and 67,025
 lines in `src`. None of that was careless: a compliance calendar, financial
 tracking, impact measurement and renewal prediction were each somebody's real
-need. It grew because there was never a written rule for what does *not* belong.
+need. It grew because there was never a written rule for what does _not_ belong.
 
 Proposing "six screens instead of thirty-nine" without that rule just schedules
 the same outcome for six months from now.

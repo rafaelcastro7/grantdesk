@@ -8,7 +8,7 @@ The competitive picture, checked rather than assumed:
 
 **Submittable** is funder-side software — form builders, review workflows,
 disbursement. It is not a competitor to this product; a consultant helping
-organizations *apply* is not its user, and reviewers say so plainly. Its pricing
+organizations _apply_ is not its user, and reviewers say so plainly. Its pricing
 ($1k–$10k+/year) is for running a grant program, not seeking one.
 
 **Instrumentl** ($179–$899/month) is the real comparison. It does exactly what

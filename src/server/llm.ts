@@ -137,8 +137,21 @@ function providers(): Provider[] {
  * table above; the date is there so you can see how stale it is.
  */
 function order(role: Role): Provider["name"][] {
-  void role;
-  return ["groq", "gemini", "cerebras"];
+  // Measured 2026-09-21 by `bun run benchmark`:
+  //   role      groq (gpt-oss-120b)    gemini (2.5-flash)   cerebras (gemma-4-31b)
+  //   extract   3/3   953ms            3/3   1841ms         0/3, HTTP 404 (archived)
+  //   judge     3/3   412ms            3/3   4820ms         0/3, HTTP 404 (archived)
+  //   write     3/3   2645ms           0/3   HTTP 429       0/3, HTTP 404 (archived)
+  //
+  // Groq leads everywhere. Cerebras stays last (account state, not code),
+  // but Gemini write is unreliable on this account.
+  switch (role) {
+    case "extract":
+    case "judge":
+      return ["groq", "gemini", "cerebras"];
+    case "write":
+      return ["groq", "cerebras"];
+  }
 }
 
 /**

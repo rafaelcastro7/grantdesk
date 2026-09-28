@@ -45,10 +45,10 @@ corpus put a number on it: 33% cross-language recall. The Spanish row was
 found; both French rows were missed entirely. Measured directly, against an
 English profile about ravine restoration:
 
-| embedder | relevant FR | irrelevant FR | separation |
-|---|---|---|---|
-| nomic-embed-text (768d) | 0.5537 | 0.4699 | 0.084 |
-| bge-m3 (1024d) | 0.7557 | 0.5299 | 0.226 |
+| embedder                | relevant FR | irrelevant FR | separation |
+| ----------------------- | ----------- | ------------- | ---------- |
+| nomic-embed-text (768d) | 0.5537      | 0.4699        | 0.084      |
+| bge-m3 (1024d)          | 0.7557      | 0.5299        | 0.226      |
 
 nomic-embed-text is an English model. It rated a relevant French call barely
 above an irrelevant one, and a gap that small does not survive three thousand
@@ -71,7 +71,7 @@ The important design choice is that a rule returns **pass, fail, or unknown**,
 not a boolean. Unknown means the funder did not publish enough to decide.
 Folding that into a pass would claim verification we did not perform; folding
 it into a fail would invent a restriction the funder never stated. Keeping it
-as a third answer is what separates a *verified* match from a plausible one,
+as a third answer is what separates a _verified_ match from a plausible one,
 and it is what the `needs_input` verdict is built on.
 
 Ineligible results are stored and shown, collapsed. Filtering them out in SQL
@@ -87,18 +87,18 @@ about 77% of its opportunities; Innovation Canada's workbook publishes none, so
 Canadian calls report applicant type as unverified rather than guessed. This
 asymmetry is real and is surfaced rather than smoothed over — inferring
 applicant types from description prose was considered and rejected, because a
-false positive there creates a *hard gate* that wrongly rules a client out.
+false positive there creates a _hard gate_ that wrongly rules a client out.
 
 ## Measured
 
 `bun run eval:match`, over a hand-labelled corpus built around vocabulary gaps
 and deliberate lexical traps:
 
-| arm | P@5 | recall | traps in top 5 | cross-language recall |
-|---|---|---|---|---|
-| keyword baseline (the predecessor's `ilike` scan) | 24% | 25% | 6 | 0% |
-| hybrid, English embedder | 67% | 83% | 2 | 33% |
-| hybrid, multilingual embedder | **80%** | **100%** | **0** | **100%** |
+| arm                                               | P@5     | recall   | traps in top 5 | cross-language recall |
+| ------------------------------------------------- | ------- | -------- | -------------- | --------------------- |
+| keyword baseline (the predecessor's `ilike` scan) | 24%     | 25%      | 6              | 0%                    |
+| hybrid, English embedder                          | 67%     | 83%      | 2              | 33%                   |
+| hybrid, multilingual embedder                     | **80%** | **100%** | **0**          | **100%**              |
 
 P@5's ceiling on that corpus is 80% — each profile has only four relevant
 grants for five slots — so hybrid retrieval now reaches the maximum achievable
