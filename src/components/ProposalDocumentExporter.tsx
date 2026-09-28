@@ -41,10 +41,7 @@ export function ProposalDocumentExporter({ clientName, grantTitle, funderName, s
     alert("Markdown proposal copied to clipboard!");
   };
 
-  const totalWords = sections.reduce(
-    (sum, s) => sum + (s.content ? s.content.split(/\s+/).filter(Boolean).length : 0),
-    0,
-  );
+  const totalWords = sections.reduce((sum, s) => sum + (s.content ? s.content.split(/\s+/).filter(Boolean).length : 0), 0);
 
   return (
     <div>
@@ -104,9 +101,7 @@ export function ProposalDocumentExporter({ clientName, grantTitle, funderName, s
                   <h1 className="text-2xl font-bold font-sans mt-3 text-slate-900 dark:text-slate-100">
                     {grantTitle}
                   </h1>
-                  <p className="text-sm font-sans text-slate-500 mt-1">
-                    Submitted to: {funderName}
-                  </p>
+                  <p className="text-sm font-sans text-slate-500 mt-1">Submitted to: {funderName}</p>
                 </div>
 
                 <div className="border-t border-slate-200 dark:border-slate-800 pt-6 font-sans text-xs space-y-1">
@@ -118,11 +113,7 @@ export function ProposalDocumentExporter({ clientName, grantTitle, funderName, s
                   </div>
                   <div>
                     <strong>Date Prepared:</strong>{" "}
-                    {new Date().toLocaleDateString("en-US", {
-                      year: "numeric",
-                      month: "long",
-                      day: "numeric",
-                    })}
+                    {new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}
                   </div>
                   <div>
                     <strong>Platform Governance:</strong> IIAL GrantDesk Verified Compliance
@@ -168,9 +159,7 @@ export function ProposalDocumentExporter({ clientName, grantTitle, funderName, s
                       {idx + 1}. {sec.heading}
                     </h3>
                     <div className="text-sm leading-relaxed whitespace-pre-wrap text-slate-800 dark:text-slate-200 font-sans">
-                      {sec.content || (
-                        <em className="text-slate-400">Draft content pending completion.</em>
-                      )}
+                      {sec.content || <em className="text-slate-400">Draft content pending completion.</em>}
                     </div>
                   </div>
                 ))}

@@ -34,11 +34,9 @@ export function AskGrantDeskChat() {
         reply +=
           "Found 3 matching opportunities in Ontario for clean technology: 1. Sustainable Development Technology Canada (SDTC) Seed Fund, 2. Ontario Centre of Innovation (OCI) Voucher Program, 3. ECCC Clean Growth Grant.";
       } else if (lower.includes("quick") || lower.includes("win")) {
-        reply +=
-          "Identified 2 Quick-Win grants with estimated ROI > $5,000/hr and < 15 writing hours required.";
+        reply += "Identified 2 Quick-Win grants with estimated ROI > $5,000/hr and < 15 writing hours required.";
       } else {
-        reply +=
-          "Based on client profiles, 4 open calls match your eligibility requirements with 85%+ confidence.";
+        reply += "Based on client profiles, 4 open calls match your eligibility requirements with 85%+ confidence.";
       }
       setMessages((prev) => [...prev, { sender: "ai", text: reply }]);
     }, 500);
@@ -51,9 +49,7 @@ export function AskGrantDeskChat() {
         onClick={() => setIsOpen(true)}
         className="fixed bottom-5 right-5 p-3 rounded-full bg-indigo-600 text-white shadow-lg hover:bg-indigo-700 transition-transform active:scale-95 text-xs font-bold flex items-center gap-2 cursor-pointer z-50"
       >
-        <span>
-          💬 Ask GrantDesk <kbd className="text-[10px] opacity-75 font-mono">⌘K</kbd>
-        </span>
+        <span>💬 Ask GrantDesk <kbd className="text-[10px] opacity-75 font-mono">⌘K</kbd></span>
       </button>
     );
   }
