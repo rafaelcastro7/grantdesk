@@ -41,6 +41,11 @@ export function ProposalDocumentExporter({ clientName, grantTitle, funderName, s
     alert("Markdown proposal copied to clipboard!");
   };
 
+  const totalWords = sections.reduce(
+    (sum, s) => sum + (s.content ? s.content.split(/\s+/).filter(Boolean).length : 0),
+    0,
+  );
+
   return (
     <div>
       <button
@@ -48,7 +53,7 @@ export function ProposalDocumentExporter({ clientName, grantTitle, funderName, s
         onClick={() => setIsOpen(true)}
         className="px-3 py-1.5 text-xs font-semibold rounded-md bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900 hover:opacity-90 cursor-pointer flex items-center gap-1.5"
       >
-        <span>📄 Export Proposal Document</span>
+        <span>📄 Export Proposal Document ({totalWords} words)</span>
       </button>
 
       {isOpen && (
@@ -109,6 +114,9 @@ export function ProposalDocumentExporter({ clientName, grantTitle, funderName, s
                     <strong>Applicant Organization:</strong> {clientName}
                   </div>
                   <div>
+                    <strong>Total Word Count:</strong> {totalWords} words
+                  </div>
+                  <div>
                     <strong>Date Prepared:</strong>{" "}
                     {new Date().toLocaleDateString("en-US", {
                       year: "numeric",
@@ -117,9 +125,36 @@ export function ProposalDocumentExporter({ clientName, grantTitle, funderName, s
                     })}
                   </div>
                   <div>
-                    <strong>Platform Governance:</strong> IIAL GrantDesk Verified
+                    <strong>Platform Governance:</strong> IIAL GrantDesk Verified Compliance
                   </div>
                 </div>
+              </div>
+
+              {/* RFP Compliance Matrix Appendix */}
+              <div className="bg-white dark:bg-slate-900 p-8 border border-slate-200 dark:border-slate-800 rounded-lg shadow-sm font-sans space-y-4">
+                <h3 className="text-sm font-bold uppercase tracking-wider text-slate-500 border-b pb-2">
+                  RFP Compliance Matrix Appendix
+                </h3>
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="border-b border-slate-200 text-slate-400 uppercase text-[10px]">
+                      <th className="py-2">Requirement</th>
+                      <th className="py-2">Section Addressed</th>
+                      <th className="py-2 text-right">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {sections.map((s, idx) => (
+                      <tr key={idx}>
+                        <td className="py-2 font-medium">{s.heading}</td>
+                        <td className="py-2 text-slate-500">Section {idx + 1}</td>
+                        <td className="py-2 text-right font-bold text-emerald-600">
+                          {s.content ? "✓ Compliant" : "⚠ Pending"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
 
               {/* Sections */}
