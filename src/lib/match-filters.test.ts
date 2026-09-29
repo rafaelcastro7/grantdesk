@@ -117,6 +117,48 @@ describe("match filters", () => {
     ).toEqual(["fit-home"]);
   });
 
+  it("filters by specific country", () => {
+    const rows = [
+      row({ title: "ca-call", country: "CA" }),
+      row({ title: "us-call", country: "US" }),
+      row({ title: "mx-call", country: "MX" }),
+    ];
+    expect(
+      applyMatchFilters(rows, { ...DEFAULT_MATCH_FILTERS, country: "US" }, opts).map(
+        (r) => r.grants?.title,
+      ),
+    ).toEqual(["us-call"]);
+    expect(
+      applyMatchFilters(rows, { ...DEFAULT_MATCH_FILTERS, country: "CA" }, opts).map(
+        (r) => r.grants?.title,
+      ),
+    ).toEqual(["ca-call"]);
+    expect(
+      applyMatchFilters(rows, { ...DEFAULT_MATCH_FILTERS, country: "any" }, opts).map(
+        (r) => r.grants?.title,
+      ),
+    ).toEqual(["ca-call", "us-call", "mx-call"]);
+  });
+
+  it("country filter and homeOnly combine as intersection (empty when different)", () => {
+    const rows = [
+      row({ title: "ca-call", country: "CA" }),
+      row({ title: "us-call", country: "US" }),
+    ];
+    // homeOnly=true (home=CA) + country=US = no results (intersection)
+    expect(
+      applyMatchFilters(rows, { ...DEFAULT_MATCH_FILTERS, homeOnly: true, country: "US" }, opts).map(
+        (r) => r.grants?.title,
+      ),
+    ).toEqual([]);
+    // homeOnly=true (home=CA) + country=CA = CA results
+    expect(
+      applyMatchFilters(rows, { ...DEFAULT_MATCH_FILTERS, homeOnly: true, country: "CA" }, opts).map(
+        (r) => r.grants?.title,
+      ),
+    ).toEqual(["ca-call"]);
+  });
+
   it("sorts by nearest deadline, rolling last", () => {
     const rows = [
       row({ title: "b", deadline: "2027-01-01" }),

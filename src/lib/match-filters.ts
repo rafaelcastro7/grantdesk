@@ -27,6 +27,8 @@ export type MatchFilters = {
   minAmount: number | null;
   /** Amounts are only comparable within one currency; "any" compares none. */
   currency: string;
+  /** Filter by specific country code (e.g., "US", "CA"). "any" = no filter. */
+  country: string;
   role: "any" | "lead" | "funded_partner";
   fitOnly: boolean;
   homeOnly: boolean;
@@ -38,6 +40,7 @@ export const DEFAULT_MATCH_FILTERS: MatchFilters = {
   closes: "any",
   minAmount: null,
   currency: "any",
+  country: "any",
   role: "any",
   fitOnly: false,
   homeOnly: false,
@@ -86,6 +89,8 @@ export function applyMatchFilters<T extends FilterableMatch>(
       const fit = m.eligibility_checks.find((c) => c.rule_key === "strategic_fit");
       if (fit?.status !== "pass") return false;
     }
+    // Country filter: if a specific country is selected, only show grants from that country
+    if (filters.country !== "any" && g.country !== filters.country) return false;
     if (filters.homeOnly && !options.isHome(g.country)) return false;
     return true;
   });
@@ -111,6 +116,7 @@ export function isFiltering(filters: MatchFilters): boolean {
     filters.closes !== "any" ||
     (filters.minAmount !== null && filters.currency !== "any") ||
     filters.currency !== "any" ||
+    filters.country !== "any" ||
     filters.role !== "any" ||
     filters.fitOnly ||
     filters.homeOnly

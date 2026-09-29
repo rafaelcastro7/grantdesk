@@ -235,6 +235,11 @@ function MatchesPage() {
       (matches ?? []).map((m) => m.grants?.currency?.toUpperCase()).filter((c): c is string => !!c),
     ),
   ].sort();
+  const countries = [
+    ...new Set(
+      (matches ?? []).map((m) => m.grants?.country?.toUpperCase()).filter((c): c is string => !!c),
+    ),
+  ].sort();
   const set = (patch: Partial<MatchFilters>) => setFilters((current) => ({ ...current, ...patch }));
 
   return (
@@ -375,6 +380,24 @@ function MatchesPage() {
             >
               <option value="any">{t("matches.filter.currencyAny")}</option>
               {currencies.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-xs uppercase tracking-wide text-[var(--color-ink-soft)]">
+              {t("matches.filter.country")}
+            </span>
+            <select
+              aria-label={t("matches.filter.country")}
+              value={filters.country}
+              onChange={(e) => set({ country: e.target.value })}
+              className="rounded-md border border-[var(--color-rule)] bg-[var(--color-paper)] px-2 py-1.5"
+            >
+              <option value="any">{t("matches.filter.countryAny")}</option>
+              {countries.map((c) => (
                 <option key={c} value={c}>
                   {c}
                 </option>
