@@ -297,6 +297,7 @@ function MatchesPage() {
             </span>
             <input
               type="search"
+              aria-label="Search title, summary or funder"
               value={filters.text}
               onChange={(e) => set({ text: e.target.value })}
               placeholder="e.g. climate adaptation, micro-credentials, Ontario"
@@ -308,6 +309,7 @@ function MatchesPage() {
               Closes
             </span>
             <select
+              aria-label="Closes"
               value={filters.closes}
               onChange={(e) => set({ closes: e.target.value as MatchFilters["closes"] })}
               className="rounded-md border border-[var(--color-rule)] bg-[var(--color-paper)] px-2 py-1.5"
@@ -323,6 +325,7 @@ function MatchesPage() {
               Role
             </span>
             <select
+              aria-label="Role"
               value={filters.role}
               onChange={(e) => set({ role: e.target.value as MatchFilters["role"] })}
               className="rounded-md border border-[var(--color-rule)] bg-[var(--color-paper)] px-2 py-1.5"
@@ -337,6 +340,7 @@ function MatchesPage() {
               Currency
             </span>
             <select
+              aria-label="Currency"
               value={filters.currency}
               onChange={(e) => set({ currency: e.target.value })}
               className="rounded-md border border-[var(--color-rule)] bg-[var(--color-paper)] px-2 py-1.5"
@@ -356,6 +360,7 @@ function MatchesPage() {
             <input
               type="text"
               inputMode="numeric"
+              aria-label="Minimum award"
               value={filters.minAmount ?? ""}
               disabled={filters.currency === "any"}
               title={filters.currency === "any" ? "Choose a currency first" : undefined}
@@ -372,6 +377,7 @@ function MatchesPage() {
               Sort
             </span>
             <select
+              aria-label="Sort"
               value={filters.sort}
               onChange={(e) => set({ sort: e.target.value as MatchFilters["sort"] })}
               className="rounded-md border border-[var(--color-rule)] bg-[var(--color-paper)] px-2 py-1.5"

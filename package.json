@@ -14,6 +14,7 @@
     "test:watch": "node node_modules/vitest/vitest.mjs --config vitest.config.ts",
     "test:integration": "node node_modules/vitest/vitest.mjs run --config vitest.integration.config.ts",
     "test:e2e": "node node_modules/playwright/cli.js test",
+    "test:agents": "node node_modules/playwright/cli.js test tests/e2e/synthetic-agents.spec.ts",
     "verify": "bun run lint && bun run typecheck && bun run test && bun run build",
     "db:up": "docker compose -p grantdesk -f supabase/docker-compose.yml up -d",
     "db:down": "docker compose -p grantdesk -f supabase/docker-compose.yml down",
