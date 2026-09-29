@@ -222,47 +222,40 @@ export const draftProposalSection = createServerFn({ method: "POST" })
         return { ok: false as const, error: "This application was submitted and is locked." };
       }
 
-      const result = await draftSection(supabase, data.clientId, target);
-
-      // Captured before the overwrite below, so a re-draft that turns out
-      // worse than the last one is a click to go back to, not a rewrite from
-      // scratch. If the old version cannot be kept, the new one is not written.
-      const { data: previous, error: previousError } = await supabase
+      // The version this draft replaces, read before the (slow) model call:
+      // if anyone saves the section while the model is writing, the save
+      // below is refused instead of silently overwriting their work.
+      const { data: before, error: beforeError } = await supabase
         .from("proposal_sections")
-        .select("content, word_count, drafted_by")
+        .select("updated_at")
         .eq("proposal_id", data.proposalId)
         .eq("requirement_id", data.requirementId)
         .maybeSingle();
-      if (previousError) throw new Error(previousError.message);
-      if (previous?.content?.trim()) {
-        const { error: revisionError } = await supabase.from("proposal_section_revisions").insert({
-          proposal_id: data.proposalId,
-          requirement_id: data.requirementId,
-          content: previous.content,
-          word_count: previous.word_count,
-          drafted_by: previous.drafted_by,
-        });
-        if (revisionError) {
-          throw new Error(`the previous version could not be kept: ${revisionError.message}`);
-        }
-      }
+      if (beforeError) throw new Error(beforeError.message);
 
-      const { error: writeError } = await supabase.from("proposal_sections").upsert(
-        {
-          proposal_id: data.proposalId,
-          requirement_id: data.requirementId,
-          heading: target.label,
-          content: result.content,
-          reused_answer_ids: result.reusedAnswers.map((a) => a.id),
-          drafted_by: result.draftedBy,
-          word_count: result.wordCount,
-          fabrication_concerns: result.fabrications,
-          sort_order: 0,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: "proposal_id, requirement_id" },
-      );
-      if (writeError) throw new Error(writeError.message);
+      const result = await draftSection(supabase, data.clientId, target);
+
+      // Saved through save_section: the database keeps the current text as a
+      // revision under a row lock, and the submitted-lock trigger refuses if
+      // the application was sent while the model was writing.
+      const { error: writeError } = await supabase.rpc("save_section", {
+        target_proposal: data.proposalId,
+        target_requirement: data.requirementId,
+        new_heading: target.label,
+        new_content: result.content,
+        new_word_count: result.wordCount,
+        new_drafted_by: result.draftedBy,
+        new_fabrication_concerns: result.fabrications,
+        new_reused_answer_ids: result.reusedAnswers.map((a) => a.id),
+        expected_updated_at: (before as { updated_at: string } | null)?.updated_at ?? null,
+      });
+      if (writeError) {
+        throw new Error(
+          /changed by someone else/.test(writeError.message)
+            ? "Someone saved this section while the draft was being written, so the draft was not saved over their work. Reload and draft again."
+            : writeError.message,
+        );
+      }
 
       return {
         ok: true as const,

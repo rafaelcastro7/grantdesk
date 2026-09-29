@@ -26,6 +26,40 @@ function check(decision: ReturnType<typeof decideEligibility>, key: string) {
   return found;
 }
 
+describe("federal notice wording (audit 2026-09-29)", () => {
+  it("reads the NIH list form of foreign eligibility, and still honours its negation", () => {
+    expect(
+      statesForeignEligibility(
+        "Other Eligible Applicants include the following: Alaska Native Corporations; Non-domestic (non-U.S.) Entities (Foreign Organizations); Regional Organizations.",
+      ),
+    ).toBe(true);
+    expect(
+      statesForeignEligibility(
+        "Non-domestic (non-U.S.) Entities (Foreign Organizations) are not eligible to apply.",
+      ),
+    ).toBe(false);
+  });
+
+  it("never treats a forecast as open, and says when the estimate has passed", () => {
+    const upcoming = decideEligibility(
+      input({ grant: { status: "forecasted", deadline: null, estimatedDeadline: "2026-11-25" } }),
+    );
+    expect(upcoming.verdict).toBe("needs_input");
+    expect(check(upcoming, "deadline").detail).toMatch(/Forecast only.*2026-11-25/);
+
+    const stale = decideEligibility(
+      input({ grant: { status: "forecasted", deadline: null, estimatedDeadline: "2025-11-25" } }),
+    );
+    expect(check(stale, "deadline").detail).toMatch(/has passed without the call opening/);
+  });
+
+  it("uses the source's structured cost-share flag when the prose states no share", () => {
+    const decision = decideEligibility(input({ grant: { costSharingRequired: true } }));
+    expect(check(decision, "cost_share").status).toBe("fail");
+    expect(check(decision, "cost_share").detail).toMatch(/requiring cost sharing/);
+  });
+});
+
 describe("jurisdiction", () => {
   it("rules out a grant restricted to a country the client is not in, and says which", () => {
     const decision = decideEligibility(input({ grant: { country: "US" } }));

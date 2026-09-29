@@ -263,7 +263,7 @@ export function PipelineLog({ clientId }: { clientId: string }) {
                 onClick={() => setFilter(key)}
                 className={`rounded-full border px-3 py-1 text-xs ${
                   filter === key
-                    ? "border-[var(--color-accent)] bg-[var(--color-accent)] text-white"
+                    ? "border-[var(--color-accent)] bg-[var(--color-accent-strong)] text-white"
                     : "border-[var(--color-rule)]"
                 }`}
               >

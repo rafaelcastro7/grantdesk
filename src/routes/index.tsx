@@ -3,6 +3,8 @@ import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { Landing } from "@/components/Landing";
 import { daysUntilDeadline } from "@/lib/deadline";
+import { buildIcs } from "@/lib/ics";
+import { useDocumentTitle } from "@/lib/use-document-title";
 
 export const Route = createFileRoute("/")({ component: Home });
 
@@ -46,6 +48,7 @@ const OUTCOME_LABEL: Record<string, string> = {
  * it should have to be.
  */
 function Home() {
+  useDocumentTitle("What is due");
   const [rows, setRows] = useState<Row[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [signedIn, setSignedIn] = useState<boolean | null>(null);
@@ -130,6 +133,34 @@ function Home() {
       <p className="mt-2 max-w-prose text-sm text-[var(--color-ink-soft)]">
         Every application in progress, across every client, soonest first.
       </p>
+      {open.some((r) => r.grants?.deadline) && (
+        <button
+          type="button"
+          onClick={() => {
+            const ics = buildIcs(
+              open
+                .filter((r) => r.grants?.deadline)
+                .map((r) => ({
+                  uid: r.id,
+                  title: r.grants?.title ?? "Application",
+                  client: r.clients?.name ?? "Client",
+                  deadline: r.grants!.deadline!,
+                  url: `${window.location.origin}/clients/${r.client_id}/proposals/${r.grant_id}`,
+                  note: r.decision ? `Decision: ${DECISION_LABEL[r.decision] ?? r.decision}` : null,
+                })),
+            );
+            const url = URL.createObjectURL(new Blob([ics], { type: "text/calendar" }));
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = "grantdesk-deadlines.ics";
+            a.click();
+            URL.revokeObjectURL(url);
+          }}
+          className="mt-3 rounded-md border border-[var(--color-rule)] px-3 py-1.5 text-sm font-medium"
+        >
+          Add these deadlines to my calendar (.ics)
+        </button>
+      )}
 
       {error && (
         <p role="alert" className="mt-4 text-sm text-[var(--color-ineligible)]">

@@ -36,6 +36,9 @@ const COLUMNS =
   "recommendation, recommendation_reason, condition, decision, condition_met, decided_by, " +
   "decision_reason, decided_at, updated_at, recorder:consultants!opportunity_decisions_decided_by_user_fkey(email)";
 
+const CONFLICT =
+  "Not saved — someone else saved this brief since you opened it. Copy anything you need, then reload to see their version.";
+
 export type BriefPrefill = {
   deadline: string | null;
   amountMax: number | null;
@@ -196,40 +199,51 @@ export function OpportunityBrief({
     setMessage(null);
     setFailure(null);
     try {
-      const { error } = await supabase()
-        .from("opportunity_decisions")
-        .upsert(
-          {
-            client_id: clientId,
-            grant_id: grantId,
-            role: text("role"),
-            role_other: text("roleOther"),
-            intake: text("intake"),
-            application_structure: text("applicationStructure"),
-            strategic_angle: text("strategicAngle"),
-            mandatory_components: text("mandatoryComponents"),
-            ...amounts,
-            cash_match_confirmed: form.get("cashMatchConfirmed") === "on",
-            risks: text("risks"),
-            recommendation: text("recommendation"),
-            recommendation_reason: text("recommendationReason"),
-            condition: text("condition"),
-            decision,
-            condition_met: form.get("conditionMet") === "on",
-            decided_by: text("decidedBy"),
-            decision_reason: text("decisionReason"),
-            // Stamped when a decision is recorded, kept when only the brief moves.
-            decided_at:
-              decision === "pending"
-                ? null
-                : decision === row?.decision && row?.decided_at
-                  ? row.decided_at
-                  : new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          },
-          { onConflict: "client_id, grant_id" },
-        );
-      if (error) throw error;
+      const fields = {
+        client_id: clientId,
+        grant_id: grantId,
+        role: text("role"),
+        role_other: text("roleOther"),
+        intake: text("intake"),
+        application_structure: text("applicationStructure"),
+        strategic_angle: text("strategicAngle"),
+        mandatory_components: text("mandatoryComponents"),
+        ...amounts,
+        cash_match_confirmed: form.get("cashMatchConfirmed") === "on",
+        risks: text("risks"),
+        recommendation: text("recommendation"),
+        recommendation_reason: text("recommendationReason"),
+        condition: text("condition"),
+        decision,
+        condition_met: form.get("conditionMet") === "on",
+        decided_by: text("decidedBy"),
+        decision_reason: text("decisionReason"),
+        // Stamped when a decision is recorded, kept when only the brief moves.
+        decided_at:
+          decision === "pending"
+            ? null
+            : decision === row?.decision && row?.decided_at
+              ? row.decided_at
+              : new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      // Only over the version this page loaded. Two people saving one brief
+      // used to mean the last save silently replaced the other's decision.
+      if (row) {
+        const { data: saved, error } = await supabase()
+          .from("opportunity_decisions")
+          .update(fields)
+          .eq("client_id", clientId)
+          .eq("grant_id", grantId)
+          .eq("updated_at", row.updated_at)
+          .select("updated_at");
+        if (error) throw error;
+        if (!saved || saved.length === 0) throw new Error(CONFLICT);
+      } else {
+        const { error } = await supabase().from("opportunity_decisions").insert(fields);
+        if (error?.code === "23505") throw new Error(CONFLICT);
+        if (error) throw error;
+      }
       await load();
       setMessage(decision === "pending" ? "Brief saved." : "Brief and decision recorded.");
     } catch (caught) {

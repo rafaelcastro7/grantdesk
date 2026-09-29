@@ -5,6 +5,7 @@ import { supabase } from "@/lib/supabase";
 import { accessToken } from "@/lib/session";
 import { useAction } from "@/lib/use-action";
 import { useRequireSession } from "@/lib/use-require-session";
+import { useDocumentTitle } from "@/lib/use-document-title";
 import { formatMoney } from "@/lib/money";
 import { relevanceFrom } from "@/lib/match-explain";
 import { bandOf } from "@/lib/regions";
@@ -195,6 +196,7 @@ function MatchesPage() {
    * ones regardless of which happened to score higher, because "priority" was
    * the actual ask and a relevance-only order cannot express it.
    */
+  useDocumentTitle("Matches", clientName);
   const allOf = (verdict: Verdict) => (matches ?? []).filter((m) => m.verdict === verdict);
   const grouped = (verdict: Verdict) => {
     const filtered = applyMatchFilters(allOf(verdict), filters, {
@@ -241,7 +243,7 @@ function MatchesPage() {
           onClick={() => findAll()}
           disabled={busy !== null}
           data-testid="run-matching"
-          className="rounded-md bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+          className="rounded-md bg-[var(--color-accent-strong)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
         >
           {busy
             ? "Checking the catalog…"
@@ -636,6 +638,7 @@ function MatchCard({
           to="/clients/$clientId/proposals/$grantId"
           params={{ clientId, grantId: grant.id }}
           data-testid="to-proposal"
+          aria-label={`Draft this application: ${grant.title}`}
           className="mt-2 inline-block text-sm font-medium text-[var(--color-accent)]"
         >
           Draft this application →
@@ -649,6 +652,7 @@ function MatchCard({
           to="/clients/$clientId/proposals/$grantId"
           params={{ clientId, grantId: grant.id }}
           data-testid="to-brief"
+          aria-label={`Qualify it — open the Opportunity Brief: ${grant.title}`}
           className="mt-2 inline-block text-sm font-medium text-[var(--color-accent)]"
         >
           Qualify it — open the Opportunity Brief →

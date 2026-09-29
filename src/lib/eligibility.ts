@@ -41,6 +41,10 @@ export type EligibilityInput = {
     country: string;
     deadline?: string | null;
     status?: string | null;
+    /** A forecast's estimated application date; never read as a deadline. */
+    estimatedDeadline?: string | null;
+    /** A structured "cost sharing required" flag, where the source has one. */
+    costSharingRequired?: boolean | null;
     eligibleApplicantTypes?: readonly string[] | null;
     amountMin?: number | null;
     amountMax?: number | null;
@@ -113,7 +117,12 @@ export function statesForeignEligibility(text: string | null | undefined): boole
     `${subject}.{0,60}\\b(are eligible|is eligible|may apply|entities are eligible|` +
       `organi[sz]ations are eligible|applicants? (?:are|is) eligible)\\b`,
   );
-  return affirms.test(hay);
+  if (affirms.test(hay)) return true;
+  // The list form most NIH/federal notices use — no verb, just an entry:
+  // "Other Eligible Applicants include … Non-domestic (non-U.S.) Entities
+  // (Foreign Organizations)". The negation check above already ran on the
+  // same text, so "…(Foreign Organizations) are not eligible" never gets here.
+  return /eligible applicants include[^.]{0,400}non-domestic \(non-u\.s\.\) entities/.test(hay);
 }
 
 function jurisdictionRule(input: EligibilityInput): RuleResult {
@@ -167,6 +176,23 @@ function jurisdictionRule(input: EligibilityInput): RuleResult {
 
 function deadlineRule(input: EligibilityInput): RuleResult {
   const { deadline, status } = input.grant;
+  // Announced but not open: nobody can apply yet, and "no deadline" here is
+  // not rolling intake. Unknown rather than a fail — it is worth watching,
+  // not ruling out — with the funder's own estimate when it gave one.
+  if (status === "forecasted") {
+    const estimate = input.grant.estimatedDeadline;
+    const stale = estimate ? daysUntilDeadline(estimate, input.today) < 0 : false;
+    return {
+      key: "deadline",
+      status: "unknown",
+      isHardGate: true,
+      detail: estimate
+        ? stale
+          ? `Forecast only — its estimated date (${estimate}) has passed without the call opening. Check the funder before planning on it.`
+          : `Forecast only — not accepting applications yet. The funder estimates applications around ${estimate}.`
+        : "Forecast only — not accepting applications yet, and the funder has not estimated when.",
+    };
+  }
   if (status && status !== "open") {
     return {
       key: "deadline",
@@ -464,6 +490,17 @@ function costShareRule(input: EligibilityInput): RuleResult {
   const inKindCap = detectInKindCapPercent(text);
 
   if (share === null) {
+    // The source's own structured flag, when the prose gives no percentage.
+    if (input.grant.costSharingRequired === true) {
+      return {
+        key: "cost_share",
+        status: "fail",
+        isHardGate: false,
+        detail:
+          "The funder marks this call as requiring cost sharing or matching; the share is in the NOFO. " +
+          "Confirm with whoever controls the budget that it can be covered — never assume it.",
+      };
+    }
     return {
       key: "cost_share",
       status: "unknown",

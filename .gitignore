@@ -17,6 +17,9 @@ coverage/
 # Downloaded open-data caches — every importer re-fetches what is missing.
 data/cache/
 
+# Database backups hold every client's data; they belong off this repo.
+backups/
+
 # OS / editor
 .DS_Store
 Thumbs.db

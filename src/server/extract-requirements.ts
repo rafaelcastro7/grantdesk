@@ -3,6 +3,15 @@ import { htmlToText, htmlTitle, relatedLinks } from "@/lib/html-text";
 import { callLlm } from "./llm";
 import { readTextCapped, safeFetch } from "./safe-fetch";
 import { UNTRUSTED_RULE, untrusted } from "./prompt-safety";
+import { verifyQuotes } from "@/lib/verify-quote";
+
+/** Said to the consultant, so a dropped quote is visible rather than silent. */
+function unverifiedConcerns(labels: string[]): string[] {
+  return labels.map(
+    (label) =>
+      `"${label}": the quoted wording was not found on the page, so the quote was removed — check the call for the exact condition.`,
+  );
+}
 
 /**
  * Read a funding call and record what it actually asks for.
@@ -217,7 +226,7 @@ async function extractFromPages(pages: Page[]): Promise<RequirementExtraction> {
           .map((page) =>
             [
               `Source: ${page.url}`,
-              page.title ? `Page title: ${page.title}` : null,
+              page.title ? `Page title: ${untrusted("page title", page.title)}` : null,
               "",
               "Call text:",
               untrusted(page.url, page.text),
@@ -238,14 +247,18 @@ async function extractFromPages(pages: Page[]): Promise<RequirementExtraction> {
     },
   });
 
+  const verified = verifyQuotes(
+    parseRequirements(response.text),
+    pages.map((page) => page.text).join("\n"),
+  );
   return {
-    requirements: parseRequirements(response.text),
+    requirements: verified.items,
     // Every page read, labeled, not only the primary one — a consultant
     // checking "what did it actually read" has to see all of it, or a
     // requirement sourced from the second page looks unverifiable.
     readText: pages.map((page) => `=== ${page.url} ===\n${page.text.slice(0, 4000)}`).join("\n\n"),
     sourcesRead: pages.map((page) => page.url),
-    concerns: [],
+    concerns: unverifiedConcerns(verified.unverified),
     provenance: {
       source: primary.url,
       title: primary.title,
@@ -330,7 +343,8 @@ export async function critiqueExtraction(
                 .join("\n\n---\n\n"),
               "",
               "Extracted requirements:",
-              listing,
+              // Written by a model from untrusted pages, so fenced the same way.
+              untrusted("first-pass extraction", listing),
             ].join("\n"),
           },
         ],
@@ -507,7 +521,7 @@ export async function extractRequirementsFromText(
         role: "user",
         content: [
           `Source: ${source}`,
-          title ? `Call: ${title}` : null,
+          title ? `Call: ${untrusted("call title", title)}` : null,
           "",
           "Call text:",
           untrusted(source, text.slice(0, 24_000)),
@@ -526,11 +540,12 @@ export async function extractRequirementsFromText(
     },
   });
 
+  const verified = verifyQuotes(parseRequirements(response.text), text);
   return {
-    requirements: parseRequirements(response.text),
+    requirements: verified.items,
     readText: text.slice(0, 4000),
     sourcesRead: [source],
-    concerns: [],
+    concerns: unverifiedConcerns(verified.unverified),
     provenance: {
       source,
       title: title ?? null,

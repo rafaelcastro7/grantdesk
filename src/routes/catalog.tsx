@@ -3,6 +3,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useState } from "react";
 import { getCoverage } from "@/server/catalog.functions";
 import { errorMessage } from "@/lib/error-message";
+import { useDocumentTitle } from "@/lib/use-document-title";
 import type { MarketCoverage } from "@/lib/coverage";
 
 export const Route = createFileRoute("/catalog")({ component: CatalogPage });
@@ -30,6 +31,7 @@ const MARKET_NAMES: Record<string, string> = {
  * and which are a directory with a link.
  */
 function CatalogPage() {
+  useDocumentTitle("Funder coverage");
   const fetchCoverage = useServerFn(getCoverage);
   const [data, setData] = useState<{ coverage: MarketCoverage[]; totalGrants: number } | null>(
     null,

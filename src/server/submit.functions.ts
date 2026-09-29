@@ -218,12 +218,17 @@ export const submitProposal = createServerFn({ method: "POST" })
         // decision someone made, and "did we know?" has to stay answerable.
         overridden_blockers: assessed.blockers as unknown as Blocker[],
       });
+      // A second click that lost the race: the submission exists, which is
+      // what the consultant wanted — say so instead of a constraint message.
+      if (error?.code === "23505") return { ok: true as const, overrode: 0 };
       if (error) throw new Error(error.message);
 
-      await supabase
+      const { error: touchError } = await supabase
         .from("proposals")
         .update({ updated_at: new Date().toISOString() })
         .eq("id", data.proposalId);
+      if (touchError)
+        console.warn(`submission recorded; proposal timestamp not updated: ${touchError.message}`);
 
       return { ok: true as const, overrode: assessed.blockers.length };
     } catch (error) {

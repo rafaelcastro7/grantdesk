@@ -30,6 +30,8 @@ type OppHit = {
   agency?: string;
   agencyCode?: string;
   closeDate?: string;
+  /** "posted" or "forecasted". A forecast is not accepting applications yet. */
+  oppStatus?: string;
   /** Assistance Listing (formerly CFDA) numbers — the key prior awards are indexed under. */
   cfdaList?: string[];
 };
@@ -76,7 +78,37 @@ export type OppDetail = {
   eligibleApplicantTypes: string[];
   amountMin: number | null;
   amountMax: number | null;
+  contact: string | null;
+  costSharingRequired: boolean | null;
+  documents: Array<{ label: string; url: string }>;
+  deadlineNote: string | null;
+  /** A forecast's estimated application date, `YYYY-MM-DD`. */
+  estimatedDeadline: string | null;
 };
+
+const ATTACHMENT_URL = "https://apply07.grants.gov/grantsws/rest/opportunity/att/download/";
+
+const MONTHS: Record<string, string> = {
+  Jan: "01",
+  Feb: "02",
+  Mar: "03",
+  Apr: "04",
+  May: "05",
+  Jun: "06",
+  Jul: "07",
+  Aug: "08",
+  Sep: "09",
+  Oct: "10",
+  Nov: "11",
+  Dec: "12",
+};
+
+/** "Nov 25, 2025 12:00:00 AM EST" → "2025-11-25"; anything else → null. */
+export function parseDetailDate(raw: unknown): string | null {
+  const hit = /^([A-Z][a-z]{2}) (\d{1,2}), (\d{4})/.exec(String(raw ?? "").trim());
+  if (!hit || !MONTHS[hit[1]!]) return null;
+  return `${hit[3]}-${MONTHS[hit[1]!]}-${hit[2]!.padStart(2, "0")}`;
+}
 
 /** Award figures arrive as strings, and "none" is a real value in this feed. */
 export function parseAmount(raw: unknown): number | null {
@@ -110,6 +142,30 @@ export function readDetail(body: unknown): OppDetail {
     ),
     amountMin: parseAmount(detail.awardFloor),
     amountMax: parseAmount(detail.awardCeiling),
+    contact:
+      [detail.agencyContactName, detail.agencyContactEmail, detail.agencyContactPhone]
+        .map((part) =>
+          String(part ?? "")
+            .replace(/\s+/g, " ")
+            .trim(),
+        )
+        .filter(Boolean)
+        .join(" · ") || null,
+    costSharingRequired: typeof detail.costSharing === "boolean" ? detail.costSharing : null,
+    // The NOFO itself: the one document the application is written against.
+    documents: (
+      (data.synopsisAttachmentFolders ?? []) as Array<{
+        synopsisAttachments?: Array<{ id?: number | string; fileName?: string }>;
+      }>
+    )
+      .flatMap((folder) => folder.synopsisAttachments ?? [])
+      .filter((file) => file.id != null)
+      .map((file) => ({
+        label: String(file.fileName ?? `Attachment ${file.id}`),
+        url: `${ATTACHMENT_URL}${file.id}`,
+      })),
+    deadlineNote: htmlToText(String(detail.responseDateDesc ?? "")).slice(0, 1000) || null,
+    estimatedDeadline: parseDetailDate(detail.estApplicationResponseDate),
   };
 }
 
@@ -119,6 +175,11 @@ const EMPTY_DETAIL: OppDetail = {
   eligibleApplicantTypes: [],
   amountMin: null,
   amountMax: null,
+  contact: null,
+  costSharingRequired: null,
+  documents: [],
+  deadlineNote: null,
+  estimatedDeadline: null,
 };
 
 async function fetchDetail(opportunityId: string): Promise<OppDetail> {
@@ -209,6 +270,13 @@ export const grantsGov: SourceAdapter = {
         language: "en",
         eligibleApplicantTypes: detail.eligibleApplicantTypes,
         eligibilityNote: detail.eligibilityNote,
+        status: hit.oppStatus === "forecasted" ? "forecasted" : "open",
+        estimatedDeadline: detail.estimatedDeadline,
+        costSharingRequired: detail.costSharingRequired,
+        deadlineNote: detail.deadlineNote,
+        opportunityNumber: hit.number ?? null,
+        contact: detail.contact,
+        documents: detail.documents,
         assistanceListings: (hit.cfdaList ?? []).map((code) => String(code).trim()).filter(Boolean),
         externalId: `grants-gov:${hit.number || hit.id}`,
       });

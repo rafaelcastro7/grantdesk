@@ -70,7 +70,7 @@ ${UNTRUSTED_RULE}`;
 function buildUserPrompt(text: string, sourceUrl: string, title: string | null): string {
   return [
     `Source: ${sourceUrl}`,
-    title ? `Page title: ${title}` : null,
+    title ? `Page title: ${untrusted("page title", title)}` : null,
     "",
     "Page text:",
     untrusted(sourceUrl, text),

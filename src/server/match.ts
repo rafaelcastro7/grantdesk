@@ -92,6 +92,8 @@ type GrantRow = {
   amount_min: number | null;
   amount_max: number | null;
   currency: string | null;
+  estimated_deadline: string | null;
+  cost_sharing_required: boolean | null;
 };
 
 /**
@@ -194,7 +196,8 @@ export async function runMatch(
       .from("grants")
       .select(
         "id, title, summary, country, deadline, status, eligible_applicant_types, " +
-          "eligibility_note, amount_min, amount_max, currency",
+          "eligibility_note, amount_min, amount_max, currency, estimated_deadline, " +
+          "cost_sharing_required",
       )
       .in("id", ids.slice(i, i + 50));
     if (error) throw new Error(`could not read candidates: ${error.message}`);
@@ -217,6 +220,8 @@ export async function runMatch(
         // at all — it is never a structured field.
         eligibilityNote: grant.eligibility_note,
         summary: grant.summary,
+        estimatedDeadline: grant.estimated_deadline,
+        costSharingRequired: grant.cost_sharing_required,
         amountMin: grant.amount_min,
         amountMax: grant.amount_max,
         currency: grant.currency,

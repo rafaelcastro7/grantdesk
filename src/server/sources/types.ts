@@ -45,7 +45,15 @@ export type SourceGrant = {
    */
   assistanceListings?: readonly string[];
   /** Only for sources that publish it; otherwise the stored status is left alone. */
-  status?: "open" | "closed";
+  status?: "open" | "closed" | "forecasted";
+  /** A forecast's estimated application date — never treated as a deadline. */
+  estimatedDeadline?: string | null;
+  /** Where the source publishes a structured cost-share flag. */
+  costSharingRequired?: boolean | null;
+  /** The funder's own words about dates: LOIs, several due dates, local time. */
+  deadlineNote?: string | null;
+  /** The funder's reference, e.g. a NOFO number. */
+  opportunityNumber?: string | null;
   /** Guidelines, forms and application guides, as the funder linked them. */
   documents?: ReadonlyArray<{ label: string; url: string }>;
   /** Who to ask, as the funder published it. */

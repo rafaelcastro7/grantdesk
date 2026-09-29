@@ -4,6 +4,7 @@ import type { DraftingGate } from "@/lib/go-decision";
 import { CallSnapshot, type CallSnapshotGrant } from "@/components/CallSnapshot";
 import { formatMoney } from "@/lib/money";
 import { useRequireSession } from "@/lib/use-require-session";
+import { useDocumentTitle } from "@/lib/use-document-title";
 import { useServerFn } from "@tanstack/react-start";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
@@ -52,6 +53,8 @@ type Section = {
   drafted_by: string | null;
   reused_answer_ids: string[];
   fabrication_concerns: { kind: "number" | "spelled-number" | "person"; text: string }[];
+  /** The version this page loaded, so a save can tell if someone saved since. */
+  updated_at: string;
 };
 
 /**
@@ -106,7 +109,8 @@ function ProposalPage() {
       .from("grants")
       .select(
         "title, url, deadline, summary, eligibility_note, status, currency, amount_min, " +
-          "amount_max, country, documents, contact, source_key, last_seen_at, funders(name, website)",
+          "amount_max, country, documents, contact, source_key, last_seen_at, funders(name, website), " +
+          "estimated_deadline, cost_sharing_required, deadline_note, opportunity_number",
       )
       .eq("id", grantId)
       .maybeSingle();
@@ -154,7 +158,7 @@ function ProposalPage() {
       supabase()
         .from("proposal_sections")
         .select(
-          "id, requirement_id, heading, content, word_count, drafted_by, reused_answer_ids, fabrication_concerns",
+          "id, requirement_id, heading, content, word_count, drafted_by, reused_answer_ids, fabrication_concerns, updated_at",
         )
         .eq("proposal_id", id),
       supabase()
@@ -581,49 +585,36 @@ function ProposalPage() {
 
   async function saveEdit(requirement: Requirement, content: string): Promise<boolean> {
     if (!proposalId) return false;
-    const previous = sections[requirement.id];
-    if (previous?.content?.trim()) {
-      // Refuse to overwrite if the earlier version could not be kept: losing
-      // the only copy of a draft to save an edit is worse than not saving.
-      const { error: revisionError } = await supabase().from("proposal_section_revisions").insert({
-        proposal_id: proposalId,
-        requirement_id: requirement.id,
-        content: previous.content,
-        word_count: previous.word_count,
-        drafted_by: previous.drafted_by,
-      });
-      if (revisionError) {
-        setError(`Not saved — the previous version could not be kept: ${revisionError.message}`);
-        return false;
-      }
-    }
-    const { error: saveError } = await supabase()
-      .from("proposal_sections")
-      .upsert(
-        {
-          proposal_id: proposalId,
-          requirement_id: requirement.id,
-          heading: requirement.label,
-          content,
-          word_count: content.trim().split(/\s+/).filter(Boolean).length,
-          // Edited by a person, so the previous model attribution no longer
-          // describes it. Leaving it would misattribute the consultant's words.
-          drafted_by: null,
-          // The fabrication check ran against the model's draft, not this
-          // edit — carrying it forward would flag text the consultant wrote.
-          fabrication_concerns: [],
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: "proposal_id, requirement_id" },
-      );
+    // One call, under a row lock: the database keeps its own current text as
+    // the previous version, and refuses if someone saved since this page
+    // loaded — the other person's words were being overwritten unrecorded.
+    const { error: saveError } = await supabase().rpc("save_section", {
+      target_proposal: proposalId,
+      target_requirement: requirement.id,
+      new_heading: requirement.label,
+      new_content: content,
+      new_word_count: content.trim().split(/\s+/).filter(Boolean).length,
+      // Edited by a person, so the previous model attribution no longer
+      // describes it. Leaving it would misattribute the consultant's words.
+      new_drafted_by: null,
+      // The fabrication check ran against the model's draft, not this edit.
+      new_fabrication_concerns: [],
+      new_reused_answer_ids: sections[requirement.id]?.reused_answer_ids ?? [],
+      expected_updated_at: sections[requirement.id]?.updated_at ?? null,
+    });
     if (saveError) {
-      setError(errorMessage(saveError));
+      setError(
+        /changed by someone else/.test(saveError.message)
+          ? "Not saved — someone else saved this section since you opened it. Copy your text, reload the page, and merge."
+          : errorMessage(saveError),
+      );
       return false;
     }
     await load();
     return true;
   }
 
+  useDocumentTitle(grant?.title, "Application");
   const writable = (requirements ?? []).filter((r) => r.kind === "section");
   const conditions = (requirements ?? []).filter(
     (r) => r.kind !== "section" && r.kind !== "process",
@@ -686,7 +677,7 @@ function ProposalPage() {
             onClick={readCall}
             disabled={busy !== null}
             data-testid="read-call"
-            className="rounded-md bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+            className="rounded-md bg-[var(--color-accent-strong)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
           >
             {busy === "read"
               ? "Reading the call…"
@@ -1109,7 +1100,7 @@ function ProposalPage() {
                         busy !== null || blockers.some((b) => b.isHard && b.key !== "not_reviewed")
                       }
                       data-testid="submit-proposal"
-                      className="rounded-md bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+                      className="rounded-md bg-[var(--color-accent-strong)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
                     >
                       {busy === "submit"
                         ? "Recording…"
@@ -1154,7 +1145,9 @@ function ProposalPage() {
         on a page headed for a funder's portal. window.print() on the export
         button above is the trigger; @media print in index.css hides
         everything but this block. */}
-      <div className="hidden print:block print:px-0 print:py-0">
+      {/* Hidden from assistive tech: on screen it would be a second H1 and a
+          second copy of every section; it exists only for paper. */}
+      <div aria-hidden="true" className="hidden print:block print:px-0 print:py-0">
         <h1 className="text-xl font-semibold">{grant?.title ?? "Application"}</h1>
         <p className="mt-1 text-sm">{grant?.deadline ? `Closes ${grant.deadline}` : ""}</p>
         {writable.map((requirement) => {
@@ -1327,7 +1320,7 @@ function SectionCard({
               if (saved) setDirty(false);
             }}
             disabled={disabled || saving}
-            className="rounded-md bg-[var(--color-accent)] px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+            className="rounded-md bg-[var(--color-accent-strong)] px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
           >
             {saving ? "Saving…" : "Save"}
           </button>

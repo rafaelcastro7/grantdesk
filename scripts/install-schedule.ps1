@@ -32,10 +32,14 @@ if (-not $bun) {
 # every hour is exactly the thing nobody notices, and the log is where the
 # answer lives when someone finally asks.
 $logFile = Join-Path $logDir "refresh.log"
-$command = "cd `"$repo`"; & `"$bun`" run refresh *>> `"$logFile`""
 
-$action = New-ScheduledTaskAction -Execute "powershell.exe" `
-    -Argument "-NoProfile -ExecutionPolicy Bypass -Command `"$command`""
+# Run through cmd.exe, not PowerShell. PowerShell turned bun's ordinary stderr
+# (its "$ bun run" echo) into a NativeCommandError, so every run reported
+# result 1 and the task's status could not be used to notice real failures.
+# cmd passes bun's own exit code through unchanged.
+$action = New-ScheduledTaskAction -Execute "cmd.exe" `
+    -Argument "/c `"`"$bun`" run refresh >> `"$logFile`" 2>&1`"" `
+    -WorkingDirectory $repo
 
 $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(2) `
     -RepetitionInterval (New-TimeSpan -Hours 1)

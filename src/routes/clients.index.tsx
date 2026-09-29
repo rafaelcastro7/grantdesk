@@ -2,6 +2,7 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useAction } from "@/lib/use-action";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import { useDocumentTitle } from "@/lib/use-document-title";
 
 export const Route = createFileRoute("/clients/")({ component: ClientsPage });
 
@@ -26,6 +27,7 @@ function operatesIn(row: ClientRow): string {
  * they are working for.
  */
 function ClientsPage() {
+  useDocumentTitle("Clients");
   const navigate = useNavigate();
   const [clients, setClients] = useState<ClientRow[] | null>(null);
   const [name, setName] = useState("");
@@ -111,7 +113,7 @@ function ClientsPage() {
         <button
           type="submit"
           disabled={busy !== null}
-          className="rounded-md bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+          className="rounded-md bg-[var(--color-accent-strong)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
         >
           {busy ? "Adding…" : "Add client"}
         </button>

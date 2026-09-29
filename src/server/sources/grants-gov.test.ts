@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { departmentOf, parseAmount, parseCloseDate, readDetail } from "./grants-gov";
+import {
+  departmentOf,
+  parseAmount,
+  parseCloseDate,
+  parseDetailDate,
+  readDetail,
+} from "./grants-gov";
 
 describe("parseCloseDate", () => {
   it("converts the feed's US format to ISO", () => {
@@ -78,7 +84,56 @@ describe("readDetail", () => {
       eligibleApplicantTypes: [],
       amountMin: null,
       amountMax: null,
+      contact: null,
+      costSharingRequired: null,
+      documents: [],
+      deadlineNote: null,
+      estimatedDeadline: null,
     });
     expect(readDetail(null).summary).toBeNull();
+  });
+
+  it("keeps a forecast's estimated date, contact and cost-share flag (live shape, NIEHS 359970)", () => {
+    const detail = readDetail({
+      data: {
+        forecast: {
+          forecastDesc: "<p>Worker training.</p>",
+          agencyContactName: "Sharon D. Beard\nNIEHS",
+          agencyContactEmail: "beard1@niehs.nih.gov",
+          agencyContactPhone: "984-287-3237",
+          costSharing: false,
+          estApplicationResponseDate: "Nov 25, 2025 12:00:00 AM EST",
+        },
+      },
+    });
+    expect(detail.estimatedDeadline).toBe("2025-11-25");
+    expect(detail.contact).toBe("Sharon D. Beard NIEHS · beard1@niehs.nih.gov · 984-287-3237");
+    expect(detail.costSharingRequired).toBe(false);
+  });
+
+  it("links the NOFO attachment itself (live shape, NIST 363279)", () => {
+    const detail = readDetail({
+      data: {
+        synopsis: { costSharing: true },
+        synopsisAttachmentFolders: [
+          { synopsisAttachments: [{ id: 354080, fileName: "2026-NIST-MEP-02 NOFO.pdf" }] },
+        ],
+      },
+    });
+    expect(detail.costSharingRequired).toBe(true);
+    expect(detail.documents).toEqual([
+      {
+        label: "2026-NIST-MEP-02 NOFO.pdf",
+        url: "https://apply07.grants.gov/grantsws/rest/opportunity/att/download/354080",
+      },
+    ]);
+  });
+});
+
+describe("parseDetailDate", () => {
+  it("reads the detail feed's date format and nothing else", () => {
+    expect(parseDetailDate("Aug 21, 2026 12:00:00 AM EDT")).toBe("2026-08-21");
+    expect(parseDetailDate("")).toBeNull();
+    expect(parseDetailDate("2026-08-21")).toBeNull();
   });
 });

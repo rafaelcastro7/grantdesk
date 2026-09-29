@@ -199,7 +199,10 @@ function buildPrompt(
 
   if (requirement.grant) {
     const g = requirement.grant;
-    lines.push(`The call: ${g.title}${g.funder ? `, from ${g.funder}` : ""}`);
+    lines.push(
+      "The call:",
+      untrusted("call title and funder", `${g.title}${g.funder ? `, from ${g.funder}` : ""}`),
+    );
     const unit = g.currency ?? "";
     if (g.amountMin && g.amountMax) {
       lines.push(
@@ -226,13 +229,20 @@ function buildPrompt(
   if (requirement.sourceQuote)
     lines.push(`The call says, verbatim:`, untrusted("call text", requirement.sourceQuote));
 
-  lines.push("", `Organization: ${client.name}`);
-  if (client.stage) lines.push(`Legal form: ${client.stage}`);
-  if (client.sectors?.length) lines.push(`Sectors: ${client.sectors.join(", ")}`);
-  if (client.jurisdictions?.length) lines.push(`Operates in: ${listPlaces(client.jurisdictions)}`);
-  if (client.annualBudget) lines.push(`Annual budget: ${client.annualBudget.toLocaleString()}`);
-  if (client.capabilities) lines.push(`Track record: ${client.capabilities}`);
-  if (client.beneficiaries) lines.push(`Who benefits: ${client.beneficiaries}`);
+  // The profile is part-written from the client's own website, so it is
+  // material to use, not instructions — fenced like any other outside text.
+  const profile = [
+    `Organization: ${client.name}`,
+    client.stage ? `Legal form: ${client.stage}` : null,
+    client.sectors?.length ? `Sectors: ${client.sectors.join(", ")}` : null,
+    client.jurisdictions?.length ? `Operates in: ${listPlaces(client.jurisdictions)}` : null,
+    client.annualBudget ? `Annual budget: ${client.annualBudget.toLocaleString()}` : null,
+    client.capabilities ? `Track record: ${client.capabilities}` : null,
+    client.beneficiaries ? `Who benefits: ${client.beneficiaries}` : null,
+  ]
+    .filter((line): line is string => line !== null)
+    .join("\n");
+  lines.push("", "The applicant, as its profile states it:", untrusted("client profile", profile));
 
   if (reused.length > 0) {
     lines.push("", "Previously approved answers from this client, to build on:");

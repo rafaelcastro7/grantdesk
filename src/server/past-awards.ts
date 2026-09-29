@@ -64,12 +64,38 @@ export function normalizeAward(row: ApiRow, listing: string): PastAward | null {
   };
 }
 
-export async function fetchPastAwards(listing: string, limit = 25): Promise<PastAward[]> {
+/** How far back "who won this before" looks. Older winners describe a different program. */
+const LOOKBACK_YEARS = 5;
+
+export async function fetchPastAwards(
+  listings: string | readonly string[],
+  limit = 25,
+  now = new Date(),
+): Promise<PastAward[]> {
+  const programs = typeof listings === "string" ? [listings] : [...listings];
+  const start = new Date(now);
+  start.setUTCFullYear(start.getUTCFullYear() - LOOKBACK_YEARS);
   const response = await fetch(SEARCH_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      filters: { award_type_codes: ASSISTANCE_TYPES, program_numbers: [listing] },
+      // Recent awards only, across every listing the notice carries: sorting
+      // all-time awards by size surfaced 2006 billion-dollar grants as the
+      // "prior winners" of a 2026 call.
+      filters: {
+        award_type_codes: ASSISTANCE_TYPES,
+        program_numbers: programs,
+        // new_awards_only: awards that *started* in the window. Without it the
+        // window matches any award with activity in it, and a 2006 grant still
+        // drawing funds came back as a recent winner (verified live).
+        time_period: [
+          {
+            start_date: start.toISOString().slice(0, 10),
+            end_date: now.toISOString().slice(0, 10),
+            date_type: "new_awards_only",
+          },
+        ],
+      },
       fields: ["Recipient Name", "Award Amount", "Start Date", "Recipient Location"],
       limit,
       sort: "Award Amount",
@@ -81,7 +107,7 @@ export async function fetchPastAwards(listing: string, limit = 25): Promise<Past
 
   const body = (await response.json()) as { results?: ApiRow[] };
   return (body.results ?? [])
-    .map((row) => normalizeAward(row, listing))
+    .map((row) => normalizeAward(row, programs.join("+")))
     .filter((award): award is PastAward => award !== null);
 }
 
@@ -161,7 +187,7 @@ export async function loadPastAwards(
     };
   }
 
-  const awards = await fetchPastAwards(listing);
+  const awards = await fetchPastAwards(grant.assistance_listings ?? [listing]);
 
   if (awards.length > 0) {
     // Shared catalog data: consultants may read it, only the server writes it.

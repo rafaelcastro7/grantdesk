@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabase";
 import { accessToken } from "@/lib/session";
 import { parseMoney } from "@/lib/parse-money";
 import { useRequireSession } from "@/lib/use-require-session";
+import { useDocumentTitle } from "@/lib/use-document-title";
 import { extractProfile } from "@/server/profile.functions";
 import { assessProfile, nextGap, type ProfileFields } from "@/lib/profile-completeness";
 import { PipelineLog } from "@/components/PipelineLog";
@@ -412,6 +413,7 @@ function ClientDetail() {
     });
   }
 
+  useDocumentTitle(client?.name, "Client");
   const fields = toFields(profile);
   const completeness = assessProfile(fields);
   const gap = nextGap(completeness);
@@ -442,7 +444,7 @@ function ClientDetail() {
           <button
             type="submit"
             disabled={busy !== null}
-            className="rounded-md bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+            className="rounded-md bg-[var(--color-accent-strong)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
           >
             {busy === "extract"
               ? "Reading…"
@@ -615,7 +617,7 @@ function ClientDetail() {
             to="/clients/$clientId/matches"
             params={{ clientId }}
             data-testid="to-matches"
-            className="mt-4 inline-block rounded-md bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-white"
+            className="mt-4 inline-block rounded-md bg-[var(--color-accent-strong)] px-4 py-2 text-sm font-medium text-white"
           >
             Find what they can apply for →
           </Link>

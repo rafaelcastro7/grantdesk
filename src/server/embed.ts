@@ -179,7 +179,8 @@ export async function embedCatalog(
       supabase
         .from("grants")
         .select("id, title, summary, eligibility_note")
-        .eq("status", "open")
+        // Forecasts stay findable: they are what a consultant plans ahead on.
+        .in("status", ["open", "forecasted"])
         .order("id")
         .range(from, to),
     options.limit ?? 50_000,

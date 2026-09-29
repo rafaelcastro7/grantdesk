@@ -31,8 +31,14 @@ export const Route = createRootRoute({
 function RootComponent() {
   return (
     <RootDocument>
+      {/* First focusable element: skips the navigation (WCAG 2.4.1). */}
+      <a href="#main" className="skip-link">
+        Skip to content
+      </a>
       <Nav />
-      <Outlet />
+      <div id="main" tabIndex={-1} className="outline-none">
+        <Outlet />
+      </div>
     </RootDocument>
   );
 }

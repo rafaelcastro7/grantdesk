@@ -18,6 +18,10 @@ export type CallSnapshotGrant = {
   source_key: string | null;
   last_seen_at: string | null;
   funders: { name: string; website: string | null } | null;
+  estimated_deadline?: string | null;
+  cost_sharing_required?: boolean | null;
+  deadline_note?: string | null;
+  opportunity_number?: string | null;
 };
 
 const SOURCE_LABEL: Record<string, string> = {
@@ -47,13 +51,19 @@ export function CallSnapshot({ grant }: { grant: CallSnapshotGrant }) {
         : grant.amount_min
           ? `From ${formatMoney(grant.amount_min, grant.currency)}`
           : "Not published";
-  const closed = grant.status && grant.status !== "open";
+  const forecast = grant.status === "forecasted";
+  const closed = grant.status && grant.status !== "open" && !forecast;
 
   const facts: Array<[string, React.ReactNode]> = [
     ["Funder", grant.funders?.name ?? "Not published"],
     [
       "Status",
-      closed ? (
+      forecast ? (
+        <span className="text-[var(--color-needs-input)]">
+          Forecast — not accepting applications yet
+          {grant.estimated_deadline ? ` (funder's estimate: ${grant.estimated_deadline})` : ""}
+        </span>
+      ) : closed ? (
         <span className="text-[var(--color-ineligible)]">{grant.status}</span>
       ) : days !== null && days < 0 ? (
         <span className="text-[var(--color-ineligible)]">Deadline passed</span>
@@ -68,19 +78,31 @@ export function CallSnapshot({ grant }: { grant: CallSnapshotGrant }) {
       "Deadline",
       grant.deadline
         ? `${grant.deadline}${days !== null && days >= 0 ? ` · ${days} day${days === 1 ? "" : "s"} left` : ""}`
-        : "None published — rolling or continuous intake",
+        : forecast
+          ? "Not set — this is a forecast"
+          : "None published — rolling or continuous intake",
     ],
-    ["Intake", grant.deadline ? "Fixed deadline" : "Rolling"],
+    ["Intake", forecast ? "Not open yet" : grant.deadline ? "Fixed deadline" : "Rolling"],
     [
       "Cost share",
       share === null
-        ? "Not stated in the funder's text"
+        ? grant.cost_sharing_required === true
+          ? "Required by the funder — the share is in the NOFO"
+          : grant.cost_sharing_required === false
+            ? "Not required (per the funder)"
+            : "Not stated in the funder's text"
         : share === 0
           ? "Funder covers the full cost"
           : `Applicant carries about ${share}%${inKind !== null ? ` · in-kind at most ${inKind}%` : ""}`,
     ],
     ["Country", grant.country],
     ["Contact", grant.contact ?? "Not published"],
+    ...(grant.opportunity_number
+      ? ([["Opportunity number", grant.opportunity_number]] as Array<[string, React.ReactNode]>)
+      : []),
+    ...(grant.deadline_note
+      ? ([["About the dates", grant.deadline_note]] as Array<[string, React.ReactNode]>)
+      : []),
   ];
 
   return (

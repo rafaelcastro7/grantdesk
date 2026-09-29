@@ -43,15 +43,38 @@ export async function runSource(
   const supabase = options.client ?? adminClient();
   const started = Date.now();
 
-  const { data: run } = await supabase
+  const runStarted = new Date(started).toISOString();
+
+  // What the last good full run delivered, to catch a source that quietly
+  // shrank (a changed page layout parses to fewer rows, not to zero).
+  const { data: previousRun } = await supabase
+    .from("source_runs")
+    .select("grants_upserted")
+    .eq("source_key", adapter.key)
+    .eq("status", "ok")
+    .order("finished_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  // A run that cannot be recorded is not run: an unrecorded failure would
+  // leave coverage calling this source fresh.
+  const { data: run, error: runError } = await supabase
     .from("source_runs")
     .insert({ source_key: adapter.key })
     .select("id")
     .single();
+  if (runError) throw new Error(`could not record the ${adapter.key} run: ${runError.message}`);
   const runId = (run as { id: string } | null)?.id;
 
   try {
     const harvest = await adapter.harvest({ limit: options.limit });
+    const before = (previousRun as { grants_upserted: number | null } | null)?.grants_upserted ?? 0;
+    if (options.limit === undefined && before >= 20 && harvest.grants.length < before * 0.5) {
+      throw new Error(
+        `${adapter.key} returned ${harvest.grants.length} calls against ${before} last time — ` +
+          "the source probably changed its layout; nothing was written",
+      );
+    }
 
     // Funders first: grants reference them, and a grant whose funder failed to
     // land must be skipped loudly rather than attached to the wrong one.
@@ -113,6 +136,10 @@ export async function runSource(
         assistance_listings: grant.assistanceListings ?? [],
         documents: grant.documents ?? [],
         contact: grant.contact ?? null,
+        estimated_deadline: grant.estimatedDeadline ?? null,
+        cost_sharing_required: grant.costSharingRequired ?? null,
+        deadline_note: grant.deadlineNote ?? null,
+        opportunity_number: grant.opportunityNumber ?? null,
         // A source badge saying "open" on a date that has passed is stale
         // markup; re-reading it must not reopen an expired call.
         ...(grant.status
@@ -144,6 +171,19 @@ export async function runSource(
         .select("id");
       if (error) throw new Error(`grant upsert failed: ${error.message}`);
       grantsUpserted += data?.length ?? 0;
+    }
+
+    // A full read is the source's complete list: anything it no longer
+    // publishes has closed or been withdrawn, and must stop reading as open.
+    // Skipped on a limited run, which by design saw only part of the list.
+    if (options.limit === undefined && grantsUpserted > 0) {
+      const { error: closeError } = await supabase
+        .from("grants")
+        .update({ status: "closed" })
+        .eq("source_key", adapter.key)
+        .in("status", ["open", "forecasted"])
+        .lt("last_seen_at", runStarted);
+      if (closeError) throw new Error(`could not close withdrawn calls: ${closeError.message}`);
     }
 
     if (runId) {

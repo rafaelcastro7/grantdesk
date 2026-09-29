@@ -2,6 +2,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useAction } from "@/lib/use-action";
 import { supabase } from "@/lib/supabase";
 import { useEffect, useState } from "react";
+import { useDocumentTitle } from "@/lib/use-document-title";
 import { getTenantBranding, resolveTenantSlug, type TenantBranding } from "@/lib/tenant";
 
 export const Route = createFileRoute("/auth")({ component: AuthPage });
@@ -17,6 +18,7 @@ export const Route = createFileRoute("/auth")({ component: AuthPage });
  * actually in the fields, so the race cannot happen.
  */
 function AuthPage() {
+  useDocumentTitle("Sign in");
   const navigate = useNavigate();
   const { busy, error, run, setError } = useAction();
   // Resolved from the address the visitor came in on; nothing is shown until
@@ -131,7 +133,7 @@ function AuthPage() {
           <button
             type="submit"
             disabled={busy !== null}
-            className="flex-1 rounded-md bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+            className="flex-1 rounded-md bg-[var(--color-accent-strong)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
           >
             {busy ? "Working…" : "Sign in"}
           </button>

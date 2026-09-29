@@ -208,7 +208,7 @@ export function Landing() {
           <div className="mt-6 flex flex-wrap items-center gap-5">
             <Link
               to="/auth"
-              className="rounded-md bg-[var(--color-accent)] px-5 py-2.5 text-sm font-medium text-white"
+              className="rounded-md bg-[var(--color-accent-strong)] px-5 py-2.5 text-sm font-medium text-white"
             >
               Sign in
             </Link>
