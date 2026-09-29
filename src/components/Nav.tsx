@@ -1,36 +1,52 @@
 import { Link, useRouterState } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { getTenantBranding, resolveTenantSlug } from "@/lib/tenant";
+import { supabase } from "@/lib/supabase";
 
-/**
- * Top navigation bar with multi-tenant workspace badge,
- * contextual active routes, and active deadline indicator.
- */
-const LINKS: Array<{ to: string; label: string; badge?: string }> = [
-  { to: "/", label: "Due Radar", badge: "Live" },
+const LINKS: Array<{ to: string; label: string }> = [
+  { to: "/", label: "Due this week" },
   { to: "/clients", label: "Clients" },
   { to: "/catalog", label: "Funder Coverage" },
-  { to: "/design-system", label: "Design Tokens" },
 ];
 
+/**
+ * The workspace shown is the one the signed-in user actually belongs to.
+ * The hostname only decides branding before sign-in; showing a member of
+ * one tenant another tenant's name would misstate whose data they see.
+ */
 export function Nav() {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
-  const [tenantSlug, setTenantSlug] = useState<string>("iial");
+  const [tenantSlug, setTenantSlug] = useState<string | null>(null);
 
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      const search = new URLSearchParams(window.location.search);
-      const resolved = resolveTenantSlug({
-        hostname: window.location.hostname,
-        searchParams: search,
-      });
-      setTenantSlug(resolved);
-    }
+    if (typeof window === "undefined") return;
+    let cancelled = false;
+    const fromHost = resolveTenantSlug({
+      hostname: window.location.hostname,
+      searchParams: new URLSearchParams(window.location.search),
+    });
+    void (async () => {
+      const { data: session } = await supabase().auth.getSession();
+      if (!session.session) {
+        if (!cancelled) setTenantSlug(fromHost);
+        return;
+      }
+      const { data } = await supabase()
+        .from("tenant_members")
+        .select("tenants(slug)")
+        .eq("user_id", session.session.user.id)
+        .limit(1)
+        .maybeSingle();
+      const member = (data as { tenants: { slug: string } | null } | null)?.tenants?.slug;
+      if (!cancelled) setTenantSlug(member ?? fromHost);
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [pathname]);
 
-  const branding = getTenantBranding(tenantSlug);
-
   if (pathname.startsWith("/auth")) return null;
+  const branding = getTenantBranding(tenantSlug ?? "iial");
 
   return (
     <nav
@@ -41,21 +57,25 @@ export function Nav() {
       <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-3">
         <div className="flex items-center gap-6">
           <Link to="/" className="flex items-center gap-3 group">
-            <img
-              src={branding.logoUrl}
-              alt={branding.name}
-              width={161}
-              height={49}
-              className="h-7 w-auto self-center dark:hidden transition-transform group-hover:scale-102"
-            />
-            <img
-              src={branding.logoInverseUrl}
-              alt=""
-              aria-hidden="true"
-              width={162}
-              height={51}
-              className="hidden h-7 w-auto self-center dark:block transition-transform group-hover:scale-102"
-            />
+            {branding.logoUrl && tenantSlug && (
+              <img
+                src={branding.logoUrl}
+                alt={branding.name}
+                width={161}
+                height={49}
+                className="h-7 w-auto self-center dark:hidden transition-transform group-hover:scale-102"
+              />
+            )}
+            {branding.logoInverseUrl && tenantSlug && (
+              <img
+                src={branding.logoInverseUrl}
+                alt=""
+                aria-hidden="true"
+                width={162}
+                height={51}
+                className="hidden h-7 w-auto self-center dark:block transition-transform group-hover:scale-102"
+              />
+            )}
             <div className="flex flex-col">
               <span className="text-sm font-semibold text-[var(--color-ink)] leading-tight">
                 GrantDesk
@@ -66,16 +86,14 @@ export function Nav() {
             </div>
           </Link>
 
-          {/* Tenant Status Badge */}
-          <div
-            data-testid="tenant-badge"
-            className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium border border-sky-500/20 bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-300"
-          >
-            <span className="h-1.5 w-1.5 rounded-full bg-sky-500 animate-pulse" />
-            <span>
-              Tenant: <strong>{branding.shortName}</strong>
-            </span>
-          </div>
+          {tenantSlug && (
+            <div
+              data-testid="tenant-badge"
+              className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium border border-[var(--color-rule)] text-[var(--color-ink-soft)]"
+            >
+              Workspace: <strong>{branding.shortName}</strong>
+            </div>
+          )}
         </div>
 
         <div className="flex items-center gap-2 sm:gap-4">
@@ -94,11 +112,6 @@ export function Nav() {
                   }
                 >
                   {link.label}
-                  {link.badge && (
-                    <span className="ml-1.5 text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300">
-                      {link.badge}
-                    </span>
-                  )}
                 </Link>
               );
             })}

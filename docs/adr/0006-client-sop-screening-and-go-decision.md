@@ -35,6 +35,29 @@ with no delete policy: the SOP requires no-goes to be kept.
 without a sign-off step is never blocked by one. A go-conditional opens drafting
 only once its condition is marked met; a decision needs a named approver.
 
+## Follow-up after a critical walkthrough (same day)
+
+- **Ontario Transfer Payment Ontario** is a source (`ontario-tpon`, 24h): status,
+  deadline, eligibility prose, guideline links and contacts per program. GMF/FCM
+  refuses automated reads (HTTP 403) and is not ingested; it stays a manual check.
+- Grants carry `documents` and `contact`; the proposal screen shows a call
+  snapshot with every field, saying "not published" rather than omitting one.
+- The brief pre-fills role (from the stored `role` rule), intake, amount,
+  mandatory components (critical requirements) and risks (missing fields).
+  The database stamps the signed-in account behind every decision
+  (`decided_by_user`), because the typed approver name proves nothing.
+- Manual section headings belong to a client (`requirements.client_id`); they
+  used to be written into the shared per-grant list, visible to every tenant.
+- Deadlines end at 23:59 America/Toronto, not UTC (`src/lib/deadline.ts`).
+- Pasted URLs are fetched through `safeFetch`, which refuses private and local
+  addresses; profile extraction requires a signed-in caller.
+- Alerts only fire on an `eligible` verdict computed with every field; reminders
+  skip submitted and no-go work. Nothing sends `email_outbox` yet.
+- Removed as fabricated: the keyword "AI" chat, the budget planner and ROI
+  matrix sample data, the pipeline board, the approval workflow stub, the
+  exporter fed an empty list, the relevance-percentage scorecard, the
+  design-token route, and the "Live" badge.
+
 ## Consequences
 
 - Funded-partner detection only recognises public bodies as leads. That matches

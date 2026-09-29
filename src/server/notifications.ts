@@ -1,6 +1,28 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getTenantBranding } from "@/lib/tenant";
 import { decideEligibility } from "@/lib/eligibility";
+import { daysUntilDeadline } from "@/lib/deadline";
+import { formatMoney } from "@/lib/money";
+
+/** Funder text goes into HTML email; it must never be able to become markup. */
+export function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function safeUrl(url: string | undefined): string | null {
+  if (!url) return null;
+  try {
+    const parsed = new URL(url);
+    return /^https?:$/.test(parsed.protocol) ? escapeHtml(parsed.toString()) : null;
+  } catch {
+    return null;
+  }
+}
 
 export interface EmailOutboxRow {
   id?: string;
@@ -36,6 +58,11 @@ export function formatNewGrantEmail({
 }): { subject: string; html: string } {
   const branding = getTenantBranding(tenantSlug);
   const subject = `[GrantDesk] New Matched Grant for ${clientName}: ${grantTitle}`;
+  grantTitle = escapeHtml(grantTitle);
+  funderName = escapeHtml(funderName);
+  clientName = escapeHtml(clientName);
+  amountFormatted = escapeHtml(amountFormatted);
+  const link = safeUrl(grantUrl);
 
   const html = `
 <!DOCTYPE html>
@@ -63,9 +90,9 @@ export function formatNewGrantEmail({
     <p>A new funding opportunity was discovered and matches the profile of <strong>${clientName}</strong>:</p>
     <div class="details">
       <div><strong>Funding Amount:</strong> ${amountFormatted}</div>
-      <div><strong>Deadline:</strong> ${deadline ? deadline : "Continuous / Open"}</div>
+      <div><strong>Deadline:</strong> ${deadline ? escapeHtml(deadline) : "No closing date published"}</div>
     </div>
-    ${grantUrl ? `<a href="${grantUrl}" class="btn">View Grant in Workspace</a>` : ""}
+    ${link ? `<a href="${link}" class="btn">Open the call</a>` : ""}
   </div>
 </body>
 </html>
@@ -100,6 +127,9 @@ export function formatDeadlineEmail({
           ? "⚠️ Attention"
           : "📅 Upcoming";
   const subject = `[${branding.shortName}] ${urgencyLabel}: ${daysLeft}d left for ${clientName} - ${grantTitle}`;
+  grantTitle = escapeHtml(grantTitle);
+  clientName = escapeHtml(clientName);
+  deadline = escapeHtml(deadline);
 
   const html = `
 <!DOCTYPE html>
@@ -144,21 +174,27 @@ export async function scanAndAlertNewGrants({
 }): Promise<{ queued: number }> {
   if (!newGrantIds.length) return { queued: 0 };
 
-  // Fetch new grants
+  // Every field the rules engine reads, so an alert means what a match means.
   const { data: grants, error: grantErr } = await supabase
     .from("grants")
-    .select("id, title, country, currency, amount_min, amount_max, deadline, funder:funders(name)")
+    .select(
+      "id, title, summary, url, country, currency, amount_min, amount_max, deadline, status, " +
+        "eligible_applicant_types, eligibility_note, funder:funders(name)",
+    )
     .in("id", newGrantIds);
-  if (grantErr || !grants) return { queued: 0 };
+  if (grantErr) throw new Error(`alert scan could not read grants: ${grantErr.message}`);
+  if (!grants) return { queued: 0 };
 
-  // Fetch active clients and their profiles
   const { data: clients, error: clientErr } = await supabase
     .from("clients")
     .select(
-      "id, name, consultant_id, tenant_id, client_profiles(jurisdictions, sectors, stage, annual_budget, lead_time_weeks)",
+      "id, name, consultant_id, tenant_id, tenant:tenants(slug), client_profiles(jurisdictions, " +
+        "sectors, stage, annual_budget, currency, lead_time_weeks, funded_partner_pathway, " +
+        "partner_lead_time_weeks, capability_domains)",
     )
     .is("archived_at", null);
-  if (clientErr || !clients) return { queued: 0 };
+  if (clientErr) throw new Error(`alert scan could not read clients: ${clientErr.message}`);
+  if (!clients) return { queued: 0 };
 
   // Fetch consultant emails
   const { data: consultants } = await supabase.from("consultants").select("id, email");
@@ -169,45 +205,86 @@ export async function scanAndAlertNewGrants({
   let queued = 0;
   const today = new Date();
 
-  for (const grant of grants) {
-    const funderName =
-      (Array.isArray(grant.funder)
-        ? (grant.funder[0] as { name?: string })?.name
-        : (grant.funder as { name?: string } | null)?.name) ?? "Funding Agency";
-    const amountStr = grant.amount_max
-      ? `$${Number(grant.amount_max).toLocaleString()} ${grant.currency ?? "CAD"}`
-      : "Disclosed in RFP";
+  type GrantRow = {
+    id: string;
+    title: string;
+    summary: string | null;
+    url: string;
+    country: string;
+    currency: string | null;
+    amount_min: number | null;
+    amount_max: number | null;
+    deadline: string | null;
+    status: string | null;
+    eligible_applicant_types: string[] | null;
+    eligibility_note: string | null;
+    funder: { name?: string } | Array<{ name?: string }> | null;
+  };
+  type ClientRow = {
+    id: string;
+    name: string;
+    consultant_id: string;
+    tenant_id: string | null;
+    tenant: { slug: string } | Array<{ slug: string }> | null;
+    client_profiles: ProfileRow | ProfileRow[] | null;
+  };
+  type ProfileRow = {
+    jurisdictions?: string[];
+    stage?: string | null;
+    annual_budget?: number | null;
+    currency?: string | null;
+    lead_time_weeks?: number | null;
+    funded_partner_pathway?: boolean | null;
+    partner_lead_time_weeks?: number | null;
+    capability_domains?: string[] | null;
+  };
+  const one = <T>(value: T | T[] | null): T | null =>
+    Array.isArray(value) ? (value[0] ?? null) : value;
 
-    for (const client of clients) {
-      const profile = (
-        Array.isArray(client.client_profiles) ? client.client_profiles[0] : client.client_profiles
-      ) as {
-        jurisdictions?: string[];
-        sectors?: string[];
-        stage?: string | null;
-        annual_budget?: number | null;
-        lead_time_weeks?: number | null;
-      } | null;
-      if (!profile) continue;
+  for (const grant of grants as unknown as GrantRow[]) {
+    const funderName = one(grant.funder)?.name ?? "Funder not published";
+    const amountStr = grant.amount_max
+      ? `Up to ${formatMoney(Number(grant.amount_max), grant.currency)}`
+      : grant.amount_min
+        ? `From ${formatMoney(Number(grant.amount_min), grant.currency)}`
+        : "Amount not published";
+
+    for (const client of clients as unknown as ClientRow[]) {
+      const profile = one(client.client_profiles);
+      const tenantSlug = one(client.tenant)?.slug;
+      // No tenant means no branding and no isolation to send under; skipping
+      // is right, guessing a default tenant would mail under someone else's name.
+      if (!profile || !client.tenant_id || !tenantSlug) continue;
 
       const decision = decideEligibility({
         grant: {
+          title: grant.title,
+          summary: grant.summary,
           country: grant.country,
+          currency: grant.currency,
           amountMin: grant.amount_min,
           amountMax: grant.amount_max,
           deadline: grant.deadline,
-          status: "open",
+          status: grant.status,
+          eligibleApplicantTypes: grant.eligible_applicant_types ?? [],
+          eligibilityNote: grant.eligibility_note,
         },
         client: {
           jurisdictions: profile.jurisdictions,
           stage: profile.stage,
           annualBudget: profile.annual_budget,
+          currency: profile.currency,
           leadTimeWeeks: profile.lead_time_weeks,
+          fundedPartnerPathway: profile.funded_partner_pathway,
+          partnerLeadTimeWeeks: profile.partner_lead_time_weeks,
+          capabilityDomains: profile.capability_domains,
         },
         today,
       });
 
-      if (decision.verdict === "eligible" || decision.verdict === "needs_input") {
+      // Only a verdict the rules stand behind is worth an email. A
+      // needs-input result is a question for the screen, not the inbox.
+      if (decision.verdict === "eligible") {
         const recipientEmail = emailMap.get(client.consultant_id);
         if (!recipientEmail) continue;
 
@@ -217,11 +294,13 @@ export async function scanAndAlertNewGrants({
           amountFormatted: amountStr,
           deadline: grant.deadline,
           clientName: client.name,
+          tenantSlug,
+          grantUrl: grant.url,
         });
 
-        // Upsert/Insert with ignore on duplicate
+        // Duplicates are rejected by the daily dedup index, which is the point.
         const { error: insertErr } = await supabase.from("email_outbox").insert({
-          tenant_id: client.tenant_id ?? "11111111-1111-1111-1111-111111111111",
+          tenant_id: client.tenant_id,
           recipient_email: recipientEmail,
           subject,
           body_html: html,
@@ -253,16 +332,30 @@ export async function scanAndAlertDeadlines({
   const todayStr = today.toISOString().slice(0, 10);
   const horizonStr = horizonDate.toISOString().slice(0, 10);
 
-  // Find open proposals with deadline between today and 14 days
-  const { data: proposals, error } = await supabase
-    .from("proposals")
-    .select(
-      "id, client_id, grant:grants!inner(id, title, deadline, status), client:clients!inner(id, name, consultant_id, tenant_id)",
-    )
-    .gte("grant.deadline", todayStr)
-    .lte("grant.deadline", horizonStr);
-
-  if (error || !proposals) return { queued: 0 };
+  // Only live work: something drafted or decided, not sent, not a no-go.
+  const [{ data: proposals, error }, { data: decisions, error: decisionError }] = await Promise.all(
+    [
+      supabase
+        .from("proposals")
+        .select(
+          "id, client_id, grant_id, grant:grants!inner(id, title, deadline, status), " +
+            "client:clients!inner(id, name, consultant_id, tenant_id, tenant:tenants(slug)), " +
+            "submissions(id), proposal_sections(id)",
+        )
+        .gte("grant.deadline", todayStr)
+        .lte("grant.deadline", horizonStr),
+      supabase.from("opportunity_decisions").select("client_id, grant_id, decision"),
+    ],
+  );
+  if (error) throw new Error(`reminder scan could not read proposals: ${error.message}`);
+  if (decisionError)
+    throw new Error(`reminder scan could not read decisions: ${decisionError.message}`);
+  if (!proposals) return { queued: 0 };
+  const decisionOf = new Map(
+    ((decisions ?? []) as Array<{ client_id: string; grant_id: string; decision: string }>).map(
+      (d) => [`${d.client_id}|${d.grant_id}`, d.decision],
+    ),
+  );
 
   const { data: consultants } = await supabase.from("consultants").select("id, email");
   const emailMap = new Map(
@@ -271,7 +364,17 @@ export async function scanAndAlertDeadlines({
 
   let queued = 0;
 
-  for (const row of proposals) {
+  for (const row of proposals as unknown as Array<{
+    client_id: string;
+    grant_id: string;
+    grant: unknown;
+    client: unknown;
+    submissions: Array<{ id: string }> | null;
+    proposal_sections: Array<{ id: string }> | null;
+  }>) {
+    const decision = decisionOf.get(`${row.client_id}|${row.grant_id}`);
+    if ((row.submissions ?? []).length > 0 || decision === "no_go") continue;
+    if ((row.proposal_sections ?? []).length === 0 && !decision) continue;
     const grant = (Array.isArray(row.grant) ? row.grant[0] : row.grant) as {
       id: string;
       title: string;
@@ -283,10 +386,13 @@ export async function scanAndAlertDeadlines({
       name: string;
       consultant_id: string;
       tenant_id: string | null;
+      tenant: { slug: string } | Array<{ slug: string }> | null;
     } | null;
-    if (!grant?.deadline || !client) continue;
+    if (!grant?.deadline || !client?.tenant_id) continue;
+    const tenantSlug = (Array.isArray(client.tenant) ? client.tenant[0] : client.tenant)?.slug;
+    if (!tenantSlug || (grant.status && grant.status !== "open")) continue;
 
-    const daysLeft = Math.ceil((new Date(grant.deadline).getTime() - today.getTime()) / 86_400_000);
+    const daysLeft = daysUntilDeadline(grant.deadline, today);
     // Send alerts at 14, 7, 3, or 1 days
     if (![14, 7, 3, 1].includes(daysLeft)) continue;
 
@@ -298,10 +404,11 @@ export async function scanAndAlertDeadlines({
       clientName: client.name,
       daysLeft,
       deadline: grant.deadline,
+      tenantSlug,
     });
 
     const { error: insertErr } = await supabase.from("email_outbox").insert({
-      tenant_id: client.tenant_id ?? "11111111-1111-1111-1111-111111111111",
+      tenant_id: client.tenant_id,
       recipient_email: recipientEmail,
       subject,
       body_html: html,

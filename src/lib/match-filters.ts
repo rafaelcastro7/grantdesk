@@ -5,6 +5,8 @@
  * says how many a filter is hiding.
  */
 
+import { daysUntilDeadline } from "./deadline";
+
 export type FilterableMatch = {
   grants: {
     title: string;
@@ -44,9 +46,7 @@ export function matchRole(m: FilterableMatch): "lead" | "funded_partner" | "othe
   return /funded partner/i.test(role.detail) ? "funded_partner" : "lead";
 }
 
-function daysUntil(deadline: string, today: Date): number {
-  return Math.ceil((new Date(`${deadline}T23:59:59Z`).getTime() - today.getTime()) / 86_400_000);
-}
+const daysUntil = daysUntilDeadline;
 
 export function applyMatchFilters<T extends FilterableMatch>(
   rows: readonly T[],

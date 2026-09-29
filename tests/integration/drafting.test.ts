@@ -104,6 +104,7 @@ beforeAll(async () => {
     .upsert(
       {
         grant_id: grantId,
+        client_id: clientId,
         label: "Organizational Capacity",
         detail: "Demonstrate your ability to deliver projects of this size.",
         kind: "section",
@@ -112,7 +113,7 @@ beforeAll(async () => {
         source_quote: "Applicants must demonstrate organizational capacity.",
         sort_order: 0,
       },
-      { onConflict: "grant_id, label" },
+      { onConflict: "grant_id, label, client_id" },
     )
     .select("id")
     .single();

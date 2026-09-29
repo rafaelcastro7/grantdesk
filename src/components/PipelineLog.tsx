@@ -64,8 +64,11 @@ export function PipelineLog({ clientId }: { clientId: string }) {
       const [proposals, decisions] = await Promise.all([
         supabase()
           .from("proposals")
-          .select(`grant_id, grants(${grantCols}), submissions(submitted_at, outcome)`)
-          .eq("client_id", clientId),
+          .select(
+            `grant_id, grants(${grantCols}), submissions(submitted_at, outcome), proposal_sections(id)`,
+          )
+          .eq("client_id", clientId)
+          .order("submitted_at", { referencedTable: "submissions", ascending: false }),
         supabase()
           .from("opportunity_decisions")
           .select(
@@ -83,7 +86,7 @@ export function PipelineLog({ clientId }: { clientId: string }) {
       const byGrant = new Map<string, Entry>();
       const base = (grantId: string, g: GrantJoin): Entry => ({
         grantId,
-        title: g?.title ?? "Call no longer in the catalog",
+        title: g?.title ?? "Call details unavailable",
         funder: g?.funders?.name ?? null,
         deadline: g?.deadline ?? null,
         amountMax: g?.amount_max ?? null,
@@ -103,9 +106,12 @@ export function PipelineLog({ clientId }: { clientId: string }) {
           | { submitted_at: string; outcome: string | null }
           | Array<{ submitted_at: string; outcome: string | null }>
           | null;
+        proposal_sections: Array<{ id: string }>;
       }>) {
-        const entry = base(row.grant_id, row.grants);
         const sent = Array.isArray(row.submissions) ? row.submissions[0] : row.submissions;
+        // Opening a call is not logging it; only real work or a decision is.
+        if (!sent && (row.proposal_sections ?? []).length === 0) continue;
+        const entry = base(row.grant_id, row.grants);
         entry.submittedAt = sent?.submitted_at ?? null;
         entry.outcome = sent?.outcome ?? null;
         byGrant.set(row.grant_id, entry);
@@ -164,7 +170,13 @@ export function PipelineLog({ clientId }: { clientId: string }) {
       "Submitted",
       "Outcome",
     ];
-    const cell = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    // A funder title starting with "=" or "+" would run as a formula when the
+    // log is opened in Excel; a leading apostrophe keeps it text.
+    const cell = (v: unknown) => {
+      const text = String(v ?? "");
+      const safe = /^[=+\-@\t\r]/.test(text) ? `'${text}` : text;
+      return `"${safe.replace(/"/g, '""')}"`;
+    };
     const lines = [
       header,
       ...shown.map((e) => [
@@ -227,7 +239,8 @@ export function PipelineLog({ clientId }: { clientId: string }) {
 
       {entries !== null && entries.length === 0 && (
         <p className="mt-3 text-sm text-[var(--color-ink-soft)]">
-          Nothing logged yet. Open a call from the matches to start its Opportunity Brief.
+          Nothing logged yet. A call is logged once its Opportunity Brief is saved or a section is
+          drafted.
         </p>
       )}
 
@@ -269,8 +282,14 @@ export function PipelineLog({ clientId }: { clientId: string }) {
                   >
                     {e.title}
                   </Link>
-                  <span className={`text-xs font-semibold uppercase ${TONE[e.decision]}`}>
-                    {e.submittedAt ? `Submitted ${e.submittedAt.slice(0, 10)}` : LABEL[e.decision]}
+                  <span
+                    className={`text-xs font-semibold uppercase ${
+                      e.submittedAt ? "text-[var(--color-eligible)]" : TONE[e.decision]
+                    }`}
+                  >
+                    {e.submittedAt
+                      ? `Submitted ${e.submittedAt.slice(0, 10)}${e.outcome ? ` · ${e.outcome}` : ""}`
+                      : LABEL[e.decision]}
                   </span>
                 </div>
                 <p className="mt-1 text-xs text-[var(--color-ink-soft)]">

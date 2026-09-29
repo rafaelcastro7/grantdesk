@@ -44,6 +44,12 @@ export type SourceGrant = {
    * "who won this before" answerable at all.
    */
   assistanceListings?: readonly string[];
+  /** Only for sources that publish it; otherwise the stored status is left alone. */
+  status?: "open" | "closed";
+  /** Guidelines, forms and application guides, as the funder linked them. */
+  documents?: ReadonlyArray<{ label: string; url: string }>;
+  /** Who to ask, as the funder published it. */
+  contact?: string | null;
   /** Stable across re-runs; this is what makes ingestion idempotent. */
   externalId: string;
 };

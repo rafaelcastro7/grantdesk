@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { htmlToText, htmlTitle, relatedLinks } from "@/lib/html-text";
 import { callLlm } from "./llm";
+import { safeFetch } from "./safe-fetch";
 
 /**
  * Read a funding call and record what it actually asks for.
@@ -366,7 +367,7 @@ export async function extractRequirementsFromHtml(
 }
 
 async function fetchPage(url: string, timeoutMs: number, minChars: number): Promise<FetchedPage> {
-  const response = await fetch(url, {
+  const response = await safeFetch(url, {
     headers: FETCH_HEADERS,
     signal: AbortSignal.timeout(timeoutMs),
   });

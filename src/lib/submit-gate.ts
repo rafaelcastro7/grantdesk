@@ -1,3 +1,5 @@
+import { deadlineEnd } from "./deadline";
+
 /**
  * Is this application actually ready to send?
  *
@@ -121,7 +123,7 @@ export function assessSubmission(candidate: SubmitCandidate): {
   }
 
   if (candidate.deadline) {
-    const closes = new Date(`${candidate.deadline}T23:59:59Z`);
+    const closes = new Date(deadlineEnd(candidate.deadline));
     if (!Number.isNaN(closes.getTime()) && closes.getTime() < candidate.today.getTime()) {
       blockers.push({
         key: "closed",

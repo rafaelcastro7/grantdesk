@@ -154,9 +154,11 @@ function MatchesPage() {
     // would defeat the guard it depends on.
   }, [matches, busy]);
 
-  const findAll = () =>
+  const findAll = (depth: 60 | 150 | 300 = 60) =>
     run("matching", async () => {
-      const response = await runMatching({ data: { clientId, accessToken: await accessToken() } });
+      const response = await runMatching({
+        data: { clientId, accessToken: await accessToken(), depth },
+      });
       if (!response.ok) throw new Error(response.error);
 
       const { result } = response;
@@ -227,7 +229,7 @@ function MatchesPage() {
       <div className="mt-6 flex flex-wrap items-center gap-3">
         <button
           type="button"
-          onClick={findAll}
+          onClick={() => findAll()}
           disabled={busy !== null}
           data-testid="run-matching"
           className="rounded-md bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
@@ -238,6 +240,18 @@ function MatchesPage() {
               ? "Check again"
               : "Find matches"}
         </button>
+        {matches && matches.length > 0 && (
+          <button
+            type="button"
+            onClick={() => findAll(300)}
+            disabled={busy !== null}
+            data-testid="run-matching-deep"
+            title="Checks up to 300 calls instead of 60 — slower, finds more"
+            className="rounded-md border border-[var(--color-rule)] px-4 py-2 text-sm font-medium disabled:opacity-50"
+          >
+            Search deeper (300 calls)
+          </button>
+        )}
         {note && (
           <p data-testid="match-summary" className="text-sm text-[var(--color-ink-soft)]">
             {note}

@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { extractRequirementsFromText, extractRequirementsFromUrl } from "./extract-requirements";
+import { catalogWriter } from "./caller";
 
 /**
  * Read a call's own requirements and store them against the grant.
@@ -14,7 +15,12 @@ import { extractRequirementsFromText, extractRequirementsFromUrl } from "./extra
  * and the empty-extraction case shipped broken for a while before anyone
  * noticed by clicking through the app.
  */
-export async function readRequirementsForGrant(supabase: SupabaseClient, grantId: string) {
+export async function readRequirementsForGrant(
+  supabase: SupabaseClient,
+  grantId: string,
+  /** Extracted requirements are shared catalog data; only the server writes them. */
+  writer: SupabaseClient = catalogWriter(),
+) {
   const { data: grant, error } = await supabase
     .from("grants")
     .select("id, url, title, summary, eligibility_note")
@@ -65,9 +71,9 @@ export async function readRequirementsForGrant(supabase: SupabaseClient, grantId
   // reading proposal_sections from this client only ever shows the caller's
   // own — so this code used to delete requirements another consultant had
   // already drafted against, silently unlinking their work.
-  await supabase.rpc("replace_extracted_requirements", { target_grant: grantId });
+  await writer.rpc("replace_extracted_requirements", { target_grant: grantId });
 
-  const { error: writeError } = await supabase.from("requirements").upsert(
+  const { error: writeError } = await writer.from("requirements").upsert(
     requirements.map((r) => ({
       grant_id: grantId,
       label: r.label,
@@ -81,7 +87,7 @@ export async function readRequirementsForGrant(supabase: SupabaseClient, grantId
       extracted_at: provenance.extractedAt,
       extracted_from: provenance.source,
     })),
-    { onConflict: "grant_id, label" },
+    { onConflict: "grant_id, label, client_id" },
   );
   if (writeError) throw new Error(writeError.message);
 

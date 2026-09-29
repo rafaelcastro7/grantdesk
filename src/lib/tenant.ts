@@ -13,8 +13,9 @@ export interface TenantBranding {
   tagline: string;
   primaryColor: string;
   accentColor: string;
-  logoUrl: string;
-  logoInverseUrl: string;
+  /** Null when the tenant has not supplied a logo; never another tenant's. */
+  logoUrl: string | null;
+  logoInverseUrl: string | null;
 }
 
 export const DEFAULT_TENANT_SLUG = "iial";
@@ -39,8 +40,8 @@ export const KNOWN_TENANTS: Record<string, TenantBranding> = {
     tagline: "Strategic Funding & Research Advisory",
     primaryColor: "#10b981",
     accentColor: "#059669",
-    logoUrl: "/brand/iial-logo.png",
-    logoInverseUrl: "/brand/iial-logo-inverse.png",
+    logoUrl: null,
+    logoInverseUrl: null,
   },
 };
 
@@ -111,7 +112,7 @@ export function getTenantBranding(slug: string): TenantBranding {
     tagline: "Secure Multi-Tenant Grant Desk",
     primaryColor: "#0ea5e9",
     accentColor: "#0284c7",
-    logoUrl: "/brand/iial-logo.png",
-    logoInverseUrl: "/brand/iial-logo-inverse.png",
+    logoUrl: null,
+    logoInverseUrl: null,
   };
 }

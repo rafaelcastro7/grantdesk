@@ -1,5 +1,6 @@
 import { fromClientStage, listApplicantTypes, type ApplicantType } from "./applicant-types";
 import { matchedTerms } from "./match-explain";
+import { daysUntilDeadline, deadlineEnd } from "./deadline";
 
 /**
  * Eligibility is decided by rules, never by a model.
@@ -182,7 +183,7 @@ function deadlineRule(input: EligibilityInput): RuleResult {
       detail: "No closing date published — this funder accepts applications continuously.",
     };
   }
-  const closes = new Date(`${deadline}T23:59:59Z`);
+  const closes = new Date(deadlineEnd(deadline));
   if (Number.isNaN(closes.getTime())) {
     return {
       key: "deadline",
@@ -199,7 +200,7 @@ function deadlineRule(input: EligibilityInput): RuleResult {
       detail: `Closed on ${deadline}.`,
     };
   }
-  const days = Math.ceil((closes.getTime() - input.today.getTime()) / 86_400_000);
+  const days = daysUntilDeadline(deadline, input.today);
   return {
     key: "deadline",
     status: "pass",
@@ -336,6 +337,18 @@ function scaleRule(input: EligibilityInput): RuleResult {
       status: "unknown",
       isHardGate: false,
       detail: "Not enough figures published to compare this award against the client's budget.",
+    };
+  }
+  // A USD award against a CAD budget is not a ratio; no rate is stored here, so
+  // the honest answer is that we cannot compare them.
+  const grantCurrency = currency?.toUpperCase();
+  const clientCurrency = input.client.currency?.toUpperCase();
+  if (grantCurrency && clientCurrency && grantCurrency !== clientCurrency) {
+    return {
+      key: "scale",
+      status: "unknown",
+      isHardGate: false,
+      detail: `The award is in ${grantCurrency} and this client's budget in ${clientCurrency}, so size was not compared.`,
     };
   }
   const unit = currency ?? input.client.currency ?? "";
@@ -511,8 +524,8 @@ function runwayRule(input: EligibilityInput): RuleResult {
       detail: "No closing date, so there is no deadline to race.",
     };
   }
-  const closes = new Date(`${input.grant.deadline}T23:59:59Z`);
-  if (Number.isNaN(closes.getTime())) {
+  const days = daysUntilDeadline(input.grant.deadline, input.today);
+  if (Number.isNaN(days)) {
     return {
       key: "runway",
       status: "unknown",
@@ -521,7 +534,6 @@ function runwayRule(input: EligibilityInput): RuleResult {
     };
   }
 
-  const days = Math.ceil((closes.getTime() - input.today.getTime()) / 86_400_000);
   if (days < 0) {
     return { key: "runway", status: "fail", isHardGate: false, detail: "This call has closed." };
   }

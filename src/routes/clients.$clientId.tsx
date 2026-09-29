@@ -3,6 +3,7 @@ import { useAction } from "@/lib/use-action";
 import { useServerFn } from "@tanstack/react-start";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import { accessToken } from "@/lib/session";
 import { extractProfile } from "@/server/profile.functions";
 import { assessProfile, nextGap, type ProfileFields } from "@/lib/profile-completeness";
 import { PipelineLog } from "@/components/PipelineLog";
@@ -122,16 +123,23 @@ function ClientDetail() {
     // the client name, profile and answer library too even though they had
     // already come back fine.
     setClient(clientRow as ClientRow | null);
-    if (clientRow?.website && !sourceUrl) setSourceUrl(clientRow.website as string);
+    // A failed profile read must not look like "no profile yet" — that is what
+    // triggers an automatic re-extraction over a profile that exists.
+    if (profileResult.error) {
+      setError(profileResult.error.message);
+      return;
+    }
+    if (clientRow?.website) setSourceUrl((current) => current || (clientRow.website as string));
     setProfile((profileResult.data as StoredProfile | null) ?? null);
-    setAnswers((answersResult.data ?? []) as StoredAnswer[]);
+    if (answersResult.error) setError(answersResult.error.message);
+    else setAnswers((answersResult.data ?? []) as StoredAnswer[]);
 
     if (teamResult.error) {
       setError(teamResult.error.message);
       return;
     }
     setTeam((teamResult.data ?? []) as unknown as TeamMember[]);
-  }, [clientId, sourceUrl]);
+  }, [clientId]);
 
   useEffect(() => {
     void load();
@@ -275,7 +283,9 @@ function ClientDetail() {
         if (existing) return "Skipped the automatic read — a profile was already saved.";
       }
 
-      const result = await runExtraction({ data: { url: sourceUrl.trim() } });
+      const result = await runExtraction({
+        data: { url: sourceUrl.trim(), accessToken: await accessToken() },
+      });
       if (!result.ok) throw new Error(result.error);
 
       const { profile: extracted, provenance } = result;

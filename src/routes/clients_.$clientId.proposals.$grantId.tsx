@@ -1,6 +1,8 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { OpportunityBrief } from "@/components/OpportunityBrief";
 import type { DraftingGate } from "@/lib/go-decision";
+import { CallSnapshot, type CallSnapshotGrant } from "@/components/CallSnapshot";
+import { formatMoney } from "@/lib/money";
 import { useServerFn } from "@tanstack/react-start";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
@@ -66,13 +68,7 @@ function ProposalPage() {
   const runPastAwards = useServerFn(getPastAwards);
   const runAssess = useServerFn(assessRequirement);
 
-  const [grant, setGrant] = useState<{
-    title: string;
-    url: string;
-    deadline: string | null;
-    summary: string | null;
-    eligibility_note: string | null;
-  } | null>(null);
+  const [grant, setGrant] = useState<CallSnapshotGrant | null>(null);
   const [proposalId, setProposalId] = useState<string | null>(null);
   const [requirements, setRequirements] = useState<Requirement[] | null>(null);
   const [sections, setSections] = useState<Record<string, Section>>({});
@@ -96,12 +92,23 @@ function ProposalPage() {
   const pendingAcks = useRef(new Set<Promise<unknown>>());
 
   const load = useCallback(async () => {
-    const { data: grantRow } = await supabase()
+    const { data: grantRow, error: grantError } = await supabase()
       .from("grants")
-      .select("title, url, deadline, summary, eligibility_note")
+      .select(
+        "title, url, deadline, summary, eligibility_note, status, currency, amount_min, " +
+          "amount_max, country, documents, contact, source_key, last_seen_at, funders(name, website)",
+      )
       .eq("id", grantId)
       .maybeSingle();
-    setGrant(grantRow as typeof grant);
+    if (grantError) {
+      setError(grantError.message);
+      return;
+    }
+    if (!grantRow) {
+      setError("This call is not in the catalog, or you do not have access to it.");
+      return;
+    }
+    setGrant(grantRow as unknown as NonNullable<typeof grant>);
 
     // The proposal row is created on arrival rather than behind a button: the
     // consultant has already decided by navigating here, and an extra click
@@ -123,21 +130,48 @@ function ProposalPage() {
     const id = (proposal as { id: string }).id;
     setProposalId(id);
 
-    const { data: reqs } = await supabase()
-      .from("requirements")
-      .select(
-        "id, label, detail, kind, word_limit, evaluation_note, source_quote, is_critical, sort_order",
-      )
-      .eq("grant_id", grantId)
-      .order("sort_order");
-    setRequirements((reqs ?? []) as Requirement[]);
-
-    const { data: secs } = await supabase()
-      .from("proposal_sections")
-      .select(
-        "id, requirement_id, heading, content, word_count, drafted_by, reused_answer_ids, fabrication_concerns",
-      )
-      .eq("proposal_id", id);
+    // Shared extracted requirements plus the headings typed for this client
+    // only — never another client's, even one this consultant also serves.
+    const [reqResult, secResult, ackResult, assessResult, sentResult] = await Promise.all([
+      supabase()
+        .from("requirements")
+        .select(
+          "id, label, detail, kind, word_limit, evaluation_note, source_quote, is_critical, sort_order",
+        )
+        .eq("grant_id", grantId)
+        .or(`client_id.is.null,client_id.eq.${clientId}`)
+        .order("sort_order"),
+      supabase()
+        .from("proposal_sections")
+        .select(
+          "id, requirement_id, heading, content, word_count, drafted_by, reused_answer_ids, fabrication_concerns",
+        )
+        .eq("proposal_id", id),
+      supabase()
+        .from("requirement_acknowledgements")
+        .select("requirement_id, location")
+        .eq("proposal_id", id),
+      supabase()
+        .from("requirement_assessments")
+        .select("requirement_id, assessment")
+        .eq("proposal_id", id),
+      supabase()
+        .from("submissions")
+        .select("submitted_at, outcome, confirmation_number")
+        .eq("proposal_id", id)
+        .order("submitted_at", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+    ]);
+    // A failed read must say so: an empty list here reads as "the call asks
+    // for nothing" or "nothing is drafted", both of which are false.
+    const failed = [reqResult, secResult, ackResult, assessResult, sentResult].find((r) => r.error);
+    if (failed?.error) {
+      setError(failed.error.message);
+      return;
+    }
+    setRequirements((reqResult.data ?? []) as Requirement[]);
+    const secs = secResult.data;
 
     const byRequirement: Record<string, Section> = {};
     for (const section of (secs ?? []) as Section[]) {
@@ -145,11 +179,10 @@ function ProposalPage() {
     }
     setSections(byRequirement);
 
-    const { data: acks } = await supabase()
-      .from("requirement_acknowledgements")
-      .select("requirement_id, location")
-      .eq("proposal_id", id);
-    const ackRows = (acks ?? []) as Array<{ requirement_id: string; location: string | null }>;
+    const ackRows = (ackResult.data ?? []) as Array<{
+      requirement_id: string;
+      location: string | null;
+    }>;
     setAcknowledged(new Set(ackRows.map((a) => a.requirement_id)));
     setLocations(
       Object.fromEntries(
@@ -157,25 +190,14 @@ function ProposalPage() {
       ),
     );
 
-    const { data: assessed } = await supabase()
-      .from("requirement_assessments")
-      .select("requirement_id, assessment")
-      .eq("proposal_id", id);
     setAssessments(
       Object.fromEntries(
-        ((assessed ?? []) as Array<{ requirement_id: string; assessment: string }>).map((a) => [
-          a.requirement_id,
-          a.assessment,
-        ]),
+        ((assessResult.data ?? []) as Array<{ requirement_id: string; assessment: string }>).map(
+          (a) => [a.requirement_id, a.assessment],
+        ),
       ),
     );
-
-    const { data: sent } = await supabase()
-      .from("submissions")
-      .select("submitted_at, outcome, confirmation_number")
-      .eq("proposal_id", id)
-      .maybeSingle();
-    setSubmission(sent as typeof submission);
+    setSubmission(sentResult.data as typeof submission);
   }, [clientId, grantId]);
 
   useEffect(() => {
@@ -306,12 +328,14 @@ function ProposalPage() {
         .upsert(
           {
             grant_id: grantId,
+            // Belongs to this client's application, not to the shared call.
+            client_id: clientId,
             label,
             kind: "section",
             word_limit: Number.isFinite(limit) && limit > 0 ? limit : null,
             sort_order: (requirements?.length ?? 0) + 100,
           },
-          { onConflict: "grant_id, label" },
+          { onConflict: "grant_id, label, client_id" },
         );
       if (insertError) throw insertError;
       form.reset();
@@ -367,10 +391,14 @@ function ProposalPage() {
     // checkbox that stays where it was for half a second reads as broken —
     // people click it again, which is how a confirmation gets toggled back off
     // without anyone noticing. Reverted below if the write actually fails.
-    const optimistic = new Set(acknowledged);
-    if (has) optimistic.add(requirement.id);
-    else optimistic.delete(requirement.id);
-    setAcknowledged(optimistic);
+    // Functional, so two quick ticks both land: a set copied from this
+    // render's closure would drop whichever tick came first.
+    setAcknowledged((current) => {
+      const next = new Set(current);
+      if (has) next.add(requirement.id);
+      else next.delete(requirement.id);
+      return next;
+    });
 
     // Cleared here, synchronously, and not after the write returns. Doing it
     // afterwards let a slow acknowledgement wipe the results of a readiness
@@ -391,11 +419,12 @@ function ProposalPage() {
         );
         if (ackError) throw ackError;
       } else {
-        await supabase()
+        const { error: deleteError } = await supabase()
           .from("requirement_acknowledgements")
           .delete()
           .eq("proposal_id", proposalId)
           .eq("requirement_id", requirement.id);
+        if (deleteError) throw deleteError;
       }
       // Deliberately no reload on success. Reloading replaced the local set
       // with a snapshot taken before this write landed, so ticking several
@@ -519,13 +548,19 @@ function ProposalPage() {
     if (!proposalId) return;
     const previous = sections[requirement.id];
     if (previous?.content?.trim()) {
-      await supabase().from("proposal_section_revisions").insert({
+      // Refuse to overwrite if the earlier version could not be kept: losing
+      // the only copy of a draft to save an edit is worse than not saving.
+      const { error: revisionError } = await supabase().from("proposal_section_revisions").insert({
         proposal_id: proposalId,
         requirement_id: requirement.id,
         content: previous.content,
         word_count: previous.word_count,
         drafted_by: previous.drafted_by,
       });
+      if (revisionError) {
+        setError(`Not saved — the previous version could not be kept: ${revisionError.message}`);
+        return;
+      }
     }
     const { error: saveError } = await supabase()
       .from("proposal_sections")
@@ -590,13 +625,20 @@ function ProposalPage() {
           ingestion. Reading it required opening "The call itself" until now,
           which is exactly the kind of thing this app should never make a
           consultant leave it to go find out. */}
-        {(grant?.summary || grant?.eligibility_note) && (
-          <div className="mt-4 max-w-prose rounded-md border border-[var(--color-rule)] bg-[var(--color-surface)] p-4">
-            {grant?.summary && <p className="text-sm">{grant.summary}</p>}
-            {grant?.eligibility_note && (
-              <p className="mt-2 text-sm text-[var(--color-ink-soft)]">{grant.eligibility_note}</p>
-            )}
-          </div>
+        {error && !grant && (
+          <p role="alert" className="mt-4 text-sm text-[var(--color-ineligible)]">
+            {error}
+          </p>
+        )}
+        {grant && <CallSnapshot grant={grant} />}
+        {submission && (
+          <p
+            data-testid="submitted-lock"
+            className="mt-4 rounded-md border border-[var(--color-rule)] bg-[var(--color-accent-soft)] p-3 text-sm"
+          >
+            Submitted on {new Date(submission.submitted_at).toLocaleDateString()}. The application
+            is locked so the record matches what the funder received.
+          </p>
         )}
 
         <div className="mt-6 flex flex-wrap items-center gap-3">
@@ -675,7 +717,8 @@ function ProposalPage() {
                           )}
                         </span>
                         <span className="shrink-0 font-mono text-xs tabular-nums text-[var(--color-ink-soft)]">
-                          {award.amount ? `$${Math.round(award.amount).toLocaleString()}` : "—"}
+                          {/* USAspending reports federal awards in US dollars. */}
+                          {award.amount ? formatMoney(Math.round(award.amount), "USD") : "—"}
                           {award.awardedOn && ` · ${award.awardedOn.slice(0, 4)}`}
                         </span>
                       </li>
@@ -821,7 +864,33 @@ function ProposalPage() {
           this was found against is a real, common example of — its own URL
           is an administrator's page, not the opportunity's, so extraction
           has nothing to read there by design, not by failure. */}
-        <OpportunityBrief clientId={clientId} grantId={grantId} onGate={setGate} />
+        {grant && (
+          <OpportunityBrief
+            clientId={clientId}
+            grantId={grantId}
+            onGate={setGate}
+            locked={!!submission}
+            prefill={{
+              deadline: grant.deadline,
+              amountMax: grant.amount_max,
+              currency: grant.currency,
+              mandatoryComponents: (requirements ?? [])
+                .filter((r) => r.is_critical || r.kind === "attachment")
+                .map((r) => `• ${r.label}${r.source_quote ? ` — "${r.source_quote}"` : ""}`)
+                .join("\n"),
+              risks: [
+                grant.amount_max ? null : "The funder publishes no award amount.",
+                grant.deadline ? null : "No closing date published — confirm intake timing.",
+                grant.eligibility_note ? null : "No eligibility text published — read the guide.",
+                (grant.documents ?? []).length
+                  ? null
+                  : "No application guide linked by the source.",
+              ]
+                .filter(Boolean)
+                .join("\n"),
+            }}
+          />
+        )}
 
         {requirements !== null && (
           <section className="mt-10">
@@ -855,7 +924,7 @@ function ProposalPage() {
                   requirement={requirement}
                   section={sections[requirement.id]}
                   busy={busy === requirement.id}
-                  disabled={busy !== null || !gate.allowed}
+                  disabled={busy !== null || !gate.allowed || !!submission}
                   onDraft={() => draft(requirement)}
                   onSave={(content) => saveEdit(requirement, content)}
                   onKeep={(content) => keepAnswer(requirement, content)}
@@ -892,7 +961,7 @@ function ProposalPage() {
               />
               <button
                 type="submit"
-                disabled={busy !== null}
+                disabled={busy !== null || !!submission}
                 data-testid="add-section"
                 className="rounded-md border border-[var(--color-rule)] px-3 py-2 text-sm font-medium disabled:opacity-50"
               >
@@ -1096,16 +1165,16 @@ function SectionCard({
       setShowHistory(false);
       return;
     }
-    if (revisions === null) {
-      const { data } = await supabase()
-        .from("proposal_section_revisions")
-        .select("id, content, word_count, drafted_by, created_at")
-        .eq("proposal_id", proposalId)
-        .eq("requirement_id", requirement.id)
-        .order("created_at", { ascending: false })
-        .limit(10);
-      setRevisions((data as Revision[] | null) ?? []);
-    }
+    // Read on every open: a re-draft since the last look adds a version, and a
+    // cached list would hide the one the consultant most likely wants back.
+    const { data, error: historyError } = await supabase()
+      .from("proposal_section_revisions")
+      .select("id, content, word_count, drafted_by, created_at")
+      .eq("proposal_id", proposalId)
+      .eq("requirement_id", requirement.id)
+      .order("created_at", { ascending: false })
+      .limit(10);
+    setRevisions(historyError ? null : ((data as Revision[] | null) ?? []));
     setShowHistory(true);
   }
 
@@ -1275,7 +1344,9 @@ function SectionCard({
           className="mt-3 rounded-md border border-[var(--color-rule)] p-3"
         >
           {revisions === null ? (
-            <p className="text-sm text-[var(--color-ink-soft)]">Loading…</p>
+            <p className="text-sm text-[var(--color-ineligible)]">
+              Could not load earlier versions. Close and open History to try again.
+            </p>
           ) : revisions.length === 0 ? (
             <p className="text-sm text-[var(--color-ink-soft)]">
               No earlier version — this is the only one.

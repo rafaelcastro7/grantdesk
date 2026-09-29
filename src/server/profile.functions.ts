@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { extractProfileFromUrl } from "./extract-profile";
+import { ACCESS_TOKEN_MESSAGE, callerClient } from "./caller";
 
 /**
  * Profile extraction runs on the server because it needs provider API keys.
@@ -16,9 +17,14 @@ export const extractProfile = createServerFn({ method: "POST" })
         .string()
         .url("That does not look like a web address.")
         .refine((value) => /^https?:\/\//i.test(value), "Only http(s) addresses can be read."),
+      accessToken: z.string().min(10, ACCESS_TOKEN_MESSAGE),
     }),
   )
   .handler(async ({ data }) => {
+    // Reading a page spends model quota and makes the server fetch a URL, so
+    // it is only done for a signed-in consultant.
+    const { data: user, error: authError } = await callerClient(data.accessToken).auth.getUser();
+    if (authError || !user.user) return { ok: false as const, error: ACCESS_TOKEN_MESSAGE };
     try {
       const { profile, provenance } = await extractProfileFromUrl(data.url);
       return { ok: true as const, profile, provenance };

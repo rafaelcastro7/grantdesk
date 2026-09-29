@@ -2,6 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { Landing } from "@/components/Landing";
+import { daysUntilDeadline } from "@/lib/deadline";
 
 export const Route = createFileRoute("/")({ component: Home });
 
@@ -12,6 +13,15 @@ type Row = {
   clients: { name: string } | null;
   grants: { title: string; deadline: string | null } | null;
   submissions: Array<{ submitted_at: string; outcome: string | null }>;
+  proposal_sections: Array<{ id: string }>;
+  /** Joined in code from opportunity_decisions. */
+  decision?: string | null;
+};
+
+const DECISION_LABEL: Record<string, string> = {
+  pending: "awaiting go / no-go",
+  go: "GO",
+  go_conditional: "GO-conditional",
 };
 
 /**
@@ -40,24 +50,51 @@ function Home() {
     }
     setSignedIn(true);
 
-    const { data, error: readError } = await supabase()
-      .from("proposals")
-      .select(
-        "id, client_id, grant_id, clients(name), grants(title, deadline), submissions(submitted_at, outcome)",
-      );
+    const [proposals, decisions] = await Promise.all([
+      supabase()
+        .from("proposals")
+        .select(
+          "id, client_id, grant_id, clients(name), grants(title, deadline), " +
+            "submissions(submitted_at, outcome), proposal_sections(id)",
+        )
+        .order("submitted_at", { referencedTable: "submissions", ascending: false }),
+      supabase().from("opportunity_decisions").select("client_id, grant_id, decision"),
+    ]);
+    const readError = proposals.error ?? decisions.error;
     if (readError) {
       setError(readError.message);
       return;
     }
-    setRows((data ?? []) as unknown as Row[]);
+    const decisionOf = new Map(
+      (
+        (decisions.data ?? []) as Array<{ client_id: string; grant_id: string; decision: string }>
+      ).map((d) => [`${d.client_id}|${d.grant_id}`, d.decision]),
+    );
+    setRows(
+      ((proposals.data ?? []) as unknown as Row[]).map((r) => ({
+        ...r,
+        decision: decisionOf.get(`${r.client_id}|${r.grant_id}`) ?? null,
+      })),
+    );
   }, []);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  const open = (rows ?? [])
-    .filter((r) => r.submissions.length === 0)
+  // In progress means real work exists — a section or a brief. Merely opening
+  // a call to look at it is not an application, and a no-go is not due.
+  const active = (rows ?? []).filter(
+    (r) =>
+      r.submissions.length === 0 &&
+      r.decision !== "no_go" &&
+      (r.proposal_sections.length > 0 || r.decision != null),
+  );
+  const isClosed = (r: Row) =>
+    !!r.grants?.deadline && daysUntilDeadline(r.grants.deadline, new Date()) < 0;
+  const lapsed = active.filter(isClosed);
+  const open = active
+    .filter((r) => !isClosed(r))
     .sort((a, b) => {
       // A call with no published closing date is genuinely less urgent than one
       // that closes on Friday, so it sorts last rather than first.
@@ -92,15 +129,19 @@ function Home() {
         </p>
       )}
 
-      {signedIn && rows !== null && open.length === 0 && sent.length === 0 && (
-        <p className="mt-8 text-sm text-[var(--color-ink-soft)]">
-          Nothing in progress yet.{" "}
-          <Link to="/clients" className="text-[var(--color-accent)]">
-            Add a client
-          </Link>{" "}
-          and find what they can apply for.
-        </p>
-      )}
+      {signedIn &&
+        rows !== null &&
+        open.length === 0 &&
+        sent.length === 0 &&
+        lapsed.length === 0 && (
+          <p className="mt-8 text-sm text-[var(--color-ink-soft)]">
+            Nothing in progress yet.{" "}
+            <Link to="/clients" className="text-[var(--color-accent)]">
+              Add a client
+            </Link>{" "}
+            and find what they can apply for.
+          </p>
+        )}
 
       {open.length > 0 && (
         <ul
@@ -119,10 +160,40 @@ function Home() {
                 </Link>
                 <Deadline date={row.grants?.deadline ?? null} />
               </div>
-              <p className="mt-1 text-xs text-[var(--color-ink-soft)]">{row.clients?.name}</p>
+              <p className="mt-1 text-xs text-[var(--color-ink-soft)]">
+                {row.clients?.name}
+                {row.decision ? ` · ${DECISION_LABEL[row.decision] ?? row.decision}` : ""}
+                {` · ${row.proposal_sections.length} section${row.proposal_sections.length === 1 ? "" : "s"} started`}
+              </p>
             </li>
           ))}
         </ul>
+      )}
+
+      {lapsed.length > 0 && (
+        <section className="mt-10" data-testid="lapsed-list">
+          <h2 className="text-sm font-semibold">Closed before it was sent</h2>
+          <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
+            Work exists but the deadline has passed. Kept so the effort is not lost if it reopens.
+          </p>
+          <ul className="mt-3 flex flex-col gap-px overflow-hidden rounded-md border border-[var(--color-rule)] bg-[var(--color-rule)]">
+            {lapsed.map((row) => (
+              <li key={row.id} className="bg-[var(--color-surface)] px-4 py-3 text-sm">
+                <Link
+                  to="/clients/$clientId/proposals/$grantId"
+                  params={{ clientId: row.client_id, grantId: row.grant_id }}
+                  className="text-[var(--color-accent)]"
+                >
+                  {row.grants?.title ?? "Application"}
+                </Link>
+                <span className="text-[var(--color-ink-soft)]">
+                  {" "}
+                  · {row.clients?.name} · closed {row.grants?.deadline}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
 
       {sent.length > 0 && (
@@ -180,7 +251,7 @@ function Deadline({ date }: { date: string | null }) {
   if (!date) {
     return <span className="shrink-0 text-xs text-[var(--color-ink-soft)]">no closing date</span>;
   }
-  const days = Math.ceil((new Date(`${date}T23:59:59Z`).getTime() - Date.now()) / 86_400_000);
+  const days = daysUntilDeadline(date, new Date());
   const tone =
     days < 0
       ? "text-[var(--color-ineligible)]"

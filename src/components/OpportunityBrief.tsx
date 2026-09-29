@@ -24,13 +24,49 @@ type BriefRow = {
   decided_by: string | null;
   decision_reason: string | null;
   decided_at: string | null;
+  updated_at: string | null;
+  /** The signed-in account that recorded the decision, set by the database. */
+  recorder: { email: string } | null;
 };
 
 const COLUMNS =
   "role, role_other, intake, application_structure, strategic_angle, mandatory_components, " +
   "request_amount, net_revenue, match_required, in_kind_cap, cash_match_confirmed, risks, " +
   "recommendation, recommendation_reason, condition, decision, condition_met, decided_by, " +
-  "decision_reason, decided_at";
+  "decision_reason, decided_at, updated_at, recorder:consultants!opportunity_decisions_decided_by_user_fkey(email)";
+
+export type BriefPrefill = {
+  deadline: string | null;
+  amountMax: number | null;
+  currency: string | null;
+  mandatoryComponents: string;
+  risks: string;
+};
+
+const EMPTY_BRIEF: BriefRow = {
+  role: null,
+  role_other: null,
+  intake: null,
+  application_structure: null,
+  strategic_angle: null,
+  mandatory_components: null,
+  request_amount: null,
+  net_revenue: null,
+  match_required: null,
+  in_kind_cap: null,
+  cash_match_confirmed: false,
+  risks: null,
+  recommendation: null,
+  recommendation_reason: null,
+  condition: null,
+  decision: "pending",
+  condition_met: false,
+  decided_by: null,
+  decision_reason: null,
+  decided_at: null,
+  updated_at: null,
+  recorder: null,
+};
 
 const DECISION_LABEL: Record<Decision, string> = {
   pending: "Awaiting leadership decision",
@@ -50,10 +86,16 @@ export function OpportunityBrief({
   clientId,
   grantId,
   onGate,
+  prefill,
+  locked = false,
 }: {
   clientId: string;
   grantId: string;
   onGate: (gate: DraftingGate) => void;
+  /** What the catalog and the rules already know, used when no brief exists yet. */
+  prefill: BriefPrefill;
+  /** After submission the record must match what was sent. */
+  locked?: boolean;
 }) {
   const [row, setRow] = useState<BriefRow | null>(null);
   const [required, setRequired] = useState(false);
@@ -61,9 +103,10 @@ export function OpportunityBrief({
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
+  const [roleFromRules, setRoleFromRules] = useState<BriefRow["role"]>(null);
 
   const load = useCallback(async () => {
-    const [{ data, error }, { data: policy, error: policyError }] = await Promise.all([
+    const [decisionResult, policyResult, matchResult] = await Promise.all([
       supabase()
         .from("opportunity_decisions")
         .select(COLUMNS)
@@ -75,17 +118,45 @@ export function OpportunityBrief({
         .select("requires_go_decision")
         .eq("client_id", clientId)
         .maybeSingle(),
+      supabase()
+        .from("matches")
+        .select("eligibility_checks(rule_key, status, detail)")
+        .eq("client_id", clientId)
+        .eq("grant_id", grantId)
+        .maybeSingle(),
     ]);
-    if (error || policyError) {
-      setFailure((error ?? policyError)!.message);
+    const error = decisionResult.error ?? policyResult.error;
+    if (error) {
+      // Unknown state is treated as locked: showing a blank, saveable form
+      // here would let one click overwrite the real brief with nothing.
+      setFailure(`Could not load the brief: ${error.message}`);
+      onGate({
+        allowed: false,
+        reason: "The brief could not be loaded, so drafting stays locked.",
+      });
       return;
     }
-    const found = (data as unknown as BriefRow | null) ?? null;
-    const mustDecide = !!(policy as { requires_go_decision?: boolean } | null)
+    const found = (decisionResult.data as unknown as BriefRow | null) ?? null;
+    const mustDecide = !!(policyResult.data as { requires_go_decision?: boolean } | null)
       ?.requires_go_decision;
+    const checks =
+      (
+        matchResult.data as {
+          eligibility_checks: Array<{ rule_key: string; status: string; detail: string }>;
+        } | null
+      )?.eligibility_checks ?? [];
+    const role = checks.find((c) => c.rule_key === "role");
+    setRoleFromRules(
+      role?.status === "pass"
+        ? /funded partner/i.test(role.detail)
+          ? "funded_partner"
+          : "lead"
+        : null,
+    );
     setRow(found);
     setRequired(mustDecide);
     setLoaded(true);
+    setFailure(null);
     onGate(draftingGate(fromRow(found), mustDecide));
   }, [clientId, grantId, onGate]);
 
@@ -158,10 +229,39 @@ export function OpportunityBrief({
     }
   }
 
-  if (!loaded && !failure) return null;
+  if (!loaded) {
+    return failure ? (
+      <section className="mt-10" data-testid="opportunity-brief">
+        <p role="alert" className="text-sm text-[var(--color-ineligible)]">
+          {failure}
+        </p>
+        <button
+          type="button"
+          onClick={() => void load()}
+          className="mt-2 text-sm text-[var(--color-accent)]"
+        >
+          Try again
+        </button>
+      </section>
+    ) : null;
+  }
   const gate = draftingGate(fromRow(row), required);
-  const r = row;
-  const k = r?.decided_at ?? "new";
+  // A stored brief wins; otherwise start from what is already known, so the
+  // consultant confirms facts instead of retyping them from the call.
+  const r: BriefRow = row ?? {
+    ...EMPTY_BRIEF,
+    role: roleFromRules,
+    intake: prefill.deadline ? "fixed" : "rolling",
+    request_amount: prefill.amountMax,
+    mandatory_components: prefill.mandatoryComponents || null,
+    risks: prefill.risks || null,
+  };
+  // Re-keyed when the pre-fill arrives late (requirements are read after the
+  // brief loads), so the uncontrolled fields pick it up.
+  const k = row
+    ? `saved-${row.updated_at}`
+    : `new-${roleFromRules ?? ""}-${prefill.mandatoryComponents.length}`;
+  const unit = prefill.currency ?? "currency not published";
 
   return (
     <section className="mt-10" data-testid="opportunity-brief">
@@ -228,10 +328,10 @@ export function OpportunityBrief({
           hint="Every required study, deliverable or partner type — the guide's exact words"
           value={r?.mandatory_components}
         />
-        <Text name="requestAmount" label="Request amount ($)" value={r?.request_amount} />
-        <Text name="netRevenue" label="Net revenue ($)" value={r?.net_revenue} />
-        <Text name="matchRequired" label="Match required ($)" value={r?.match_required} />
-        <Text name="inKindCap" label="In-kind cap ($)" value={r?.in_kind_cap} />
+        <Text name="requestAmount" label={`Request amount (${unit})`} value={r.request_amount} />
+        <Text name="netRevenue" label={`Net revenue (${unit})`} value={r.net_revenue} />
+        <Text name="matchRequired" label={`Match required (${unit})`} value={r.match_required} />
+        <Text name="inKindCap" label={`In-kind cap (${unit})`} value={r.in_kind_cap} />
         <Check
           name="cashMatchConfirmed"
           label="Whoever controls the budget has confirmed any cash match can be covered"
@@ -281,16 +381,25 @@ export function OpportunityBrief({
         <div className="bg-[var(--color-surface)] px-4 py-3 sm:col-span-2">
           <button
             type="submit"
-            disabled={saving}
+            disabled={saving || locked}
             data-testid="save-brief"
             className="rounded-md border border-[var(--color-rule)] px-3 py-1.5 text-sm font-medium disabled:opacity-50"
           >
-            {saving ? "Saving…" : "Save brief"}
+            {saving ? "Saving…" : locked ? "Locked after submission" : "Save brief"}
           </button>
-          {r?.decided_at && (
-            <span className="ml-3 text-xs text-[var(--color-ink-soft)]">
-              Decided {new Date(r.decided_at).toLocaleDateString()} by {r.decided_by}
+          {r.decided_at && (
+            <span
+              data-testid="decision-record"
+              className="ml-3 text-xs text-[var(--color-ink-soft)]"
+            >
+              Decided {new Date(r.decided_at).toLocaleDateString()} · approver {r.decided_by}
+              {r.recorder?.email ? ` · recorded by ${r.recorder.email}` : ""}
             </span>
+          )}
+          {!row && (
+            <p className="mt-2 text-xs text-[var(--color-ink-soft)]">
+              Pre-filled from the call and the eligibility rules. Check each field, then save.
+            </p>
           )}
         </div>
       </form>

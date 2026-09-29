@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { htmlToText, htmlTitle } from "@/lib/html-text";
 import { callLlm } from "./llm";
+import { safeFetch } from "./safe-fetch";
 import type { ProfileFields } from "@/lib/profile-completeness";
 import {
   normalizeBudget,
@@ -155,7 +156,7 @@ export async function extractProfileFromHtml(
 }
 
 export async function extractProfileFromUrl(sourceUrl: string): Promise<ExtractionResult> {
-  const response = await fetch(sourceUrl, {
+  const response = await safeFetch(sourceUrl, {
     headers: { "User-Agent": "IIAL-GrantDesk/1.0 (+https://iial.ca; reads public pages)" },
     signal: AbortSignal.timeout(30_000),
   });

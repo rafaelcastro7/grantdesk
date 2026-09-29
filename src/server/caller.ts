@@ -24,5 +24,16 @@ export function callerClient(accessToken: string): SupabaseClient {
   });
 }
 
+/**
+ * Service-role client, for shared catalog data no consultant owns (grants,
+ * extracted requirements). Never for anything a client owns.
+ */
+export function catalogWriter(): SupabaseClient {
+  const env = serverEnv();
+  return createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+}
+
 /** The shape every server function here validates its token with. */
 export const ACCESS_TOKEN_MESSAGE = "Your session expired. Sign in again.";

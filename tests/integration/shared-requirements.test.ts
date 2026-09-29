@@ -102,8 +102,9 @@ beforeAll(async () => {
   alice = await setUpConsultant("alice");
   bob = await setUpConsultant("bob");
 
-  // A requirement that looks like it came from a previous read of the call.
-  const { data: requirement, error } = await alice.client
+  // A requirement that came from a previous read of the call. Extracted rows
+  // are shared catalog data and only the server writes them.
+  const { data: requirement, error } = await admin
     .from("requirements")
     .upsert(
       {
@@ -114,7 +115,7 @@ beforeAll(async () => {
         extracted_at: new Date().toISOString(),
         sort_order: 0,
       },
-      { onConflict: "grant_id, label" },
+      { onConflict: "grant_id, label, client_id" },
     )
     .select("id")
     .single();
@@ -185,7 +186,7 @@ describe("re-reading a call that another consultant is writing against", () => {
   it("still removes an extracted requirement nobody is writing against", async () => {
     // The dedup this replace exists for has to keep working, or a re-read goes
     // back to piling near-synonyms on top of each other.
-    const { data: orphan } = await alice.client
+    const { data: orphan } = await admin
       .from("requirements")
       .upsert(
         {
@@ -195,7 +196,7 @@ describe("re-reading a call that another consultant is writing against", () => {
           extracted_from: "https://example.org/shared",
           sort_order: 1,
         },
-        { onConflict: "grant_id, label" },
+        { onConflict: "grant_id, label, client_id" },
       )
       .select("id")
       .single();
@@ -215,8 +216,14 @@ describe("re-reading a call that another consultant is writing against", () => {
     const { data: typed } = await alice.client
       .from("requirements")
       .upsert(
-        { grant_id: grantId, label: "Budget Narrative", kind: "section", sort_order: 2 },
-        { onConflict: "grant_id, label" },
+        {
+          grant_id: grantId,
+          client_id: alice.clientId,
+          label: "Budget Narrative",
+          kind: "section",
+          sort_order: 2,
+        },
+        { onConflict: "grant_id, label, client_id" },
       )
       .select("id")
       .single();
@@ -228,5 +235,37 @@ describe("re-reading a call that another consultant is writing against", () => {
       .select("id")
       .eq("id", (typed as { id: string }).id);
     expect(survived).toHaveLength(1);
+  }, 60_000);
+});
+
+describe("a heading typed for one client", () => {
+  it("is invisible to another consultant and cannot be overwritten by them", async () => {
+    await alice.client.from("requirements").upsert(
+      {
+        grant_id: grantId,
+        client_id: alice.clientId,
+        label: "Alice Only Heading",
+        kind: "section",
+        word_limit: 300,
+      },
+      { onConflict: "grant_id, label, client_id" },
+    );
+
+    const { data: bobSees } = await bob.client
+      .from("requirements")
+      .select("id")
+      .eq("grant_id", grantId)
+      .eq("label", "Alice Only Heading");
+    expect(bobSees).toHaveLength(0);
+
+    // Bob can neither write a shared row nor one owned by Alice's client.
+    const shared = await bob.client
+      .from("requirements")
+      .insert({ grant_id: grantId, label: "Injected", kind: "section" });
+    expect(shared.error).not.toBeNull();
+    const intoAlice = await bob.client
+      .from("requirements")
+      .insert({ grant_id: grantId, client_id: alice.clientId, label: "Injected", kind: "section" });
+    expect(intoAlice.error).not.toBeNull();
   }, 60_000);
 });

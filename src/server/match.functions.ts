@@ -8,11 +8,15 @@ export const findMatches = createServerFn({ method: "POST" })
     z.object({
       clientId: z.string().uuid(),
       accessToken: z.string().min(10, ACCESS_TOKEN_MESSAGE),
+      /** How many calls to check; deeper runs find more at the cost of time. */
+      depth: z.union([z.literal(60), z.literal(150), z.literal(300)]).optional(),
     }),
   )
   .handler(async ({ data }) => {
     try {
-      const result = await runMatch(callerClient(data.accessToken), data.clientId);
+      const result = await runMatch(callerClient(data.accessToken), data.clientId, {
+        limit: data.depth ?? 60,
+      });
       return { ok: true as const, result };
     } catch (error) {
       if (error instanceof ProfileTooThinError) {
