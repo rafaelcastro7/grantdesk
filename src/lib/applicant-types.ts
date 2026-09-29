@@ -61,6 +61,42 @@ const GRANTS_GOV_CODES: Record<string, readonly ApplicantType[]> = {
   "99": [...APPLICANT_TYPES],
 };
 
+/**
+ * True when the structured list is not the whole answer: code 25 ("Others —
+ * see the text field") or a code this table does not know. The listed types
+ * are still definitely eligible; anyone else may be, and only the prose says.
+ */
+export function grantsGovListIsOpenEnded(codes: readonly string[]): boolean {
+  return codes.some((code) => {
+    const mapped = GRANTS_GOV_CODES[code.trim()];
+    return mapped === undefined || mapped.length === 0;
+  });
+}
+
+/**
+ * Grants.gov funding-instrument codes, as the API returns them. The description
+ * the feed sends is preferred; this only covers a missing one.
+ */
+const GRANTS_GOV_INSTRUMENTS: Record<string, string> = {
+  G: "grant",
+  CA: "cooperative agreement",
+  PC: "procurement contract",
+  O: "other",
+};
+
+export function fromGrantsGovInstruments(
+  instruments: ReadonlyArray<{ id?: string; description?: string }>,
+): string[] {
+  const out = new Set<string>();
+  for (const item of instruments) {
+    const label =
+      item.description?.trim().toLowerCase() ||
+      GRANTS_GOV_INSTRUMENTS[item.id?.trim().toUpperCase() ?? ""];
+    if (label) out.add(label);
+  }
+  return [...out].sort();
+}
+
 export function fromGrantsGovCodes(codes: readonly string[]): ApplicantType[] {
   const out = new Set<ApplicantType>();
   for (const code of codes) {

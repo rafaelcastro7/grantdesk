@@ -4,6 +4,8 @@ import { businessBenefitsFinder } from "./business-benefits-finder";
 import { craFoundations } from "./cra-foundations";
 import { ontarioTpon } from "./ontario-tpon";
 import { otf } from "./otf";
+import { esdc } from "./esdc";
+import { canadaCouncil } from "./canada-council";
 
 /**
  * Every source the catalog draws on, and nothing else.
@@ -19,6 +21,8 @@ export const SOURCES: readonly SourceAdapter[] = [
   craFoundations,
   ontarioTpon,
   otf,
+  esdc,
+  canadaCouncil,
 ];
 
 export function sourceByKey(key: string): SourceAdapter | undefined {

@@ -45,6 +45,29 @@ describe("parseAmount", () => {
 });
 
 describe("readDetail", () => {
+  it("flags code 25 as open-ended and reads the funding instrument (live shape, 357305)", () => {
+    const detail = readDetail({
+      data: {
+        synopsis: {
+          applicantTypes: [{ id: "12" }, { id: "25" }],
+          fundingInstruments: [
+            { id: "G", description: "Grant" },
+            { id: "CA", description: "Cooperative Agreement" },
+          ],
+        },
+      },
+    });
+    expect(detail.eligibleApplicantTypes).toEqual(["charity", "nonprofit"]);
+    expect(detail.applicantListOpenEnded).toBe(true);
+    expect(detail.fundingInstruments).toEqual(["cooperative agreement", "grant"]);
+  });
+
+  it("treats a fully mapped applicant list as closed", () => {
+    const detail = readDetail({ data: { synopsis: { applicantTypes: [{ id: "00" }] } } });
+    expect(detail.applicantListOpenEnded).toBe(false);
+    expect(detail.fundingInstruments).toEqual([]);
+  });
+
   it("reads a posted opportunity's synopsis", () => {
     const detail = readDetail({
       data: {
@@ -82,6 +105,8 @@ describe("readDetail", () => {
       summary: null,
       eligibilityNote: null,
       eligibleApplicantTypes: [],
+      applicantListOpenEnded: null,
+      fundingInstruments: [],
       amountMin: null,
       amountMax: null,
       contact: null,

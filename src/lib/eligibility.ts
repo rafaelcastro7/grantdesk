@@ -53,6 +53,8 @@ export type EligibilityInput = {
     /** A structured "cost sharing required" flag, where the source has one. */
     costSharingRequired?: boolean | null;
     eligibleApplicantTypes?: readonly string[] | null;
+    /** The list also admits "others, see the text": absence is not exclusion. */
+    applicantListOpenEnded?: boolean | null;
     amountMin?: number | null;
     amountMax?: number | null;
     currency?: string | null;
@@ -362,6 +364,18 @@ function applicantTypeRule(input: EligibilityInput): RuleResult {
       status: "pass",
       isHardGate: true,
       detail: `Open to ${listApplicantTypes(overlap)}, which is what this client is.`,
+    };
+  }
+  // Grants.gov code 25: the listed types are certain, but the funder also
+  // admits others described only in prose. Unlisted is not excluded.
+  if (input.grant.applicantListOpenEnded) {
+    return {
+      key: "applicant_type",
+      status: "unknown",
+      isHardGate: true,
+      detail:
+        `Open to ${listApplicantTypes(declared)}, and to others described in the funder's ` +
+        `eligibility text — check whether ${listApplicantTypes(clientTypes)} qualifies.`,
     };
   }
   // Still a hard gate, but an open one: whether a lead will take the client on

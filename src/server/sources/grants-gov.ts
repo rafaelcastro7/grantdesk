@@ -1,4 +1,8 @@
-import { fromGrantsGovCodes } from "@/lib/applicant-types";
+import {
+  fromGrantsGovCodes,
+  fromGrantsGovInstruments,
+  grantsGovListIsOpenEnded,
+} from "@/lib/applicant-types";
 import { htmlToText } from "@/lib/html-text";
 import type { SourceAdapter, SourceFunder, SourceGrant } from "./types";
 
@@ -76,6 +80,10 @@ export type OppDetail = {
   summary: string | null;
   eligibilityNote: string | null;
   eligibleApplicantTypes: string[];
+  /** The applicant list says "others" too, so an unlisted type is not a fail. */
+  applicantListOpenEnded: boolean | null;
+  /** Grant, cooperative agreement, procurement contract… */
+  fundingInstruments: string[];
   amountMin: number | null;
   amountMax: number | null;
   contact: string | null;
@@ -129,6 +137,7 @@ export function readDetail(body: unknown): OppDetail {
   const data = (body as { data?: Record<string, unknown> })?.data ?? {};
   const detail = ((data.synopsis ?? data.forecast ?? {}) as Record<string, unknown>) || {};
   const applicantTypes = (detail.applicantTypes ?? []) as Array<{ id?: string }>;
+  const applicantCodes = applicantTypes.map((t) => String(t?.id ?? "")).filter(Boolean);
   const description = detail.synopsisDesc ?? detail.forecastDesc ?? "";
 
   return {
@@ -137,8 +146,10 @@ export function readDetail(body: unknown): OppDetail {
     summary: htmlToText(String(description)).slice(0, 4000) || null,
     eligibilityNote:
       htmlToText(String(detail.applicantEligibilityDesc ?? "")).slice(0, 2000) || null,
-    eligibleApplicantTypes: fromGrantsGovCodes(
-      applicantTypes.map((t) => String(t?.id ?? "")).filter(Boolean),
+    eligibleApplicantTypes: fromGrantsGovCodes(applicantCodes),
+    applicantListOpenEnded: applicantCodes.length ? grantsGovListIsOpenEnded(applicantCodes) : null,
+    fundingInstruments: fromGrantsGovInstruments(
+      (detail.fundingInstruments ?? []) as Array<{ id?: string; description?: string }>,
     ),
     amountMin: parseAmount(detail.awardFloor),
     amountMax: parseAmount(detail.awardCeiling),
@@ -173,6 +184,8 @@ const EMPTY_DETAIL: OppDetail = {
   summary: null,
   eligibilityNote: null,
   eligibleApplicantTypes: [],
+  applicantListOpenEnded: null,
+  fundingInstruments: [],
   amountMin: null,
   amountMax: null,
   contact: null,
@@ -270,6 +283,8 @@ export const grantsGov: SourceAdapter = {
         language: "en",
         eligibleApplicantTypes: detail.eligibleApplicantTypes,
         eligibilityNote: detail.eligibilityNote,
+        applicantListOpenEnded: detail.applicantListOpenEnded,
+        fundingInstruments: detail.fundingInstruments,
         status: hit.oppStatus === "forecasted" ? "forecasted" : "open",
         estimatedDeadline: detail.estimatedDeadline,
         costSharingRequired: detail.costSharingRequired,

@@ -2,11 +2,28 @@ import { describe, expect, it } from "vitest";
 import {
   fromClientStage,
   fromGrantsGovCodes,
+  fromGrantsGovInstruments,
+  grantsGovListIsOpenEnded,
   fromProse,
   listApplicantTypes,
   listPlaces,
   placeName,
 } from "./applicant-types";
+
+describe("Grants.gov open-ended lists and instruments", () => {
+  it("is open-ended only with code 25 or an unknown code", () => {
+    expect(grantsGovListIsOpenEnded(["12", "00"])).toBe(false);
+    expect(grantsGovListIsOpenEnded(["12", "25"])).toBe(true);
+    expect(grantsGovListIsOpenEnded(["12", "77"])).toBe(true);
+  });
+
+  it("falls back to the code when the description is missing", () => {
+    expect(fromGrantsGovInstruments([{ id: "PC" }, { id: "G", description: "Grant" }])).toEqual([
+      "grant",
+      "procurement contract",
+    ]);
+  });
+});
 
 describe("Grants.gov codes", () => {
   it("maps the 501(c)(3) code to both nonprofit and charity", () => {

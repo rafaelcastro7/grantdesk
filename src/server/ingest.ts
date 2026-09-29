@@ -143,6 +143,13 @@ export async function runSource(
         cost_sharing_required: grant.costSharingRequired ?? null,
         deadline_note: grant.deadlineNote ?? null,
         opportunity_number: grant.opportunityNumber ?? null,
+        // Columns from 0042; only written by sources that publish them.
+        ...(grant.applicantListOpenEnded !== undefined
+          ? { applicant_types_open_ended: grant.applicantListOpenEnded }
+          : {}),
+        ...(grant.fundingInstruments !== undefined
+          ? { funding_instruments: grant.fundingInstruments }
+          : {}),
         // A source badge saying "open" on a date that has passed is stale
         // markup; re-reading it must not reopen an expired call.
         ...(grant.status
