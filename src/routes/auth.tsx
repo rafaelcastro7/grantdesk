@@ -1,6 +1,8 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useAction } from "@/lib/use-action";
 import { supabase } from "@/lib/supabase";
+import { useEffect, useState } from "react";
+import { getTenantBranding, resolveTenantSlug, type TenantBranding } from "@/lib/tenant";
 
 export const Route = createFileRoute("/auth")({ component: AuthPage });
 
@@ -17,6 +19,19 @@ export const Route = createFileRoute("/auth")({ component: AuthPage });
 function AuthPage() {
   const navigate = useNavigate();
   const { busy, error, run, setError } = useAction();
+  // Resolved from the address the visitor came in on; nothing is shown until
+  // then, so another tenant's sign-in never flashes IIAL's mark.
+  const [branding, setBranding] = useState<TenantBranding | null>(null);
+  useEffect(() => {
+    setBranding(
+      getTenantBranding(
+        resolveTenantSlug({
+          hostname: window.location.hostname,
+          searchParams: new URLSearchParams(window.location.search),
+        }),
+      ),
+    );
+  }, []);
 
   async function submit(form: HTMLFormElement, mode: "signin" | "signup") {
     const data = new FormData(form);
@@ -52,21 +67,26 @@ function AuthPage() {
     <main className="mx-auto flex min-h-screen max-w-sm flex-col justify-center px-6">
       {/* The sign-in screen is the one place a visitor may arrive with no
           navigation above it, so the mark carries the identity here itself. */}
-      <img
-        src="/brand/iial-logo.png"
-        alt="Institute of Innovation and Advanced Learning"
-        width={161}
-        height={49}
-        className="h-9 w-auto dark:hidden"
-      />
-      <img
-        src="/brand/iial-logo-inverse.png"
-        alt=""
-        aria-hidden="true"
-        width={162}
-        height={51}
-        className="hidden h-9 w-auto dark:block"
-      />
+      {branding?.logoUrl && (
+        <img
+          src={branding.logoUrl}
+          alt={branding.name}
+          width={161}
+          height={49}
+          className="h-9 w-auto dark:hidden"
+        />
+      )}
+      {branding?.logoInverseUrl && (
+        <img
+          src={branding.logoInverseUrl}
+          alt=""
+          aria-hidden="true"
+          width={162}
+          height={51}
+          className="hidden h-9 w-auto dark:block"
+        />
+      )}
+      {branding && !branding.logoUrl && <p className="text-lg font-semibold">{branding.name}</p>}
       <h1 className="mt-6 text-2xl font-semibold tracking-tight">Grant Desk</h1>
       <p className="mt-2 text-sm text-[var(--color-ink-soft)]">
         Sign in to your desk. Each client&rsquo;s material stays isolated at the database level.

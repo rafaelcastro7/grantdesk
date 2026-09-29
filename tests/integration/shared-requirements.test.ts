@@ -159,8 +159,8 @@ describe("re-reading a call that another consultant is writing against", () => {
     expect(aliceSees).toHaveLength(0);
     expect(reallyThere).toHaveLength(1);
 
-    // Alice re-reads the call.
-    const { error: rpcError } = await alice.client.rpc("replace_extracted_requirements", {
+    // Alice re-reads the call; the server does the replace on her behalf.
+    const { error: rpcError } = await admin.rpc("replace_extracted_requirements", {
       target_grant: grantId,
     });
     expect(rpcError).toBeNull();
@@ -201,7 +201,7 @@ describe("re-reading a call that another consultant is writing against", () => {
       .select("id")
       .single();
 
-    await alice.client.rpc("replace_extracted_requirements", { target_grant: grantId });
+    await admin.rpc("replace_extracted_requirements", { target_grant: grantId });
 
     const { data: gone } = await admin
       .from("requirements")
@@ -228,13 +228,23 @@ describe("re-reading a call that another consultant is writing against", () => {
       .select("id")
       .single();
 
-    await alice.client.rpc("replace_extracted_requirements", { target_grant: grantId });
+    await admin.rpc("replace_extracted_requirements", { target_grant: grantId });
 
     const { data: survived } = await admin
       .from("requirements")
       .select("id")
       .eq("id", (typed as { id: string }).id);
     expect(survived).toHaveLength(1);
+  }, 60_000);
+
+  it("cannot be triggered by a consultant or an anonymous caller", async () => {
+    const asConsultant = await alice.client.rpc("replace_extracted_requirements", {
+      target_grant: grantId,
+    });
+    expect(asConsultant.error).not.toBeNull();
+    const anon = createClient(URL, ANON, { auth: { persistSession: false } });
+    const asAnon = await anon.rpc("replace_extracted_requirements", { target_grant: grantId });
+    expect(asAnon.error).not.toBeNull();
   }, 60_000);
 });
 

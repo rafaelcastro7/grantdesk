@@ -58,6 +58,23 @@ only once its condition is marked met; a decision needs a named approver.
   exporter fed an empty list, the relevance-percentage scorecard, the
   design-token route, and the "Live" badge.
 
+## Second audit (same day)
+
+- **Ontario Trillium Foundation** is a source (`otf`, 24h), read from its own
+  deadlines table (streams, intake dates, "Closed" markers) and stream pages
+  (award range, eligibility).
+- Clients always belong to a tenant (a trigger assigns the creator's; the
+  column is NOT NULL) and `belongs_to_tenant(NULL)` is false. The UI had been
+  creating every client outside tenant isolation.
+- Queued email is readable by the client's team or its recipient, not the
+  whole tenant. `replace_extracted_requirements` is service-role only;
+  `find_consultant_by_email` is closed to anon and scoped to shared tenants.
+- The daemon alerts on grants first seen this cycle (not re-read ones, no cap
+  of ten), expires by Toronto date, and ingestion never reopens a passed call.
+- 3,592 alerts queued by the old logic were marked `failed` with a reason,
+  not sent. Every self sign-up still joins the IIAL tenant (`handle_new_user`)
+  — a deployment choice to revisit before other tenants onboard.
+
 ## Consequences
 
 - Funded-partner detection only recognises public bodies as leads. That matches

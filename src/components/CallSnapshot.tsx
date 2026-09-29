@@ -25,6 +25,7 @@ const SOURCE_LABEL: Record<string, string> = {
   "business-benefits-finder": "Innovation Canada",
   "cra-foundations": "CRA charities data",
   "ontario-tpon": "Ontario — Transfer Payment Ontario",
+  otf: "Ontario Trillium Foundation",
 };
 
 /**

@@ -40,6 +40,16 @@ export function deadlineEnd(deadline: string, timeZone = DEFAULT_DEADLINE_ZONE):
   return naive - zoneOffsetMs(naive, timeZone);
 }
 
+/** Today's date, `YYYY-MM-DD`, where deadlines are counted. */
+export function todayIn(timeZone = DEFAULT_DEADLINE_ZONE, now = new Date()): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(now);
+}
+
 /** Whole days left until the deadline ends; negative once it has passed. */
 export function daysUntilDeadline(deadline: string, now: Date): number {
   const end = deadlineEnd(deadline);

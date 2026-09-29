@@ -3,6 +3,7 @@ import { grantsGov } from "./grants-gov";
 import { businessBenefitsFinder } from "./business-benefits-finder";
 import { craFoundations } from "./cra-foundations";
 import { ontarioTpon } from "./ontario-tpon";
+import { otf } from "./otf";
 
 /**
  * Every source the catalog draws on, and nothing else.
@@ -17,6 +18,7 @@ export const SOURCES: readonly SourceAdapter[] = [
   businessBenefitsFinder,
   craFoundations,
   ontarioTpon,
+  otf,
 ];
 
 export function sourceByKey(key: string): SourceAdapter | undefined {

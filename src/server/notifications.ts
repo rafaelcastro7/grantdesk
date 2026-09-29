@@ -175,15 +175,19 @@ export async function scanAndAlertNewGrants({
   if (!newGrantIds.length) return { queued: 0 };
 
   // Every field the rules engine reads, so an alert means what a match means.
-  const { data: grants, error: grantErr } = await supabase
-    .from("grants")
-    .select(
-      "id, title, summary, url, country, currency, amount_min, amount_max, deadline, status, " +
-        "eligible_applicant_types, eligibility_note, funder:funders(name)",
-    )
-    .in("id", newGrantIds);
-  if (grantErr) throw new Error(`alert scan could not read grants: ${grantErr.message}`);
-  if (!grants) return { queued: 0 };
+  // Chunked: a long id list in the query string overflows the gateway.
+  const grants: unknown[] = [];
+  for (let i = 0; i < newGrantIds.length; i += 50) {
+    const { data, error: grantErr } = await supabase
+      .from("grants")
+      .select(
+        "id, title, summary, url, country, currency, amount_min, amount_max, deadline, status, " +
+          "eligible_applicant_types, eligibility_note, funder:funders(name)",
+      )
+      .in("id", newGrantIds.slice(i, i + 50));
+    if (grantErr) throw new Error(`alert scan could not read grants: ${grantErr.message}`);
+    grants.push(...(data ?? []));
+  }
 
   const { data: clients, error: clientErr } = await supabase
     .from("clients")

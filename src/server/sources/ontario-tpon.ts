@@ -39,7 +39,7 @@ function decode(text: string): string {
     .replace(/&nbsp;/g, " ")
     .replace(/&amp;/g, "&")
     .replace(/&quot;/g, '"')
-    .replace(/&#39;|&rsquo;|&lsquo;/g, "'")
+    .replace(/&#0*39;|&#x27;|&rsquo;|&lsquo;/gi, "'")
     .replace(/&ndash;/g, "–")
     .replace(/&mdash;/g, "—")
     .replace(/&lt;/g, "<")
@@ -83,10 +83,9 @@ function money(digits: string, scale: string | undefined): number {
  * read as an award ceiling.
  */
 export function parseAmounts(text: string): { min: number | null; max: number | null } {
-  const range = new RegExp(
-    `\\b(?:range|ranging)?\\s*from\\s+${MONEY}\\s+(?:to|and)\\s+${MONEY}`,
-    "i",
-  ).exec(text);
+  const range = new RegExp(`(?:\\bfrom\\s+)?${MONEY}\\s+(?:to|and|–|-)\\s+${MONEY}`, "i").exec(
+    text,
+  );
   if (range) {
     return { min: money(range[1]!, range[2]), max: money(range[3]!, range[4]) };
   }

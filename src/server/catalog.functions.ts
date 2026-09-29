@@ -21,10 +21,23 @@ export const getCoverage = createServerFn({ method: "GET" })
       auth: { persistSession: false, autoRefreshToken: false },
     });
 
-    const [{ data: freshness }, { data: counts }] = await Promise.all([
+    // Counted in the database, and only calls still open: the page says "open
+    // calls", and downloading every row to count it could be cut short by a
+    // row cap without anyone noticing.
+    const [{ data: freshness, error: freshnessError }, ...countResults] = await Promise.all([
       supabase.from("source_freshness").select("source_key, last_ok_at"),
-      supabase.from("grants").select("source_key"),
+      ...SOURCES.map((source) =>
+        supabase
+          .from("grants")
+          .select("id", { count: "exact", head: true })
+          .eq("source_key", source.key)
+          .eq("status", "open"),
+      ),
     ]);
+    const failed = countResults.find((r) => r.error);
+    if (freshnessError || failed?.error) {
+      throw new Error(`coverage could not be read: ${(freshnessError ?? failed!.error)!.message}`);
+    }
 
     const lastOk = new Map<string, string | null>(
       ((freshness ?? []) as Array<{ source_key: string; last_ok_at: string | null }>).map((row) => [
@@ -33,10 +46,9 @@ export const getCoverage = createServerFn({ method: "GET" })
       ]),
     );
 
-    const grantsPerSource = new Map<string, number>();
-    for (const row of (counts ?? []) as Array<{ source_key: string }>) {
-      grantsPerSource.set(row.source_key, (grantsPerSource.get(row.source_key) ?? 0) + 1);
-    }
+    const grantsPerSource = new Map<string, number>(
+      SOURCES.map((source, i) => [source.key, countResults[i]?.count ?? 0]),
+    );
 
     const health: SourceHealth[] = SOURCES.map((source) => {
       const last = lastOk.get(source.key) ?? null;

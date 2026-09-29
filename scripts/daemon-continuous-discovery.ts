@@ -19,6 +19,7 @@ import { SOURCES, type SourceAdapter } from "../src/server/sources";
 import { runSource } from "../src/server/ingest";
 import { embedCatalog } from "../src/server/embed";
 import { scanAndAlertNewGrants, scanAndAlertDeadlines } from "../src/server/notifications";
+import { todayIn } from "../src/lib/deadline";
 
 config({ path: ".env" });
 
@@ -49,6 +50,9 @@ export async function runDiscoveryCycle(
   let sourcesRun = 0;
   const newlyDiscoveredGrantIds: string[] = [];
   const activeSources = options.sources ?? SOURCES;
+  // "New" means first seen during this cycle. last_seen_at moves on every
+  // re-read, so keying on it re-alerted known grants every run.
+  const cycleStarted = new Date().toISOString();
 
   for (const source of activeSources) {
     try {
@@ -56,7 +60,7 @@ export async function runDiscoveryCycle(
       const result = await runSource(source, { client: supabase, limit: options.limit });
       totalGrantsUpserted += result.grantsUpserted;
       sourcesRun++;
-      console.log(`ok (${result.grantsUpserted} upserted, 0 duplicates)`);
+      console.log(`ok (${result.grantsUpserted} upserted)`);
     } catch (err) {
       console.error(
         `FAILED source ${source.key}: ${err instanceof Error ? err.message : String(err)}`,
@@ -65,7 +69,8 @@ export async function runDiscoveryCycle(
   }
 
   // 1. Mark past-deadline grants as expired
-  const todayStr = new Date().toISOString().slice(0, 10);
+  // Counted in Toronto time, like every other deadline in the product.
+  const todayStr = todayIn();
   const { error: expireErr } = await supabase
     .from("grants")
     .update({ status: "expired" })
@@ -80,12 +85,13 @@ export async function runDiscoveryCycle(
 
   if (!options.skipAlerts) {
     // 2. Fetch recently touched grants (seen today) for match alerts
-    const { data: recentGrants } = await supabase
+    const { data: recentGrants, error: recentError } = await supabase
       .from("grants")
       .select("id")
-      .gte("last_seen_at", new Date(Date.now() - 3600_000).toISOString())
-      .limit(10);
-
+      .gte("first_seen_at", cycleStarted)
+      .eq("status", "open");
+    if (recentError)
+      console.error(`[Discovery Daemon] New-grant read failed: ${recentError.message}`);
     if (recentGrants) {
       newlyDiscoveredGrantIds.push(...recentGrants.map((g: { id: string }) => g.id));
     }

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { serverEnv } from "@/lib/env.server";
 import { sourceByKey, type SourceAdapter, type SourceGrant } from "./sources";
+import { todayIn } from "@/lib/deadline";
 
 /**
  * Run a source and fold its harvest into the catalog.
@@ -106,7 +107,16 @@ export async function runSource(
         assistance_listings: grant.assistanceListings ?? [],
         documents: grant.documents ?? [],
         contact: grant.contact ?? null,
-        ...(grant.status ? { status: grant.status } : {}),
+        // A source badge saying "open" on a date that has passed is stale
+        // markup; re-reading it must not reopen an expired call.
+        ...(grant.status
+          ? {
+              status:
+                grant.status === "open" && grant.deadline && grant.deadline < todayIn()
+                  ? "expired"
+                  : grant.status,
+            }
+          : {}),
         source_key: adapter.key,
         source_hash: sourceHash(adapter.key, grant.externalId),
         last_seen_at: new Date().toISOString(),
