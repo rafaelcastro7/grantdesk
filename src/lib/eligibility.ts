@@ -1,4 +1,9 @@
-import { fromClientStage, listApplicantTypes, type ApplicantType } from "./applicant-types";
+import {
+  fromClientStage,
+  listApplicantTypes,
+  placeName,
+  type ApplicantType,
+} from "./applicant-types";
 import { matchedTerms } from "./match-explain";
 import { daysUntilDeadline, deadlineEnd } from "./deadline";
 
@@ -39,6 +44,8 @@ export type EligibilityInput = {
   grant: {
     title?: string | null;
     country: string;
+    /** The funder's own jurisdiction, e.g. "CA-SK" for a Saskatchewan ministry. */
+    region?: string | null;
     deadline?: string | null;
     status?: string | null;
     /** A forecast's estimated application date; never read as a deadline. */
@@ -148,6 +155,35 @@ function jurisdictionRule(input: EligibilityInput): RuleResult {
   // A client operating in a province also operates in its country: "ON" and
   // "CA-ON" both satisfy a grant open to Canada.
   const countries = new Set(clientPlaces.map((place) => place.split("-")[0]));
+  // A provincial program serves its province. The province is the funder's
+  // own jurisdiction (a ministry of Saskatchewan funds Saskatchewan), which
+  // is structured data — never read from prose.
+  const region = input.grant.region?.trim().toUpperCase() ?? "";
+  if (countries.has(grantCountry) && /^CA-[A-Z]{2}$/.test(region)) {
+    const provinces = clientPlaces.filter((place) => /^CA-[A-Z]{2}$/.test(place));
+    if (provinces.includes(region)) {
+      return {
+        key: "jurisdiction",
+        status: "pass",
+        isHardGate: true,
+        detail: `A ${placeName(region)} program, where this client operates.`,
+      };
+    }
+    if (provinces.length === 0) {
+      return {
+        key: "jurisdiction",
+        status: "unknown",
+        isHardGate: true,
+        detail: `A ${placeName(region)} program. This client's profile names no province — add where it operates.`,
+      };
+    }
+    return {
+      key: "jurisdiction",
+      status: "fail",
+      isHardGate: true,
+      detail: `A ${placeName(region)} program; this client operates in ${provinces.map(placeName).join(", ")}.`,
+    };
+  }
   if (countries.has(grantCountry)) {
     return {
       key: "jurisdiction",

@@ -183,8 +183,10 @@ function ClientDetail() {
    * the page again" for a real re-read after the site changes.
    */
   const autoRead = useRef(false);
+  /** Set on the first keystroke in the profile form. */
+  const touched = useRef(false);
   useEffect(() => {
-    if (autoRead.current || profile !== null || !sourceUrl || busy) return;
+    if (autoRead.current || touched.current || profile !== null || !sourceUrl || busy) return;
     autoRead.current = true;
     void fillFromWebsite(undefined, { auto: true });
     // `run`/`fillFromWebsite` are stable enough for this one-shot; re-running
@@ -279,6 +281,10 @@ function ClientDetail() {
       // this check redundant, not wrong to keep: a second, independent guard
       // that happens to also save the wasted call if the first one is ever
       // defeated by some future change to load()'s timing.
+      // The person started typing: their words win over an unsolicited read.
+      if (options.auto && touched.current) {
+        return "Skipped the automatic read — you started filling the profile in.";
+      }
       if (options.auto) {
         const { data: existing } = await supabase()
           .from("client_profiles")
@@ -292,6 +298,11 @@ function ClientDetail() {
         data: { url: sourceUrl.trim(), accessToken: await accessToken() },
       });
       if (!result.ok) throw new Error(result.error);
+      // Typing began while the page was being read: saving the extraction now
+      // would remount the fields and throw that typing away.
+      if (options.auto && touched.current) {
+        return "Read their site, but you had started typing, so nothing was changed. Use “Read the page again” to apply it.";
+      }
 
       const { profile: extracted, provenance } = result;
       const { error: upsertError } = await supabase()
@@ -476,13 +487,16 @@ function ClientDetail() {
             would be a question with nowhere to answer it. */}
         <form
           onSubmit={saveProfile}
+          onInput={() => {
+            touched.current = true;
+          }}
           data-testid="profile-form"
           aria-busy={busy === "extract"}
           className="mt-3 grid gap-px overflow-hidden rounded-md border border-[var(--color-rule)] bg-[var(--color-rule)] sm:grid-cols-2"
         >
-          {/* Locked while their site is being read: the read replaces these
-              fields when it lands, and typing meanwhile would be wiped. */}
-          <fieldset disabled={busy === "extract"} className="contents">
+          {/* Editable while their site is read: the first keystroke makes the
+              automatic read stand down, so nothing typed here is replaced. */}
+          <fieldset className="contents">
             <EditField
               name="jurisdictions"
               label="Operates in"
@@ -582,7 +596,7 @@ function ClientDetail() {
               </button>
               {busy === "extract" && (
                 <span className="ml-3 text-sm text-[var(--color-ink-soft)]" aria-live="polite">
-                  Reading their site — the fields unlock when it finishes.
+                  Reading their site. Typing here takes priority over what it finds.
                 </span>
               )}
             </div>

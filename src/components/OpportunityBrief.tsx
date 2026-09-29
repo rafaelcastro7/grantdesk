@@ -194,6 +194,19 @@ export function OpportunityBrief({
       return;
     }
     const decision = (text("decision") ?? "pending") as Decision;
+    // Leadership may overrule the recommendation — but a GO over a no-go
+    // recommendation (or the reverse) with no stated reason is either a slip
+    // or an undocumented call, and the record is where "why?" gets answered.
+    const recommendation = text("recommendation");
+    const overrules =
+      (recommendation === "no_go" && (decision === "go" || decision === "go_conditional")) ||
+      (recommendation === "go" && decision === "no_go");
+    if (overrules && !text("decisionReason")) {
+      setFailure(
+        "Not saved — the decision goes against the recommendation. Write the decision reason so the record says why.",
+      );
+      return;
+    }
 
     setSaving(true);
     setMessage(null);

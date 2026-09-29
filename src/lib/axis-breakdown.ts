@@ -71,8 +71,11 @@ export function axisBreakdown(checks: readonly RuleResult[]): Axis[] {
     const passed = list.filter((c) => c.status === "pass");
     const unknown = list.filter((c) => c.status === "unknown");
 
-    const status: AxisStatus =
-      passed.length === list.length
+    // A failed hard gate decides the axis: "Restricted to US" next to an
+    // "Eligibility ~" chip told the consultant the opposite of the verdict.
+    const status: AxisStatus = failed.some((c) => c.isHardGate)
+      ? "fail"
+      : passed.length === list.length
         ? "pass"
         : failed.length === list.length
           ? "fail"

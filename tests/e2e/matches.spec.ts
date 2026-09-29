@@ -96,7 +96,10 @@ test("a consultant matches a client and sees why each result was ruled in or out
   // A verdict with no stated reason is the failure this phase exists to
   // prevent — it is indistinguishable from an opinion.
   await firstRuledOut.getByText("Every rule, and how this was found").click();
-  await expect(firstRuledOut).toContainText(/Restricted to|Closed on|Open to/);
+  // Country, province, closing date or applicant type — each names its reason.
+  await expect(firstRuledOut).toContainText(
+    /Restricted to|Closed on|Open to|program; this client operates in/,
+  );
 
   // Two halves of one promise, and getting them backwards is how this was
   // first built: the record keeps every rejection, the screen shows a bounded

@@ -148,8 +148,18 @@ test("a consultant screening calls for an institute that follows a go/no-go SOP"
     await findMatches(agent);
 
     // ── What can this client apply for, and why ─────────────────────────────
-    const canApply = agent.section(/^Can apply/);
+    // Verified eligibility first; otherwise the group whose applicant rules
+    // the funder does not publish — which must say so in its own heading.
+    const verified = agent.section(/^Can apply/);
+    const canApply = (await verified.count())
+      ? verified
+      : agent.section(/^Open to this client's location/);
     await expect(canApply, "there should be calls this client can apply for").toBeVisible();
+    agent.need(
+      "verification-honesty",
+      "Does the list say whether who-may-apply was actually verified?",
+      await canApply.getByRole("heading").first().textContent(),
+    );
     const card = canApply.locator("li").first();
     const cardText = (await card.textContent()) ?? "";
     agent.need(

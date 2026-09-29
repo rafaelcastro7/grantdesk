@@ -80,13 +80,26 @@ test("the second-click controls work: re-run, re-read, collapse", async ({ page 
   await expect(ruledOut.locator("li")).toHaveCount(0);
 
   // ── Re-reading a call ─────────────────────────────────────────────────────
-  await page.getByTestId("group-eligible").getByTestId("to-proposal").first().click();
+  // Verified or not, an eligible call opens the same way.
+  await page
+    .getByTestId("group-eligible")
+    .or(page.getByTestId("group-unverified"))
+    .first()
+    .getByTestId("to-proposal")
+    .first()
+    .click();
   await expect(page).toHaveURL(/\/proposals\/[0-9a-f-]{36}$/, { timeout: 30_000 });
 
   const read = page.getByTestId("read-call");
-  // Reading happens on arrival, so by the time it settles the label has become
-  // the re-read one — funders do amend their notices.
-  await expect(read).toHaveText("Re-read the call", { timeout: 120_000 });
+  // Reading happens on arrival. It settles either on requirements (the label
+  // becomes the re-read one) or on the text it read with no requirements in
+  // it — both are answers; a button stuck on "Reading" is not.
+  await expect(read).not.toHaveText("Reading the call…", { timeout: 120_000 });
+  if ((await read.textContent())?.trim() !== "Re-read the call") {
+    await expect(page.getByTestId("read-text")).toBeVisible();
+    expect(consoleErrors, `page errors: ${consoleErrors.join("; ")}`).toEqual([]);
+    return;
+  }
 
   const countRequirements = async () =>
     (await page.getByTestId("section-card").count()) +

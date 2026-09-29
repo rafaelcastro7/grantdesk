@@ -60,6 +60,46 @@ describe("federal notice wording (audit 2026-09-29)", () => {
   });
 });
 
+describe("provincial programs (senior consultant audit)", () => {
+  it("rules a Quebec client out of a Saskatchewan program and names both provinces", () => {
+    const decision = decideEligibility(
+      input({ grant: { region: "CA-SK" }, client: { jurisdictions: ["CA", "CA-QC"] } }),
+    );
+    expect(decision.verdict).toBe("ineligible");
+    expect(check(decision, "jurisdiction").detail).toMatch(/Saskatchewan.*Quebec/);
+  });
+
+  it("passes the client's own province and asks when the profile names none", () => {
+    expect(
+      check(
+        decideEligibility(
+          input({ grant: { region: "CA-ON" }, client: { jurisdictions: ["CA-ON"] } }),
+        ),
+        "jurisdiction",
+      ).status,
+    ).toBe("pass");
+    expect(
+      check(
+        decideEligibility(input({ grant: { region: "CA-ON" }, client: { jurisdictions: ["CA"] } })),
+        "jurisdiction",
+      ).status,
+    ).toBe("unknown");
+  });
+
+  it("leaves federal and US department jurisdictions to the country rule", () => {
+    for (const region of ["CA-Federal", "US-HHS", null]) {
+      expect(
+        check(
+          decideEligibility(
+            input({ grant: { region }, client: { jurisdictions: ["CA", "CA-QC"] } }),
+          ),
+          "jurisdiction",
+        ).status,
+      ).toBe("pass");
+    }
+  });
+});
+
 describe("jurisdiction", () => {
   it("rules out a grant restricted to a country the client is not in, and says which", () => {
     const decision = decideEligibility(input({ grant: { country: "US" } }));

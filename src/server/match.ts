@@ -94,6 +94,7 @@ type GrantRow = {
   currency: string | null;
   estimated_deadline: string | null;
   cost_sharing_required: boolean | null;
+  funders: { jurisdiction: string | null } | null;
 };
 
 /**
@@ -197,7 +198,7 @@ export async function runMatch(
       .select(
         "id, title, summary, country, deadline, status, eligible_applicant_types, " +
           "eligibility_note, amount_min, amount_max, currency, estimated_deadline, " +
-          "cost_sharing_required",
+          "cost_sharing_required, funders(jurisdiction)",
       )
       .in("id", ids.slice(i, i + 50));
     if (error) throw new Error(`could not read candidates: ${error.message}`);
@@ -213,6 +214,7 @@ export async function runMatch(
       grant: {
         title: grant.title,
         country: grant.country,
+        region: grant.funders?.jurisdiction ?? null,
         deadline: grant.deadline,
         status: grant.status,
         eligibleApplicantTypes: (grant.eligible_applicant_types ?? []) as ApplicantType[],

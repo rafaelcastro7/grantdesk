@@ -3,6 +3,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { serverEnv } from "@/lib/env.server";
 import type { SourceAdapter, SourceGrant } from "./sources";
 import { todayIn } from "@/lib/deadline";
+import { decodeEntities } from "@/lib/html-entities";
 
 /**
  * Run a source and fold its harvest into the catalog.
@@ -81,7 +82,7 @@ export async function runSource(
     let fundersUpserted = 0;
     for (let i = 0; i < harvest.funders.length; i += 100) {
       const chunk = harvest.funders.slice(i, i + 100).map((f) => ({
-        name: f.name,
+        name: decodeEntities(f.name),
         country: f.country,
         jurisdiction: f.jurisdiction ?? null,
         category: f.category ?? null,
@@ -115,14 +116,16 @@ export async function runSource(
     const rows: Array<Record<string, unknown>> = [];
     let skippedWithoutFunder = 0;
     for (const grant of harvest.grants as SourceGrant[]) {
-      const id = funderId.get(`${grant.funderName.toLowerCase()}|${grant.funderCountry}`);
+      const id = funderId.get(
+        `${decodeEntities(grant.funderName).toLowerCase()}|${grant.funderCountry}`,
+      );
       if (!id) {
         skippedWithoutFunder++;
         continue;
       }
       rows.push({
         funder_id: id,
-        title: grant.title,
+        title: decodeEntities(grant.title),
         summary: grant.summary ?? null,
         url: grant.url,
         country: grant.country,

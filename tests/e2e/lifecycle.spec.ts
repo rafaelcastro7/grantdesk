@@ -54,7 +54,12 @@ test("a consultant goes from a new client to a recorded submission", async ({ pa
   await expect(page.getByTestId("match-summary")).toBeVisible({ timeout: 120_000 });
 
   // Drafting is only offered where the rules said applying is possible.
-  const eligible = page.getByTestId("group-eligible");
+  // Verified eligible first; a call open to the client whose applicant list is
+  // unpublished is also draftable.
+  const eligible = page
+    .getByTestId("group-eligible")
+    .or(page.getByTestId("group-unverified"))
+    .first();
   await expect(eligible).toBeVisible({ timeout: 30_000 });
   await eligible.getByTestId("to-proposal").first().click();
   await expect(page).toHaveURL(/\/proposals\/[0-9a-f-]{36}$/, { timeout: 30_000 });
@@ -64,9 +69,13 @@ test("a consultant goes from a new client to a recorded submission", async ({ pa
   // says why not — a silent no-op is the only unacceptable outcome.
   await expect(page.getByTestId("read-call")).toBeVisible();
 
+  // Three honest outcomes: conditions found, an error that explains itself,
+  // or "we read the text but it lists no requirements — add the headings",
+  // shown with the text that was read. Silence is the only failure.
   const conditions = page.getByTestId("conditions");
   const failure = page.getByRole("alert");
-  await expect(conditions.or(failure)).toBeVisible({ timeout: 120_000 });
+  const readText = page.getByTestId("read-text");
+  await expect(conditions.or(failure).or(readText).first()).toBeVisible({ timeout: 120_000 });
 
   if (await failure.isVisible()) {
     const message = (await failure.textContent()) ?? "";

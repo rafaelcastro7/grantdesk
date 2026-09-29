@@ -60,11 +60,35 @@ type MatchRow = {
  * disappears is indistinguishable from one we never found, and the difference
  * is the entire claim this product makes.
  */
-const GROUPS: Array<{ verdict: Verdict; heading: string; blurb: string }> = [
+/**
+ * "Eligible" splits in two on screen. When the funder publishes who may apply
+ * and this client is on the list, that is a verified yes. When it publishes no
+ * list, location and dates pass but nobody has checked the applicant rules —
+ * showing both under one "Can apply" claimed verification that never happened.
+ */
+type GroupKey = Verdict | "unverified";
+
+function groupOf(row: {
+  verdict: Verdict;
+  eligibility_checks: Array<{ rule_key: string; status: string }>;
+}): GroupKey {
+  if (row.verdict !== "eligible") return row.verdict;
+  const applicant = row.eligibility_checks.find((c) => c.rule_key === "applicant_type");
+  return applicant?.status === "pass" ? "eligible" : "unverified";
+}
+
+const GROUPS: Array<{ verdict: GroupKey; heading: string; blurb: string }> = [
   {
     verdict: "eligible",
     heading: "Can apply",
-    blurb: "Every published requirement we can check is met.",
+    blurb:
+      "The funder publishes who may apply, and this client is on the list; location and dates pass.",
+  },
+  {
+    verdict: "unverified",
+    heading: "Open to this client's location — check who may apply",
+    blurb:
+      "Location and dates pass, but the funder publishes no applicant list, so eligibility is not verified. Read its terms before investing time.",
   },
   {
     verdict: "needs_input",
@@ -197,8 +221,8 @@ function MatchesPage() {
    * the actual ask and a relevance-only order cannot express it.
    */
   useDocumentTitle("Matches", clientName);
-  const allOf = (verdict: Verdict) => (matches ?? []).filter((m) => m.verdict === verdict);
-  const grouped = (verdict: Verdict) => {
+  const allOf = (verdict: GroupKey) => (matches ?? []).filter((m) => groupOf(m) === verdict);
+  const grouped = (verdict: GroupKey) => {
     const filtered = applyMatchFilters(allOf(verdict), filters, {
       today: new Date(),
       isHome: (country) => bandOf(country, jurisdictions) === "home",
@@ -553,8 +577,16 @@ function MatchCard({
         >
           {grant.title}
         </a>
-        <span className={`shrink-0 text-xs font-medium ${VERDICT_COLOR[row.verdict]}`}>
-          {VERDICT_LABEL[row.verdict]}
+        <span
+          className={`shrink-0 text-xs font-medium ${
+            groupOf(row) === "unverified"
+              ? "text-[var(--color-needs-input)]"
+              : VERDICT_COLOR[row.verdict]
+          }`}
+        >
+          {groupOf(row) === "unverified"
+            ? "Applicant rules not verified"
+            : VERDICT_LABEL[row.verdict]}
         </span>
       </div>
 
