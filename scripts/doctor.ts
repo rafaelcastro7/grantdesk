@@ -338,8 +338,11 @@ try {
     .lt("created_at", hourAgo);
   if (error) throw new Error(error.message);
   const stuck = count ?? 0;
-  if (!email.ok) {
+  if (!email.ok && stuck > 0) {
     record("email", "degraded", `${email.reason}; ${stuck} pending row(s) older than 1h`);
+  } else if (!email.ok) {
+    // Tenants may send with their own settings; see the email:<tenant> lines.
+    record("email", "ok", `env fallback off (${email.reason}); nothing pending for over an hour`);
   } else if (stuck > 0) {
     record(
       "email",
@@ -351,6 +354,79 @@ try {
   }
 } catch (error) {
   record("email", "broken", error instanceof Error ? error.message : String(error));
+}
+
+// ── Email sender per tenant ─────────────────────────────────────────────────
+// Each tenant may save its own mailbox on /settings/email; the env pair above
+// is only the fallback. Decrypting here also proves EMAIL_SETTINGS_KEY is the
+// key the secrets were saved with — a rotated key fails every send silently.
+try {
+  const { emailConfig, loadTenantSettings, toTransport } =
+    await import("../src/server/email-sender");
+  const fallback = emailConfig(process.env).ok;
+  const key = process.env.EMAIL_SETTINGS_KEY?.trim();
+  const [{ data: tenants, error: tenantsError }, { data: saved, error: savedError }] =
+    await Promise.all([
+      supabase.from("tenants").select("id, slug"),
+      supabase
+        .from("tenant_email_settings")
+        .select(
+          "tenant_id, provider, from_address, smtp_host, has_secret, enabled, last_test_result",
+        ),
+    ]);
+  if (tenantsError) throw new Error(tenantsError.message);
+  if (savedError)
+    throw new Error(`tenant_email_settings: ${savedError.message} (migration 0045 applied?)`);
+  const decrypted = key && (saved ?? []).length > 0 ? await loadTenantSettings(supabase, key) : [];
+
+  for (const tenant of (tenants ?? []) as Array<{ id: string; slug: string }>) {
+    const name = `email:${tenant.slug}`;
+    const row = (saved ?? []).find((s: { tenant_id: string }) => s.tenant_id === tenant.id) as
+      | {
+          provider: string;
+          from_address: string;
+          smtp_host: string | null;
+          has_secret: boolean;
+          enabled: boolean;
+          last_test_result: string | null;
+        }
+      | undefined;
+    const viaFallback = fallback ? "uses the env fallback (RESEND_API_KEY)" : "has NO sender";
+    if (!row || !row.enabled) {
+      record(
+        name,
+        fallback ? "ok" : "degraded",
+        `${row ? "settings saved but turned off" : "no settings saved"}; ${viaFallback}`,
+      );
+      continue;
+    }
+    const where = row.provider === "smtp" ? `smtp ${row.smtp_host}` : "resend";
+    const test = row.last_test_result ? `; last test: ${row.last_test_result}` : "; never tested";
+    if (!key) {
+      record(
+        name,
+        "degraded",
+        `${where} as ${row.from_address}, but EMAIL_SETTINGS_KEY is not set so it cannot be used; ${viaFallback}`,
+      );
+    } else if (!row.has_secret) {
+      record(
+        name,
+        "degraded",
+        `${where} as ${row.from_address}, no password saved; ${viaFallback}`,
+      );
+    } else {
+      const plain = decrypted.find((d) => d.tenant_id === tenant.id);
+      const built = plain ? toTransport(plain) : { ok: false as const, reason: "not readable" };
+      record(
+        name,
+        built.ok ? "ok" : "degraded",
+        built.ok ? `${where} as ${row.from_address}${test}` : `${where}: ${built.reason}`,
+      );
+    }
+  }
+} catch (error) {
+  // pgp_sym_decrypt with the wrong key lands here.
+  record("email:tenants", "broken", error instanceof Error ? error.message : String(error));
 }
 
 // ── Verdict ─────────────────────────────────────────────────────────────────

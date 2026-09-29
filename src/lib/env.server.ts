@@ -51,6 +51,15 @@ const schema = z.object({
   CEREBRAS_API_KEY: z.string().optional(),
   GROQ_API_KEY: z.string().optional(),
   GOOGLE_AI_STUDIO_KEY: z.string().optional(),
+  /**
+   * Optional: symmetric key for tenant email secrets (SMTP password / Resend
+   * key saved on /settings/email). Without it those settings cannot be saved
+   * or read, and delivery falls back to RESEND_API_KEY / EMAIL_FROM.
+   * Changing it makes every saved secret unreadable: re-enter them.
+   */
+  EMAIL_SETTINGS_KEY: z.string().min(16).optional(),
+  RESEND_API_KEY: z.string().optional(),
+  EMAIL_FROM: z.string().optional(),
 });
 
 export type ServerEnv = z.infer<typeof schema>;

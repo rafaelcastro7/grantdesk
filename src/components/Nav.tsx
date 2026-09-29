@@ -18,6 +18,8 @@ export function Nav() {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const [tenantSlug, setTenantSlug] = useState<string | null>(null);
   const [signedIn, setSignedIn] = useState(false);
+  // Only decides whether the link shows; the page and database enforce the role.
+  const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -35,12 +37,16 @@ export function Nav() {
       }
       const { data } = await supabase()
         .from("tenant_members")
-        .select("tenants(slug)")
+        .select("role, tenants(slug)")
         .eq("user_id", session.session.user.id)
         .limit(1)
         .maybeSingle();
-      const member = (data as { tenants: { slug: string } | null } | null)?.tenants?.slug;
-      if (!cancelled) setTenantSlug(member ?? fromHost);
+      const row = data as { role: string; tenants: { slug: string } | null } | null;
+      const member = row?.tenants?.slug;
+      if (!cancelled) {
+        setTenantSlug(member ?? fromHost);
+        setIsAdmin(row?.role === "owner" || row?.role === "admin");
+      }
     })();
     return () => {
       cancelled = true;
@@ -100,7 +106,10 @@ export function Nav() {
 
         <div className="flex items-center gap-2 sm:gap-4">
           <div className="flex items-center gap-1 sm:gap-2">
-            {LINKS.map((link) => {
+            {[
+              ...LINKS,
+              ...(signedIn && isAdmin ? [{ to: "/settings/email", label: "Email settings" }] : []),
+            ].map((link) => {
               const current = link.to === "/" ? pathname === "/" : pathname.startsWith(link.to);
               return (
                 <Link
