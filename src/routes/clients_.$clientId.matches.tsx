@@ -7,6 +7,7 @@ import { useAction } from "@/lib/use-action";
 import { useRequireSession } from "@/lib/use-require-session";
 import { useDocumentTitle } from "@/lib/use-document-title";
 import { formatMoney } from "@/lib/money";
+import { useI18n, type MessageKey } from "@/lib/i18n";
 import { relevanceFrom } from "@/lib/match-explain";
 import { bandOf } from "@/lib/regions";
 import { axisBreakdown } from "@/lib/axis-breakdown";
@@ -77,28 +78,26 @@ function groupOf(row: {
   return applicant?.status === "pass" ? "eligible" : "unverified";
 }
 
-const GROUPS: Array<{ verdict: GroupKey; heading: string; blurb: string }> = [
+const GROUPS: Array<{ verdict: GroupKey; heading: MessageKey; blurb: MessageKey }> = [
   {
     verdict: "eligible",
-    heading: "Can apply",
-    blurb:
-      "The funder publishes who may apply, and this client is on the list; location and dates pass.",
+    heading: "matches.group.eligible",
+    blurb: "matches.group.eligibleBlurb",
   },
   {
     verdict: "unverified",
-    heading: "Open to this client's location — check who may apply",
-    blurb:
-      "Location and dates pass, but the funder publishes no applicant list, so eligibility is not verified. Read its terms before investing time.",
+    heading: "matches.group.unverified",
+    blurb: "matches.group.unverifiedBlurb",
   },
   {
     verdict: "needs_input",
-    heading: "Needs an answer from you",
-    blurb: "One fact about this client decides it. Fill it in and these resolve.",
+    heading: "matches.group.needsInput",
+    blurb: "matches.group.needsInputBlurb",
   },
   {
     verdict: "ineligible",
-    heading: "Ruled out",
-    blurb: "Considered and rejected, with the rule that rejected each one.",
+    heading: "matches.group.ineligible",
+    blurb: "matches.group.ineligibleBlurb",
   },
 ];
 
@@ -115,6 +114,7 @@ const RULED_OUT_SHOWN = 12;
 
 function MatchesPage() {
   useRequireSession();
+  const { t } = useI18n();
   const { clientId } = Route.useParams();
   const runMatching = useServerFn(findMatches);
 
@@ -194,21 +194,28 @@ function MatchesPage() {
       await load();
       // Say which halves of retrieval ran. A degraded run that looks identical
       // to a healthy one teaches the consultant to distrust the good ones too.
-      const degraded = !result.usedVector
-        ? " Meaning-based search was unavailable, so these are word matches only."
-        : "";
+      const degraded = !result.usedVector ? t("matches.summaryDegraded") : "";
       // Say where the search actually looked, not just how many came back.
       // A flat count once hid the fact that a Canadian client's own country
       // was 30% of the ranking and 98% of it went unread — restating the
       // split every run is what keeps that from happening silently again.
       const home = result.bands.find((b) => b.key === "home");
       const where = home
-        ? ` Searched ${home.label} (${home.searched}) and the rest of the Americas ` +
-          `(${result.bands.find((b) => b.key === "americas")?.searched ?? 0}).`
+        ? t("matches.summaryWhere", {
+            home: home.label,
+            homeCount: home.searched,
+            americas: result.bands.find((b) => b.key === "americas")?.searched ?? 0,
+          })
         : "";
       return (
-        `Checked ${result.retrieved} calls: ${result.eligible} to apply for, ` +
-        `${result.needsInput} awaiting an answer, ${result.ineligible} ruled out.${where}${degraded}`
+        t("matches.summary", {
+          retrieved: result.retrieved,
+          eligible: result.eligible,
+          needsInput: result.needsInput,
+          ineligible: result.ineligible,
+        }) +
+        where +
+        degraded
       );
     });
 
@@ -220,7 +227,7 @@ function MatchesPage() {
    * ones regardless of which happened to score higher, because "priority" was
    * the actual ask and a relevance-only order cannot express it.
    */
-  useDocumentTitle("Matches", clientName);
+  useDocumentTitle(t("matches.title"), clientName);
   const allOf = (verdict: GroupKey) => (matches ?? []).filter((m) => groupOf(m) === verdict);
   const grouped = (verdict: GroupKey) => {
     const filtered = applyMatchFilters(allOf(verdict), filters, {
@@ -253,13 +260,10 @@ function MatchesPage() {
         params={{ clientId }}
         className="text-sm text-[var(--color-accent)]"
       >
-        ← {clientName || "Client"}
+        ← {clientName || t("matches.backFallback")}
       </Link>
-      <h1 className="mt-3 text-2xl font-semibold tracking-tight">Matches</h1>
-      <p className="mt-2 max-w-prose text-sm text-[var(--color-ink-soft)]">
-        Every call below was checked against this client's profile by rules, not by a model. The
-        reason each one was ruled in or out is stored with it.
-      </p>
+      <h1 className="mt-3 text-2xl font-semibold tracking-tight">{t("matches.title")}</h1>
+      <p className="mt-2 max-w-prose text-sm text-[var(--color-ink-soft)]">{t("matches.intro")}</p>
 
       <div className="mt-6 flex flex-wrap items-center gap-3">
         <button
@@ -270,10 +274,10 @@ function MatchesPage() {
           className="rounded-md bg-[var(--color-accent-strong)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
         >
           {busy
-            ? "Checking the catalog…"
+            ? t("matches.checking")
             : matches && matches.length > 0
-              ? "Check again"
-              : "Find matches"}
+              ? t("matches.checkAgain")
+              : t("matches.find")}
         </button>
         {matches && matches.length > 0 && (
           <button
@@ -281,10 +285,10 @@ function MatchesPage() {
             onClick={() => findAll(300)}
             disabled={busy !== null}
             data-testid="run-matching-deep"
-            title="Checks up to 300 calls instead of 60 — slower, finds more"
+            title={t("matches.deeperTitle")}
             className="rounded-md border border-[var(--color-rule)] px-4 py-2 text-sm font-medium disabled:opacity-50"
           >
-            Search deeper (300 calls)
+            {t("matches.deeper")}
           </button>
         )}
         {note && (
@@ -305,73 +309,70 @@ function MatchesPage() {
       )}
 
       {matches !== null && matches.length === 0 && !busy && (
-        <p className="mt-8 text-sm text-[var(--color-ink-soft)]">
-          Nothing came back for this profile. Add more detail about what this client does, then
-          check again.
-        </p>
+        <p className="mt-8 text-sm text-[var(--color-ink-soft)]">{t("matches.empty")}</p>
       )}
 
       {matches !== null && matches.length > 0 && (
         <section
           data-testid="match-filters"
-          aria-label="Filter matches"
+          aria-label={t("matches.filter.aria")}
           className="mt-6 grid gap-3 rounded-md border border-[var(--color-rule)] bg-[var(--color-surface)] p-4 text-sm sm:grid-cols-3"
         >
           <label className="flex flex-col gap-1 sm:col-span-3">
             <span className="text-xs uppercase tracking-wide text-[var(--color-ink-soft)]">
-              Search title, summary or funder
+              {t("matches.filter.search")}
             </span>
             <input
               type="search"
-              aria-label="Search title, summary or funder"
+              aria-label={t("matches.filter.search")}
               value={filters.text}
               onChange={(e) => set({ text: e.target.value })}
-              placeholder="e.g. climate adaptation, micro-credentials, Ontario"
+              placeholder={t("matches.filter.searchPlaceholder")}
               className="rounded-md border border-[var(--color-rule)] bg-[var(--color-paper)] px-2 py-1.5"
             />
           </label>
           <label className="flex flex-col gap-1">
             <span className="text-xs uppercase tracking-wide text-[var(--color-ink-soft)]">
-              Closes
+              {t("matches.filter.closes")}
             </span>
             <select
-              aria-label="Closes"
+              aria-label={t("matches.filter.closes")}
               value={filters.closes}
               onChange={(e) => set({ closes: e.target.value as MatchFilters["closes"] })}
               className="rounded-md border border-[var(--color-rule)] bg-[var(--color-paper)] px-2 py-1.5"
             >
-              <option value="any">Any time</option>
-              <option value="30">Within 30 days</option>
-              <option value="90">Within 90 days</option>
-              <option value="rolling">Rolling intake only</option>
+              <option value="any">{t("matches.filter.closesAny")}</option>
+              <option value="30">{t("matches.filter.closes30")}</option>
+              <option value="90">{t("matches.filter.closes90")}</option>
+              <option value="rolling">{t("matches.filter.closesRolling")}</option>
             </select>
           </label>
           <label className="flex flex-col gap-1">
             <span className="text-xs uppercase tracking-wide text-[var(--color-ink-soft)]">
-              Role
+              {t("matches.filter.role")}
             </span>
             <select
-              aria-label="Role"
+              aria-label={t("matches.filter.role")}
               value={filters.role}
               onChange={(e) => set({ role: e.target.value as MatchFilters["role"] })}
               className="rounded-md border border-[var(--color-rule)] bg-[var(--color-paper)] px-2 py-1.5"
             >
-              <option value="any">Any role</option>
-              <option value="lead">Lead applicant</option>
-              <option value="funded_partner">Funded partner</option>
+              <option value="any">{t("matches.filter.roleAny")}</option>
+              <option value="lead">{t("matches.filter.roleLead")}</option>
+              <option value="funded_partner">{t("matches.filter.rolePartner")}</option>
             </select>
           </label>
           <label className="flex flex-col gap-1">
             <span className="text-xs uppercase tracking-wide text-[var(--color-ink-soft)]">
-              Currency
+              {t("matches.filter.currency")}
             </span>
             <select
-              aria-label="Currency"
+              aria-label={t("matches.filter.currency")}
               value={filters.currency}
               onChange={(e) => set({ currency: e.target.value })}
               className="rounded-md border border-[var(--color-rule)] bg-[var(--color-paper)] px-2 py-1.5"
             >
-              <option value="any">Any currency</option>
+              <option value="any">{t("matches.filter.currencyAny")}</option>
               {currencies.map((c) => (
                 <option key={c} value={c}>
                   {c}
@@ -381,36 +382,41 @@ function MatchesPage() {
           </label>
           <label className="flex flex-col gap-1">
             <span className="text-xs uppercase tracking-wide text-[var(--color-ink-soft)]">
-              Minimum award{filters.currency !== "any" ? ` (${filters.currency})` : ""}
+              {t("matches.filter.minAmount")}
+              {filters.currency !== "any" ? ` (${filters.currency})` : ""}
             </span>
             <input
               type="text"
               inputMode="numeric"
-              aria-label="Minimum award"
+              aria-label={t("matches.filter.minAmount")}
               value={filters.minAmount ?? ""}
               disabled={filters.currency === "any"}
-              title={filters.currency === "any" ? "Choose a currency first" : undefined}
+              title={filters.currency === "any" ? t("matches.filter.chooseCurrency") : undefined}
               onChange={(e) => {
                 const n = Number(e.target.value.replace(/[^\d]/g, ""));
                 set({ minAmount: e.target.value.trim() && n > 0 ? n : null });
               }}
-              placeholder={filters.currency === "any" ? "Choose a currency first" : "e.g. 50000"}
+              placeholder={
+                filters.currency === "any"
+                  ? t("matches.filter.chooseCurrency")
+                  : t("matches.filter.minPlaceholder")
+              }
               className="rounded-md border border-[var(--color-rule)] bg-[var(--color-paper)] px-2 py-1.5 disabled:opacity-50"
             />
           </label>
           <label className="flex flex-col gap-1">
             <span className="text-xs uppercase tracking-wide text-[var(--color-ink-soft)]">
-              Sort
+              {t("matches.filter.sort")}
             </span>
             <select
-              aria-label="Sort"
+              aria-label={t("matches.filter.sort")}
               value={filters.sort}
               onChange={(e) => set({ sort: e.target.value as MatchFilters["sort"] })}
               className="rounded-md border border-[var(--color-rule)] bg-[var(--color-paper)] px-2 py-1.5"
             >
-              <option value="relevance">Relevance (home country first)</option>
-              <option value="deadline">Closing soonest</option>
-              <option value="amount">Largest award</option>
+              <option value="relevance">{t("matches.filter.sortRelevance")}</option>
+              <option value="deadline">{t("matches.filter.sortDeadline")}</option>
+              <option value="amount">{t("matches.filter.sortAmount")}</option>
             </select>
           </label>
           <label className="flex items-center gap-2 self-end">
@@ -419,7 +425,7 @@ function MatchesPage() {
               checked={filters.fitOnly}
               onChange={(e) => set({ fitOnly: e.target.checked })}
             />
-            Names a capability domain
+            {t("matches.filter.fitOnly")}
           </label>
           <label className="flex items-center gap-2 self-end">
             <input
@@ -427,7 +433,7 @@ function MatchesPage() {
               checked={filters.homeOnly}
               onChange={(e) => set({ homeOnly: e.target.checked })}
             />
-            Home country only
+            {t("matches.filter.homeOnly")}
           </label>
           {filtering && (
             <button
@@ -435,7 +441,7 @@ function MatchesPage() {
               onClick={() => setFilters(DEFAULT_MATCH_FILTERS)}
               className="self-end text-left text-[var(--color-accent)] sm:col-span-3"
             >
-              Clear filters
+              {t("matches.filter.clear")}
             </button>
           )}
         </section>
@@ -453,9 +459,9 @@ function MatchesPage() {
           <section key={group.verdict} className="mt-10" data-testid={`group-${group.verdict}`}>
             <div className="flex items-baseline justify-between gap-3">
               <h2 className="text-sm font-semibold">
-                {group.heading}{" "}
+                {t(group.heading)}{" "}
                 <span className="font-mono tabular-nums text-[var(--color-ink-soft)]">
-                  {filtering ? `${rows.length} of ${total}` : total}
+                  {filtering ? t("matches.group.countOf", { shown: rows.length, total }) : total}
                 </span>
               </h2>
               {collapsible && (
@@ -464,14 +470,14 @@ function MatchesPage() {
                   onClick={() => setShowRuledOut((v) => !v)}
                   className="text-sm text-[var(--color-accent)]"
                 >
-                  {open ? "Hide" : "Show why"}
+                  {open ? t("matches.group.hide") : t("matches.group.showWhy")}
                 </button>
               )}
             </div>
-            <p className="mt-1 text-sm text-[var(--color-ink-soft)]">{group.blurb}</p>
+            <p className="mt-1 text-sm text-[var(--color-ink-soft)]">{t(group.blurb)}</p>
             {open && rows.length === 0 && (
               <p className="mt-3 text-sm text-[var(--color-ink-soft)]">
-                The filters hide all {total} in this group.
+                {t("matches.group.allHidden", { total })}
               </p>
             )}
 
@@ -490,8 +496,7 @@ function MatchesPage() {
                     data-testid="ruled-out-truncated"
                     className="bg-[var(--color-surface)] px-4 py-3 text-sm text-[var(--color-ink-soft)]"
                   >
-                    Showing {visible.length} of {rows.length}. The rest were rejected the same way
-                    and are kept with this client's record.
+                    {t("matches.group.truncated", { shown: visible.length, total: rows.length })}
                   </li>
                 )}
               </ul>
@@ -513,10 +518,10 @@ const FIELD_FOR_RULE: Partial<Record<string, string>> = {
   applicant_type: "profile-stage",
 };
 
-const VERDICT_LABEL: Record<Verdict, string> = {
-  eligible: "Can apply",
-  needs_input: "Needs an answer",
-  ineligible: "Ruled out",
+const VERDICT_LABEL: Record<Verdict, MessageKey> = {
+  eligible: "matches.verdict.eligible",
+  needs_input: "matches.verdict.needsInput",
+  ineligible: "matches.verdict.ineligible",
 };
 
 const VERDICT_COLOR: Record<Verdict, string> = {
@@ -525,12 +530,17 @@ const VERDICT_COLOR: Record<Verdict, string> = {
   ineligible: "text-[var(--color-ineligible)]",
 };
 
-function money(row: NonNullable<MatchRow["grants"]>): string | null {
+function money(
+  row: NonNullable<MatchRow["grants"]>,
+  t: ReturnType<typeof useI18n>["t"],
+): string | null {
   if (row.amount_min && row.amount_max) {
     return `${formatMoney(row.amount_min, row.currency)} – ${formatMoney(row.amount_max, row.currency)}`;
   }
-  if (row.amount_max) return `up to ${formatMoney(row.amount_max, row.currency)}`;
-  if (row.amount_min) return `from ${formatMoney(row.amount_min, row.currency)}`;
+  if (row.amount_max)
+    return t("matches.card.upTo", { amount: formatMoney(row.amount_max, row.currency) });
+  if (row.amount_min)
+    return t("matches.card.from", { amount: formatMoney(row.amount_min, row.currency) });
   return null;
 }
 
@@ -544,6 +554,7 @@ function MatchCard({
   /** This client's own country, shown so priority is visible, not just implied by order. */
   isHome: boolean;
 }) {
+  const { t } = useI18n();
   const grant = row.grants;
   if (!grant) return null;
 
@@ -555,7 +566,7 @@ function MatchCard({
     gates.find((c) => c.status === "unknown") ??
     row.eligibility_checks.find((c) => !c.is_hard_gate && c.status === "unknown");
 
-  const amount = money(grant);
+  const amount = money(grant, t);
   const how = row.retrieval;
   const axes = axisBreakdown(
     row.eligibility_checks.map((c) => ({
@@ -585,8 +596,8 @@ function MatchCard({
           }`}
         >
           {groupOf(row) === "unverified"
-            ? "Applicant rules not verified"
-            : VERDICT_LABEL[row.verdict]}
+            ? t("matches.verdict.unverified")
+            : t(VERDICT_LABEL[row.verdict])}
         </span>
       </div>
 
@@ -595,9 +606,9 @@ function MatchCard({
           grant.funders?.name,
           // Home is stated, not just implied by list order — the order
           // survives a re-sort or a copy-paste, the label does not need to.
-          isHome ? `${grant.country} · home country` : grant.country,
+          isHome ? t("matches.card.home", { country: grant.country }) : grant.country,
           amount,
-          grant.deadline && `closes ${grant.deadline}`,
+          grant.deadline && t("matches.card.closes", { date: grant.deadline }),
         ]
           .filter(Boolean)
           .join(" · ")}
@@ -615,7 +626,7 @@ function MatchCard({
                 hash={FIELD_FOR_RULE[deciding.rule_key]}
                 className="font-medium text-[var(--color-accent)]"
               >
-                Fill it in →
+                {t("matches.card.fillIn")}
               </Link>
             </>
           )}
@@ -670,10 +681,10 @@ function MatchCard({
           to="/clients/$clientId/proposals/$grantId"
           params={{ clientId, grantId: grant.id }}
           data-testid="to-proposal"
-          aria-label={`Draft this application: ${grant.title}`}
+          aria-label={t("matches.card.draftAria", { title: grant.title })}
           className="mt-2 inline-block text-sm font-medium text-[var(--color-accent)]"
         >
-          Draft this application →
+          {t("matches.card.draft")}
         </Link>
       )}
       {/* A partner question is answered by qualifying the call, not by
@@ -684,16 +695,16 @@ function MatchCard({
           to="/clients/$clientId/proposals/$grantId"
           params={{ clientId, grantId: grant.id }}
           data-testid="to-brief"
-          aria-label={`Qualify it — open the Opportunity Brief: ${grant.title}`}
+          aria-label={t("matches.card.briefAria", { title: grant.title })}
           className="mt-2 inline-block text-sm font-medium text-[var(--color-accent)]"
         >
-          Qualify it — open the Opportunity Brief →
+          {t("matches.card.brief")}
         </Link>
       )}
 
       <details className="mt-2">
         <summary className="cursor-pointer text-xs text-[var(--color-ink-soft)]">
-          Every rule, and how this was found
+          {t("matches.card.everyRule")}
         </summary>
         <ul className="mt-2 flex flex-col gap-1 text-xs">
           {row.eligibility_checks.map((check) => (
@@ -715,12 +726,12 @@ function MatchCard({
           <li className="mt-1 text-[var(--color-ink-soft)]">
             {/* Retrieval provenance: the first thing asked when a result looks wrong. */}
             {how?.lexicalRank && how?.vectorRank
-              ? `Found by both wording (#${how.lexicalRank}) and meaning (#${how.vectorRank}).`
+              ? t("matches.card.foundBoth", { lexical: how.lexicalRank, vector: how.vectorRank })
               : how?.lexicalRank
-                ? `Found by wording (#${how.lexicalRank}).`
+                ? t("matches.card.foundWording", { lexical: how.lexicalRank })
                 : how?.vectorRank
-                  ? `Found by meaning (#${how.vectorRank}).`
-                  : "Retrieval provenance was not recorded for this match."}
+                  ? t("matches.card.foundMeaning", { vector: how.vectorRank })
+                  : t("matches.card.noProvenance")}
           </li>
         </ul>
       </details>

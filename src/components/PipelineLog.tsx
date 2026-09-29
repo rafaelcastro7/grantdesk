@@ -1,6 +1,7 @@
 import { Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import { useI18n, type MessageKey } from "@/lib/i18n";
 
 type Decision = "pending" | "go" | "no_go" | "go_conditional";
 
@@ -27,12 +28,12 @@ type GrantJoin = {
   funders: { name: string } | null;
 } | null;
 
-const LABEL: Record<Entry["decision"], string> = {
-  none: "No brief yet",
-  pending: "Awaiting decision",
-  go: "GO",
-  no_go: "NO-GO",
-  go_conditional: "GO-CONDITIONAL",
+const LABEL: Record<Entry["decision"], MessageKey> = {
+  none: "pipeline.decision.none",
+  pending: "pipeline.decision.pending",
+  go: "pipeline.decision.go",
+  no_go: "pipeline.decision.noGo",
+  go_conditional: "pipeline.decision.goConditional",
 };
 
 const TONE: Record<Entry["decision"], string> = {
@@ -53,6 +54,7 @@ type Filter = "all" | "open" | "go" | "no_go" | "submitted";
  * was turned down. Built from real rows only — an empty log says it is empty.
  */
 export function PipelineLog({ clientId }: { clientId: string }) {
+  const { t, locale } = useI18n();
   const [entries, setEntries] = useState<Entry[] | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>("all");
@@ -86,7 +88,7 @@ export function PipelineLog({ clientId }: { clientId: string }) {
       const byGrant = new Map<string, Entry>();
       const base = (grantId: string, g: GrantJoin): Entry => ({
         grantId,
-        title: g?.title ?? "Call details unavailable",
+        title: g?.title ?? t("pipeline.unavailable"),
         funder: g?.funders?.name ?? null,
         deadline: g?.deadline ?? null,
         amountMax: g?.amount_max ?? null,
@@ -158,17 +160,17 @@ export function PipelineLog({ clientId }: { clientId: string }) {
 
   function exportCsv() {
     const header = [
-      "Call",
-      "Funder",
-      "Deadline",
-      "Max amount",
-      "Currency",
-      "Decision",
-      "Decided by",
-      "Decided on",
-      "Reason",
-      "Submitted",
-      "Outcome",
+      t("pipeline.csv.call"),
+      t("pipeline.csv.funder"),
+      t("pipeline.csv.deadline"),
+      t("pipeline.csv.maxAmount"),
+      t("pipeline.csv.currency"),
+      t("pipeline.csv.decision"),
+      t("pipeline.csv.decidedBy"),
+      t("pipeline.csv.decidedOn"),
+      t("pipeline.csv.reason"),
+      t("pipeline.csv.submitted"),
+      t("pipeline.csv.outcome"),
     ];
     // A funder title starting with "=" or "+" would run as a formula when the
     // log is opened in Excel; a leading apostrophe keeps it text.
@@ -185,7 +187,7 @@ export function PipelineLog({ clientId }: { clientId: string }) {
         e.deadline,
         e.amountMax,
         e.currency,
-        LABEL[e.decision],
+        t(LABEL[e.decision]),
         e.decidedBy,
         e.decidedAt?.slice(0, 10),
         e.reason,
@@ -197,7 +199,7 @@ export function PipelineLog({ clientId }: { clientId: string }) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "pipeline-log.csv";
+    a.download = t("pipeline.csv.filename");
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -216,20 +218,18 @@ export function PipelineLog({ clientId }: { clientId: string }) {
   return (
     <section className="mt-10" data-testid="pipeline-log">
       <div className="flex flex-wrap items-baseline justify-between gap-3">
-        <h2 className="text-sm font-semibold">Pipeline log</h2>
+        <h2 className="text-sm font-semibold">{t("pipeline.title")}</h2>
         {shown.length > 0 && (
           <button
             type="button"
             onClick={exportCsv}
             className="rounded-md border border-[var(--color-rule)] px-3 py-1 text-xs font-medium"
           >
-            Export CSV
+            {t("pipeline.export")}
           </button>
         )}
       </div>
-      <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
-        Every call opened or decided for this client — no-goes are kept, with who decided and why.
-      </p>
+      <p className="mt-1 text-sm text-[var(--color-ink-soft)]">{t("pipeline.intro")}</p>
 
       {failure && (
         <p role="alert" className="mt-3 text-sm text-[var(--color-ineligible)]">
@@ -238,22 +238,23 @@ export function PipelineLog({ clientId }: { clientId: string }) {
       )}
 
       {entries !== null && entries.length === 0 && (
-        <p className="mt-3 text-sm text-[var(--color-ink-soft)]">
-          Nothing logged yet. A call is logged once its Opportunity Brief is saved or a section is
-          drafted.
-        </p>
+        <p className="mt-3 text-sm text-[var(--color-ink-soft)]">{t("pipeline.empty")}</p>
       )}
 
       {entries !== null && entries.length > 0 && (
         <>
-          <div className="mt-3 flex flex-wrap gap-2" role="group" aria-label="Filter the log">
+          <div
+            className="mt-3 flex flex-wrap gap-2"
+            role="group"
+            aria-label={t("pipeline.filterAria")}
+          >
             {(
               [
-                ["all", "All"],
-                ["open", "Awaiting decision"],
-                ["go", "Go"],
-                ["no_go", "No-go"],
-                ["submitted", "Submitted"],
+                ["all", "pipeline.filter.all"],
+                ["open", "pipeline.filter.open"],
+                ["go", "pipeline.filter.go"],
+                ["no_go", "pipeline.filter.noGo"],
+                ["submitted", "pipeline.filter.submitted"],
               ] as const
             ).map(([key, text]) => (
               <button
@@ -267,7 +268,7 @@ export function PipelineLog({ clientId }: { clientId: string }) {
                     : "border-[var(--color-rule)]"
                 }`}
               >
-                {text} ({counts[key]})
+                {t(text)} ({counts[key]})
               </button>
             ))}
           </div>
@@ -288,18 +289,21 @@ export function PipelineLog({ clientId }: { clientId: string }) {
                     }`}
                   >
                     {e.submittedAt
-                      ? `Submitted ${e.submittedAt.slice(0, 10)}${e.outcome ? ` · ${e.outcome}` : ""}`
-                      : LABEL[e.decision]}
+                      ? `${t("pipeline.submittedOn", { date: e.submittedAt.slice(0, 10) })}${e.outcome ? ` · ${e.outcome}` : ""}`
+                      : t(LABEL[e.decision])}
                   </span>
                 </div>
                 <p className="mt-1 text-xs text-[var(--color-ink-soft)]">
                   {[
                     e.funder,
-                    e.deadline ? `closes ${e.deadline}` : "rolling / no deadline",
+                    e.deadline ? t("pipeline.closes", { date: e.deadline }) : t("pipeline.rolling"),
                     e.amountMax
-                      ? `up to ${e.currency ?? ""} ${e.amountMax.toLocaleString()}`
+                      ? t("pipeline.upTo", {
+                          currency: e.currency ?? "",
+                          amount: e.amountMax.toLocaleString(locale),
+                        })
                       : null,
-                    e.decidedBy ? `decided by ${e.decidedBy}` : null,
+                    e.decidedBy ? t("pipeline.decidedBy", { name: e.decidedBy }) : null,
                   ]
                     .filter(Boolean)
                     .join(" · ")}

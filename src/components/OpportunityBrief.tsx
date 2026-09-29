@@ -3,6 +3,7 @@ import { supabase } from "@/lib/supabase";
 import { errorMessage } from "@/lib/error-message";
 import { draftingGate, fromRow, type Decision, type DraftingGate } from "@/lib/go-decision";
 import { parseMoney } from "@/lib/parse-money";
+import { useI18n, type MessageKey } from "@/lib/i18n";
 
 type BriefRow = {
   role: "lead" | "funded_partner" | "other" | null;
@@ -35,9 +36,6 @@ const COLUMNS =
   "request_amount, net_revenue, match_required, in_kind_cap, cash_match_confirmed, risks, " +
   "recommendation, recommendation_reason, condition, decision, condition_met, decided_by, " +
   "decision_reason, decided_at, updated_at, recorder:consultants!opportunity_decisions_decided_by_user_fkey(email)";
-
-const CONFLICT =
-  "Not saved — someone else saved this brief since you opened it. Copy anything you need, then reload to see their version.";
 
 export type BriefPrefill = {
   deadline: string | null;
@@ -72,11 +70,11 @@ const EMPTY_BRIEF: BriefRow = {
   recorder: null,
 };
 
-const DECISION_LABEL: Record<Decision, string> = {
-  pending: "Awaiting leadership decision",
-  go: "GO",
-  no_go: "NO-GO",
-  go_conditional: "GO-CONDITIONAL",
+const DECISION_LABEL: Record<Decision, MessageKey> = {
+  pending: "brief.decision.pending",
+  go: "brief.decision.go",
+  no_go: "brief.decision.no_go",
+  go_conditional: "brief.decision.go_conditional",
 };
 
 /**
@@ -104,6 +102,7 @@ export function OpportunityBrief({
   /** False while the call is still being read; a new brief waits for it. */
   ready?: boolean;
 }) {
+  const { t, locale, language } = useI18n();
   const [row, setRow] = useState<BriefRow | null>(null);
   const [required, setRequired] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -136,10 +135,10 @@ export function OpportunityBrief({
     if (error) {
       // Unknown state is treated as locked: showing a blank, saveable form
       // here would let one click overwrite the real brief with nothing.
-      setFailure(`Could not load the brief: ${error.message}`);
+      setFailure(t("brief.loadFailed", { error: error.message }));
       onGate({
         allowed: false,
-        reason: "The brief could not be loaded, so drafting stays locked.",
+        reason: t("brief.loadFailedGate"),
       });
       return;
     }
@@ -165,7 +164,7 @@ export function OpportunityBrief({
     setLoaded(true);
     setFailure(null);
     onGate(draftingGate(fromRow(found), mustDecide));
-  }, [clientId, grantId, onGate]);
+  }, [clientId, grantId, onGate, t]);
 
   useEffect(() => {
     void load();
@@ -182,15 +181,13 @@ export function OpportunityBrief({
       return value !== null && Number.isFinite(value) ? value : null;
     };
     const amounts = {
-      request_amount: money("requestAmount", "Request amount"),
-      net_revenue: money("netRevenue", "Net revenue"),
-      match_required: money("matchRequired", "Match required"),
-      in_kind_cap: money("inKindCap", "In-kind cap"),
+      request_amount: money("requestAmount", t("brief.requestAmount")),
+      net_revenue: money("netRevenue", t("brief.netRevenue")),
+      match_required: money("matchRequired", t("brief.matchRequired")),
+      in_kind_cap: money("inKindCap", t("brief.inKindCap")),
     };
     if (unreadable.length > 0) {
-      setFailure(
-        `Not saved — could not read ${unreadable.join(", ")}. Write amounts like 50000, 50,000 or 50k.`,
-      );
+      setFailure(t("brief.unreadable", { fields: unreadable.join(", ") }));
       return;
     }
     const decision = (text("decision") ?? "pending") as Decision;
@@ -202,9 +199,7 @@ export function OpportunityBrief({
       (recommendation === "no_go" && (decision === "go" || decision === "go_conditional")) ||
       (recommendation === "go" && decision === "no_go");
     if (overrules && !text("decisionReason")) {
-      setFailure(
-        "Not saved — the decision goes against the recommendation. Write the decision reason so the record says why.",
-      );
+      setFailure(t("brief.overrules"));
       return;
     }
 
@@ -251,20 +246,18 @@ export function OpportunityBrief({
           .eq("updated_at", row.updated_at)
           .select("updated_at");
         if (error) throw error;
-        if (!saved || saved.length === 0) throw new Error(CONFLICT);
+        if (!saved || saved.length === 0) throw new Error(t("brief.conflict"));
       } else {
         const { error } = await supabase().from("opportunity_decisions").insert(fields);
-        if (error?.code === "23505") throw new Error(CONFLICT);
+        if (error?.code === "23505") throw new Error(t("brief.conflict"));
         if (error) throw error;
       }
       await load();
-      setMessage(decision === "pending" ? "Brief saved." : "Brief and decision recorded.");
+      setMessage(decision === "pending" ? t("brief.saved") : t("brief.recorded"));
     } catch (caught) {
       const text = errorMessage(caught);
       setFailure(
-        /decided_by/.test(text) || /check constraint/.test(text)
-          ? "A decision needs the approver's name, and a go-conditional needs its condition written out."
-          : text,
+        /decided_by/.test(text) || /check constraint/.test(text) ? t("brief.constraint") : text,
       );
     } finally {
       setSaving(false);
@@ -282,7 +275,7 @@ export function OpportunityBrief({
           onClick={() => void load()}
           className="mt-2 text-sm text-[var(--color-accent)]"
         >
-          Try again
+          {t("brief.tryAgain")}
         </button>
       </section>
     ) : null;
@@ -302,30 +295,28 @@ export function OpportunityBrief({
   // call has been read, so nothing arriving later can remount it under the
   // consultant's typing.
   const k = row ? `saved-${row.updated_at}` : "new";
-  const unit = prefill.currency ?? "currency not published";
+  const unit = prefill.currency ?? t("brief.noCurrency");
 
   return (
     <section className="mt-10" data-testid="opportunity-brief">
       <div className="flex items-baseline justify-between gap-3">
-        <h2 className="text-sm font-semibold">Opportunity Brief and go / no-go</h2>
+        <h2 className="text-sm font-semibold">{t("brief.title")}</h2>
         <span
           data-testid="go-decision"
           className={`text-xs font-semibold uppercase tracking-wide ${
             gate.allowed ? "text-[var(--color-eligible)]" : "text-[var(--color-needs-input)]"
           }`}
         >
-          {DECISION_LABEL[r?.decision ?? "pending"]}
+          {t(DECISION_LABEL[r?.decision ?? "pending"])}
         </span>
       </div>
       <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
-        {required
-          ? "One page for leadership. This client's policy: nothing is drafted until a decision is recorded here."
-          : "One page for whoever signs off. Optional for this client — drafting is not locked on it."}
+        {required ? t("brief.introRequired") : t("brief.introOptional")}
       </p>
 
       {!row && !ready ? (
         <p data-testid="brief-preparing" className="mt-3 text-sm text-[var(--color-ink-soft)]">
-          Preparing the brief from the call…
+          {t("brief.preparing")}
         </p>
       ) : (
         <form
@@ -335,94 +326,114 @@ export function OpportunityBrief({
         >
           <Choice
             name="role"
-            label="Role"
+            label={t("brief.role")}
             value={r?.role}
             options={[
-              ["lead", "Lead applicant"],
-              ["funded_partner", "Funded partner"],
-              ["other", "Other"],
+              ["lead", t("brief.role.lead")],
+              ["funded_partner", t("brief.role.funded_partner")],
+              ["other", t("brief.role.other")],
             ]}
           />
-          <Text name="roleOther" label="Other role (specify)" value={r?.role_other} />
+          <Text name="roleOther" label={t("brief.roleOther")} value={r?.role_other} />
           <Choice
             name="intake"
-            label="Intake"
+            label={t("brief.intake")}
             value={r?.intake}
             options={[
-              ["fixed", "Fixed deadline"],
-              ["rolling", "Rolling"],
+              ["fixed", t("brief.intake.fixed")],
+              ["rolling", t("brief.intake.rolling")],
             ]}
           />
           <Choice
             name="applicationStructure"
-            label="Application structure"
+            label={t("brief.structure")}
             value={r?.application_structure}
             options={[
-              ["one_stage", "One-stage"],
-              ["two_stage", "Two-stage (EOI first)"],
+              ["one_stage", t("brief.structure.one_stage")],
+              ["two_stage", t("brief.structure.two_stage")],
             ]}
           />
           <Area
             name="strategicAngle"
-            label="Strategic angle"
-            hint="Which capability this leverages, and what the client gains"
+            label={t("brief.strategicAngle")}
+            hint={t("brief.strategicAngleHint")}
             value={r?.strategic_angle}
           />
           <Area
             name="mandatoryComponents"
-            label="Mandatory components"
-            hint="Every required study, deliverable or partner type — the guide's exact words"
+            label={t("brief.mandatory")}
+            hint={t("brief.mandatoryHint")}
             value={r?.mandatory_components}
           />
-          <Text name="requestAmount" label={`Request amount (${unit})`} value={r.request_amount} />
-          <Text name="netRevenue" label={`Net revenue (${unit})`} value={r.net_revenue} />
-          <Text name="matchRequired" label={`Match required (${unit})`} value={r.match_required} />
-          <Text name="inKindCap" label={`In-kind cap (${unit})`} value={r.in_kind_cap} />
+          <Text
+            name="requestAmount"
+            label={t("brief.withUnit", { label: t("brief.requestAmount"), unit })}
+            value={r.request_amount}
+          />
+          <Text
+            name="netRevenue"
+            label={t("brief.withUnit", { label: t("brief.netRevenue"), unit })}
+            value={r.net_revenue}
+          />
+          <Text
+            name="matchRequired"
+            label={t("brief.withUnit", { label: t("brief.matchRequired"), unit })}
+            value={r.match_required}
+          />
+          <Text
+            name="inKindCap"
+            label={t("brief.withUnit", { label: t("brief.inKindCap"), unit })}
+            value={r.in_kind_cap}
+          />
           <Check
             name="cashMatchConfirmed"
-            label="Whoever controls the budget has confirmed any cash match can be covered"
+            label={t("brief.cashMatch")}
             value={r?.cash_match_confirmed}
           />
           <Area
             name="risks"
-            label="Risks and unknowns"
-            hint="Eligibility ambiguities, capacity, open questions, partner dependencies"
+            label={t("brief.risks")}
+            hint={t("brief.risksHint")}
             value={r?.risks}
           />
           <Choice
             name="recommendation"
-            label="Recommendation"
+            label={t("brief.recommendation")}
             value={r?.recommendation}
             options={[
-              ["go", "Go"],
-              ["no_go", "No-go"],
-              ["go_conditional", "Go-conditional"],
+              ["go", t("brief.rec.go")],
+              ["no_go", t("brief.rec.no_go")],
+              ["go_conditional", t("brief.rec.go_conditional")],
             ]}
           />
-          <Text name="recommendationReason" label="Reason" value={r?.recommendation_reason} />
-          <Area name="condition" label="Condition (if go-conditional)" value={r?.condition} />
+          <Text
+            name="recommendationReason"
+            label={t("brief.reason")}
+            value={r?.recommendation_reason}
+          />
+          <Area name="condition" label={t("brief.condition")} value={r?.condition} />
 
           <div className="bg-[var(--color-accent-soft)] px-4 py-3 sm:col-span-2">
-            <p className="text-xs font-semibold uppercase tracking-wide">Leadership decision</p>
+            <p className="text-xs font-semibold uppercase tracking-wide">{t("brief.leadership")}</p>
           </div>
           <Choice
             name="decision"
-            label="Decision"
+            label={t("brief.decision")}
             value={r?.decision ?? "pending"}
             options={[
-              ["pending", "Pending"],
-              ["go", "GO"],
-              ["no_go", "NO-GO"],
-              ["go_conditional", "GO-CONDITIONAL"],
+              ["pending", t("brief.option.pending")],
+              ["go", t("brief.decision.go")],
+              ["no_go", t("brief.decision.no_go")],
+              ["go_conditional", t("brief.decision.go_conditional")],
             ]}
           />
-          <Text name="decidedBy" label="Approved by" value={r?.decided_by} />
-          <Text name="decisionReason" label="Decision reason" value={r?.decision_reason} />
-          <Check
-            name="conditionMet"
-            label="Condition confirmed met with leadership"
-            value={r?.condition_met}
+          <Text name="decidedBy" label={t("brief.approvedBy")} value={r?.decided_by} />
+          <Text
+            name="decisionReason"
+            label={t("brief.decisionReason")}
+            value={r?.decision_reason}
           />
+          <Check name="conditionMet" label={t("brief.conditionMet")} value={r?.condition_met} />
 
           <div className="bg-[var(--color-surface)] px-4 py-3 sm:col-span-2">
             <button
@@ -431,22 +442,23 @@ export function OpportunityBrief({
               data-testid="save-brief"
               className="rounded-md border border-[var(--color-rule)] px-3 py-1.5 text-sm font-medium disabled:opacity-50"
             >
-              {saving ? "Saving…" : locked ? "Locked after submission" : "Save brief"}
+              {saving ? t("brief.saving") : locked ? t("brief.locked") : t("brief.save")}
             </button>
             {r.decided_at && (
               <span
                 data-testid="decision-record"
                 className="ml-3 text-xs text-[var(--color-ink-soft)]"
               >
-                Decided {new Date(r.decided_at).toLocaleDateString()}
-                {r.decided_by ? ` · approver ${r.decided_by}` : ""}
-                {r.recorder?.email ? ` · recorded by ${r.recorder.email}` : ""}
+                {t("brief.decided", {
+                  date: new Date(r.decided_at) // English keeps the browser's default format, as before.
+                    .toLocaleDateString(language === "en" ? undefined : locale),
+                })}
+                {r.decided_by ? t("brief.approver", { name: r.decided_by }) : ""}
+                {r.recorder?.email ? t("brief.recordedBy", { email: r.recorder.email }) : ""}
               </span>
             )}
             {!row && (
-              <p className="mt-2 text-xs text-[var(--color-ink-soft)]">
-                Pre-filled from the call and the eligibility rules. Check each field, then save.
-              </p>
+              <p className="mt-2 text-xs text-[var(--color-ink-soft)]">{t("brief.prefilled")}</p>
             )}
           </div>
         </form>

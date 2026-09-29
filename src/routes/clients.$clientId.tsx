@@ -10,6 +10,7 @@ import { useDocumentTitle } from "@/lib/use-document-title";
 import { extractProfile } from "@/server/profile.functions";
 import { assessProfile, nextGap, type ProfileFields } from "@/lib/profile-completeness";
 import { PipelineLog } from "@/components/PipelineLog";
+import { useI18n } from "@/lib/i18n";
 
 export const Route = createFileRoute("/clients/$clientId")({ component: ClientDetail });
 
@@ -43,6 +44,7 @@ type StoredProfile = {
   capability_domains: string[] | null;
   requires_go_decision: boolean | null;
   currency: string | null;
+  draft_language: string | null;
 };
 
 function toFields(profile: StoredProfile | null): ProfileFields {
@@ -61,6 +63,7 @@ function ClientDetail() {
   useRequireSession();
   const { clientId } = Route.useParams();
   const runExtraction = useServerFn(extractProfile);
+  const { t } = useI18n();
 
   const [client, setClient] = useState<ClientRow | null>(null);
   const [profile, setProfile] = useState<StoredProfile | null>(null);
@@ -104,7 +107,7 @@ function ClientDetail() {
           .select(
             "sectors, jurisdictions, stage, annual_budget, capabilities, beneficiaries, " +
               "reviewed_at, lead_time_weeks, funded_partner_pathway, partner_lead_time_weeks, " +
-              "capability_domains, requires_go_decision, currency",
+              "capability_domains, requires_go_decision, currency, draft_language",
           )
           .eq("client_id", clientId)
           .maybeSingle(),
@@ -214,30 +217,31 @@ function ClientDetail() {
       );
       if (lookupError) throw lookupError;
       if (!foundId) {
-        throw new Error(`No GrantDesk account uses ${email} yet — ask them to sign up first.`);
+        throw new Error(t("clients.noAccount", { email }));
       }
       if (foundId === client?.consultant_id) {
-        throw new Error(`${email} already owns this client.`);
+        throw new Error(t("clients.alreadyOwner", { email }));
       }
       if (foundId === myId) {
-        throw new Error("That's your own account.");
+        throw new Error(t("clients.ownAccount"));
       }
 
       const { error: insertError } = await supabase()
         .from("client_team_members")
         .insert({ client_id: clientId, user_id: foundId, added_by: myId });
       if (insertError) {
-        if (insertError.code === "23505") throw new Error(`${email} is already on this team.`);
+        if (insertError.code === "23505") throw new Error(t("clients.alreadyMember", { email }));
         throw insertError;
       }
       setTeammateEmail("");
       await load();
-      return `Added ${email}. They'll see this client next time they sign in.`;
+      return t("clients.added", { email });
     });
   }
 
   async function removeTeammate(member: TeamMember) {
-    const label = member.consultants?.display_name || member.consultants?.email || "this person";
+    const label =
+      member.consultants?.display_name || member.consultants?.email || t("clients.thisPerson");
     const leaving = member.user_id === myId;
     // Only for removing someone else — the list re-renders in added_at
     // order, not a stable screen position, so a click meant for one row can
@@ -245,7 +249,7 @@ function ClientDetail() {
     // cut off from a client's live drafts and matches by that misclick has
     // no undo; leaving yourself is the one case where a mistaken click is
     // still trivially reversible by whoever owns the client re-adding you.
-    if (!leaving && !window.confirm(`Remove ${label} from this client?`)) return;
+    if (!leaving && !window.confirm(t("clients.confirmRemove", { label }))) return;
     setTeam((current) => (current ?? []).filter((m) => m.user_id !== member.user_id));
     await run("team", async () => {
       const { error: deleteError } = await supabase()
@@ -257,7 +261,7 @@ function ClientDetail() {
         await load();
         throw deleteError;
       }
-      return leaving ? "You left this client." : `Removed ${label} from this client.`;
+      return leaving ? t("clients.left") : t("clients.removed", { label });
     });
   }
 
@@ -283,7 +287,7 @@ function ClientDetail() {
       // defeated by some future change to load()'s timing.
       // The person started typing: their words win over an unsolicited read.
       if (options.auto && touched.current) {
-        return "Skipped the automatic read — you started filling the profile in.";
+        return t("clients.skippedTyping");
       }
       if (options.auto) {
         const { data: existing } = await supabase()
@@ -291,7 +295,7 @@ function ClientDetail() {
           .select("client_id")
           .eq("client_id", clientId)
           .maybeSingle();
-        if (existing) return "Skipped the automatic read — a profile was already saved.";
+        if (existing) return t("clients.skippedExisting");
       }
 
       const result = await runExtraction({
@@ -301,7 +305,7 @@ function ClientDetail() {
       // Typing began while the page was being read: saving the extraction now
       // would remount the fields and throw that typing away.
       if (options.auto && touched.current) {
-        return "Read their site, but you had started typing, so nothing was changed. Use “Read the page again” to apply it.";
+        return t("clients.readButTyping");
       }
 
       const { profile: extracted, provenance } = result;
@@ -330,8 +334,8 @@ function ClientDetail() {
       // means — "ollama/phi4-mini" tells a consultant nothing about how hard
       // to check what it just wrote into their client's profile.
       return provenance.model.startsWith("ollama")
-        ? `Read from ${provenance.source}, but the usual models were unreachable so a small local one did it. Check every field before relying on this.`
-        : `Read from ${provenance.source} via ${provenance.model}. Check it before relying on it.`;
+        ? t("clients.readLocal", { source: provenance.source })
+        : t("clients.readVia", { source: provenance.source, model: provenance.model });
     });
   }
 
@@ -360,15 +364,15 @@ function ClientDetail() {
         if (!raw) return null;
         const n = Number(raw);
         if (!Number.isInteger(n) || n < 1 || n > 52) {
-          throw new Error(`${label} must be a whole number of weeks from 1 to 52.`);
+          throw new Error(t("clients.weeksInvalid", { label }));
         }
         return n;
       };
       if (Number.isNaN(budget)) {
-        throw new Error("Could not read the annual budget. Write it like 450000, 450,000 or 450k.");
+        throw new Error(t("clients.budgetInvalid"));
       }
-      const leadTime = weeks("leadTimeWeeks", "Lead time");
-      const partnerLeadTime = weeks("partnerLeadTimeWeeks", "Lead time as partner");
+      const leadTime = weeks("leadTimeWeeks", t("clients.weeksLeadTime"));
+      const partnerLeadTime = weeks("partnerLeadTimeWeeks", t("clients.weeksPartnerLeadTime"));
       const currency = text("currency").toUpperCase() || null;
       const { error: saveError } = await supabase()
         .from("client_profiles")
@@ -387,6 +391,7 @@ function ClientDetail() {
             funded_partner_pathway: form.get("fundedPartnerPathway") === "on",
             requires_go_decision: form.get("requiresGoDecision") === "on",
             capability_domains: list("capabilityDomains"),
+            draft_language: text("draftLanguage") === "fr" ? "fr" : "en",
             // A human just confirmed this, which is exactly what the field means.
             reviewed_at: new Date().toISOString(),
           },
@@ -394,7 +399,7 @@ function ClientDetail() {
         );
       if (saveError) throw saveError;
       await load();
-      return "Profile saved.";
+      return t("clients.profileSaved");
     });
   }
 
@@ -420,11 +425,11 @@ function ClientDetail() {
         await load();
         throw deleteError;
       }
-      return `Removed "${answer.label}". Future drafts will not use it.`;
+      return t("clients.forgotten", { label: answer.label });
     });
   }
 
-  useDocumentTitle(client?.name, "Client");
+  useDocumentTitle(client?.name, t("clients.client"));
   const fields = toFields(profile);
   const completeness = assessProfile(fields);
   const gap = nextGap(completeness);
@@ -432,21 +437,21 @@ function ClientDetail() {
   return (
     <main className="mx-auto max-w-3xl px-6 py-12">
       <Link to="/clients" className="text-sm text-[var(--color-accent)]">
-        ← All clients
+        {t("clients.back")}
       </Link>
-      <h1 className="mt-3 text-2xl font-semibold tracking-tight">{client?.name ?? "Client"}</h1>
+      <h1 className="mt-3 text-2xl font-semibold tracking-tight">
+        {client?.name ?? t("clients.client")}
+      </h1>
 
       <section className="mt-8 rounded-md border border-[var(--color-rule)] bg-[var(--color-surface)] p-4">
-        <h2 className="text-sm font-semibold">Fill the profile from their website</h2>
-        <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
-          Paste an About or Programs page. We read what it says and never invent what it does not.
-        </p>
+        <h2 className="text-sm font-semibold">{t("clients.fillTitle")}</h2>
+        <p className="mt-1 text-sm text-[var(--color-ink-soft)]">{t("clients.fillIntro")}</p>
         <form onSubmit={fillFromWebsite} className="mt-3 flex flex-wrap gap-2">
           <input
             name="sourceUrl"
             type="url"
             required
-            aria-label="Page to read"
+            aria-label={t("clients.pageToRead")}
             value={sourceUrl}
             onChange={(event) => setSourceUrl(event.target.value)}
             placeholder="https://example.org/about"
@@ -458,10 +463,10 @@ function ClientDetail() {
             className="rounded-md bg-[var(--color-accent-strong)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
           >
             {busy === "extract"
-              ? "Reading…"
+              ? t("clients.reading")
               : profile !== null
-                ? "Read the page again"
-                : "Read the page"}
+                ? t("clients.readAgain")
+                : t("clients.read")}
           </button>
         </form>
         {note && <p className="mt-3 text-sm text-[var(--color-ink-soft)]">{note}</p>}
@@ -474,7 +479,7 @@ function ClientDetail() {
 
       <section className="mt-8">
         <div className="flex items-baseline justify-between">
-          <h2 className="text-sm font-semibold">Profile</h2>
+          <h2 className="text-sm font-semibold">{t("clients.profile")}</h2>
           <span data-testid="completeness" className="font-mono text-sm tabular-nums">
             {completeness.score}/100
           </span>
@@ -499,54 +504,80 @@ function ClientDetail() {
           <fieldset className="contents">
             <EditField
               name="jurisdictions"
-              label="Operates in"
-              hint="Country or province codes, comma separated — CA, CA-ON, US"
+              label={t("clients.field.jurisdictions")}
+              hint={t("clients.field.jurisdictionsHint")}
               defaultValue={(fields.jurisdictions ?? []).join(", ")}
             />
             <EditField
               name="sectors"
-              label="Sectors"
-              hint="Comma separated — environment, education"
+              label={t("clients.field.sectors")}
+              hint={t("clients.field.sectorsHint")}
               defaultValue={(fields.sectors ?? []).join(", ")}
             />
             <EditField
               name="stage"
-              label="Stage"
-              hint="nonprofit, charity, startup, university…"
+              label={t("clients.field.stage")}
+              hint={t("clients.field.stageHint")}
               defaultValue={fields.stage ?? ""}
             />
             <EditField
               name="annualBudget"
-              label="Annual budget"
-              hint="Approximate — e.g. 450000 or 450k"
+              label={t("clients.field.annualBudget")}
+              hint={t("clients.field.annualBudgetHint")}
               defaultValue={fields.annualBudget ? String(fields.annualBudget) : ""}
             />
             <EditField
               name="currency"
-              label="Budget currency"
-              hint="CAD, USD, MXN, BRL"
+              label={t("clients.field.currency")}
+              hint={t("clients.field.currencyHint")}
               defaultValue={profile?.currency ?? ""}
             />
             <EditField
               name="leadTimeWeeks"
-              label="Lead time (weeks)"
-              hint="Weeks to write a credible application — blank uses 3"
+              label={t("clients.field.leadTime")}
+              hint={t("clients.field.leadTimeHint")}
               defaultValue={fields.leadTimeWeeks ? String(fields.leadTimeWeeks) : ""}
             />
             <EditField
               name="partnerLeadTimeWeeks"
-              label="Lead time as partner (weeks)"
-              hint="When a partner must apply as lead — blank uses 8"
+              label={t("clients.field.partnerLeadTime")}
+              hint={t("clients.field.partnerLeadTimeHint")}
               defaultValue={
                 profile?.partner_lead_time_weeks ? String(profile.partner_lead_time_weeks) : ""
               }
             />
             <EditField
               name="capabilityDomains"
-              label="Capability domains"
-              hint="Comma separated — supply chain, micro-credentials, smart cities"
+              label={t("clients.field.capabilityDomains")}
+              hint={t("clients.field.capabilityDomainsHint")}
               defaultValue={(profile?.capability_domains ?? []).join(", ")}
             />
+            <div className="bg-[var(--color-surface)] px-4 py-3">
+              <label
+                htmlFor="profile-draftLanguage"
+                className="text-xs uppercase tracking-wide text-[var(--color-ink-soft)]"
+              >
+                {t("clients.field.draftLanguage")}
+              </label>
+              <select
+                id="profile-draftLanguage"
+                name="draftLanguage"
+                data-testid="draft-language"
+                key={profile?.draft_language ?? "en"}
+                defaultValue={profile?.draft_language === "fr" ? "fr" : "en"}
+                aria-describedby="profile-draftLanguage-hint"
+                className="mt-1 w-full rounded-md border border-[var(--color-rule)] bg-[var(--color-paper)] px-2 py-1.5 text-sm"
+              >
+                <option value="en">English</option>
+                <option value="fr">Français</option>
+              </select>
+              <p
+                id="profile-draftLanguage-hint"
+                className="mt-1 text-xs text-[var(--color-ink-soft)]"
+              >
+                {t("clients.field.draftLanguageHint")}
+              </p>
+            </div>
             <div className="bg-[var(--color-surface)] px-4 py-3 sm:col-span-2">
               <label className="flex items-start gap-2 text-sm">
                 <input
@@ -557,8 +588,9 @@ function ClientDetail() {
                   className="mt-1"
                 />
                 <span>
-                  Can join as a <strong>funded partner</strong> — an eligible lead (usually a
-                  municipality) applies and writes this client into the budget as a paid partner.
+                  {t("clients.fundedPartnerBefore")}
+                  <strong>{t("clients.fundedPartnerStrong")}</strong>
+                  {t("clients.fundedPartnerAfter")}
                 </span>
               </label>
               <label className="mt-2 flex items-start gap-2 text-sm">
@@ -570,19 +602,20 @@ function ClientDetail() {
                   className="mt-1"
                 />
                 <span>
-                  Requires a <strong>leadership go / no-go</strong> on the Opportunity Brief before
-                  any drafting.
+                  {t("clients.goDecisionBefore")}
+                  <strong>{t("clients.goDecisionStrong")}</strong>
+                  {t("clients.goDecisionAfter")}
                 </span>
               </label>
             </div>
             <EditField
               name="capabilities"
-              label="Track record"
+              label={t("clients.field.capabilities")}
               defaultValue={fields.capabilities ?? ""}
             />
             <EditField
               name="beneficiaries"
-              label="Who benefits"
+              label={t("clients.field.beneficiaries")}
               defaultValue={fields.beneficiaries ?? ""}
             />
 
@@ -592,11 +625,11 @@ function ClientDetail() {
                 disabled={busy !== null}
                 className="rounded-md border border-[var(--color-rule)] px-3 py-1.5 text-sm font-medium disabled:opacity-50"
               >
-                {busy === "save" ? "Saving…" : "Save profile"}
+                {busy === "save" ? t("clients.saving") : t("clients.saveProfile")}
               </button>
               {busy === "extract" && (
                 <span className="ml-3 text-sm text-[var(--color-ink-soft)]" aria-live="polite">
-                  Reading their site. Typing here takes priority over what it finds.
+                  {t("clients.readingSite")}
                 </span>
               )}
             </div>
@@ -612,15 +645,11 @@ function ClientDetail() {
             {gap.prompt}
           </p>
         ) : (
-          <p className="mt-4 text-sm text-[var(--color-eligible)]">
-            Complete. This client is ready to match against.
-          </p>
+          <p className="mt-4 text-sm text-[var(--color-eligible)]">{t("clients.complete")}</p>
         )}
 
         <p data-testid="can-match" className="mt-3 text-sm text-[var(--color-ink-soft)]">
-          {completeness.canMatch
-            ? "Ready to match."
-            : "Matching is off until the required fields are filled — otherwise we cannot rule out what this client is ineligible for."}
+          {completeness.canMatch ? t("clients.readyToMatch") : t("clients.matchingOff")}
         </p>
 
         {/* The link appears only once matching would actually mean something.
@@ -633,22 +662,21 @@ function ClientDetail() {
             data-testid="to-matches"
             className="mt-4 inline-block rounded-md bg-[var(--color-accent-strong)] px-4 py-2 text-sm font-medium text-white"
           >
-            Find what they can apply for →
+            {t("clients.toMatches")}
           </Link>
         )}
       </section>
 
       <section className="mt-10" data-testid="team">
-        <h2 className="text-sm font-semibold">Who has access</h2>
+        <h2 className="text-sm font-semibold">{t("clients.teamTitle")}</h2>
         <p className="mt-1 max-w-prose text-sm text-[var(--color-ink-soft)]">
-          Everyone here sees the same matches, drafts and submissions for this client — a shared
-          desk, not separate copies.
+          {t("clients.teamIntro")}
         </p>
 
         <ul className="mt-3 flex flex-col gap-px overflow-hidden rounded-md border border-[var(--color-rule)] bg-[var(--color-rule)]">
           <li className="flex items-center justify-between bg-[var(--color-surface)] px-4 py-3 text-sm">
-            <span>{client?.consultant_id === myId ? "You" : "The owner"}</span>
-            <span className="text-xs text-[var(--color-ink-soft)]">Owner</span>
+            <span>{client?.consultant_id === myId ? t("clients.you") : t("clients.theOwner")}</span>
+            <span className="text-xs text-[var(--color-ink-soft)]">{t("clients.owner")}</span>
           </li>
           {(team ?? []).map((member) => (
             <li
@@ -658,8 +686,10 @@ function ClientDetail() {
             >
               <span>
                 {member.user_id === myId
-                  ? "You"
-                  : member.consultants?.display_name || member.consultants?.email || "Unknown"}
+                  ? t("clients.you")
+                  : member.consultants?.display_name ||
+                    member.consultants?.email ||
+                    t("clients.unknown")}
               </span>
               {/* Anyone may leave; only the owner may remove someone else — a
                   member who could remove other members could quietly narrow
@@ -671,7 +701,7 @@ function ClientDetail() {
                   data-testid="remove-teammate"
                   className="text-xs text-[var(--color-ineligible)]"
                 >
-                  {member.user_id === myId ? "Leave" : "Remove"}
+                  {member.user_id === myId ? t("clients.leave") : t("clients.remove")}
                 </button>
               )}
             </li>
@@ -683,7 +713,7 @@ function ClientDetail() {
             <input
               type="email"
               name="teammateEmail"
-              aria-label="Colleague's email address"
+              aria-label={t("clients.colleagueEmail")}
               value={teammateEmail}
               onChange={(event) => setTeammateEmail(event.target.value)}
               placeholder="colleague@yourfirm.com"
@@ -695,7 +725,7 @@ function ClientDetail() {
               data-testid="add-teammate"
               className="rounded-md border border-[var(--color-rule)] px-3 py-2 text-sm font-medium disabled:opacity-50"
             >
-              Add to this client
+              {t("clients.addToClient")}
             </button>
           </form>
         )}
@@ -703,10 +733,9 @@ function ClientDetail() {
 
       {answers !== null && answers.length > 0 && (
         <section className="mt-10" data-testid="answer-library">
-          <h2 className="text-sm font-semibold">Answers kept for this client</h2>
+          <h2 className="text-sm font-semibold">{t("clients.answersTitle")}</h2>
           <p className="mt-1 max-w-prose text-sm text-[var(--color-ink-soft)]">
-            Every draft for this client is written from these. They are approved facts, not notes —
-            so anything wrong in here reappears in proposal after proposal until it is removed.
+            {t("clients.answersIntro")}
           </p>
           <ul className="mt-3 flex flex-col gap-px overflow-hidden rounded-md border border-[var(--color-rule)] bg-[var(--color-rule)]">
             {answers.map((answer) => (
@@ -715,8 +744,10 @@ function ClientDetail() {
                   <span className="text-sm font-medium">{answer.label}</span>
                   <span className="shrink-0 text-xs text-[var(--color-ink-soft)]">
                     {answer.times_used === 0
-                      ? "not used yet"
-                      : `used ${answer.times_used} time${answer.times_used === 1 ? "" : "s"}`}
+                      ? t("clients.notUsed")
+                      : t(answer.times_used === 1 ? "clients.usedOne" : "clients.usedOther", {
+                          count: answer.times_used,
+                        })}
                   </span>
                 </div>
                 <p className="mt-1 line-clamp-2 text-sm text-[var(--color-ink-soft)]">
@@ -728,7 +759,7 @@ function ClientDetail() {
                   data-testid="forget-answer"
                   className="mt-2 text-xs text-[var(--color-ineligible)]"
                 >
-                  Remove from future drafts
+                  {t("clients.forget")}
                 </button>
               </li>
             ))}
