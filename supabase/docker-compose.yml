@@ -53,6 +53,18 @@ services:
       GOTRUE_URI_ALLOW_LIST: ""
       GOTRUE_DISABLE_SIGNUP: "false"
       GOTRUE_EXTERNAL_EMAIL_ENABLED: "true"
+      # SSO is off until real OAuth credentials exist — see docs/auth-sso.md.
+      # Uncomment, fill in, add http://localhost:5180/auth to
+      # GOTRUE_URI_ALLOW_LIST, and set VITE_AUTH_GOOGLE / VITE_AUTH_AZURE=1.
+      # GOTRUE_EXTERNAL_GOOGLE_ENABLED: "true"
+      # GOTRUE_EXTERNAL_GOOGLE_CLIENT_ID: ""
+      # GOTRUE_EXTERNAL_GOOGLE_SECRET: ""
+      # GOTRUE_EXTERNAL_GOOGLE_REDIRECT_URI: http://localhost:15535/auth/v1/callback
+      # GOTRUE_EXTERNAL_AZURE_ENABLED: "true"
+      # GOTRUE_EXTERNAL_AZURE_CLIENT_ID: ""
+      # GOTRUE_EXTERNAL_AZURE_SECRET: ""
+      # GOTRUE_EXTERNAL_AZURE_REDIRECT_URI: http://localhost:15535/auth/v1/callback
+      # GOTRUE_EXTERNAL_AZURE_URL: https://login.microsoftonline.com/common
       GOTRUE_MAILER_AUTOCONFIRM: "true"
       GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
       GOTRUE_JWT_EXP: 3600

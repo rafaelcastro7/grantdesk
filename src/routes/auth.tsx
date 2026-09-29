@@ -4,6 +4,9 @@ import { supabase } from "@/lib/supabase";
 import { useEffect, useState } from "react";
 import { useDocumentTitle } from "@/lib/use-document-title";
 import { getTenantBranding, resolveTenantSlug, type TenantBranding } from "@/lib/tenant";
+import { enabledSsoProviders, readSsoCallback, SSO_LABELS, type SsoProvider } from "@/lib/sso";
+
+const SSO_PROVIDERS = enabledSsoProviders(import.meta.env);
 
 export const Route = createFileRoute("/auth")({ component: AuthPage });
 
@@ -34,6 +37,33 @@ function AuthPage() {
       ),
     );
   }, []);
+
+  // The OAuth provider sends the visitor back here; exchange the code once and
+  // move on, or say why it failed rather than showing a blank sign-in form.
+  useEffect(() => {
+    const callback = readSsoCallback(window.location.search, window.location.hash);
+    if (callback.kind === "none") return;
+    window.history.replaceState(null, "", window.location.pathname);
+    if (callback.kind === "error") {
+      setError(callback.message);
+      return;
+    }
+    void run("sso", async () => {
+      const { error: exchangeError } = await supabase().auth.exchangeCodeForSession(callback.code);
+      if (exchangeError) throw exchangeError;
+      await navigate({ to: "/clients" });
+    });
+  }, [navigate, run, setError]);
+
+  async function signInWith(provider: SsoProvider) {
+    await run(provider, async () => {
+      const { error: oauthError } = await supabase().auth.signInWithOAuth({
+        provider,
+        options: { redirectTo: `${window.location.origin}/auth` },
+      });
+      if (oauthError) throw oauthError;
+    });
+  }
 
   async function submit(form: HTMLFormElement, mode: "signin" | "signup") {
     const data = new FormData(form);
@@ -150,6 +180,22 @@ function AuthPage() {
           </button>
         </div>
       </form>
+
+      {SSO_PROVIDERS.length > 0 && (
+        <div className="mt-6 flex flex-col gap-2 border-t border-[var(--color-rule)] pt-6">
+          {SSO_PROVIDERS.map((provider) => (
+            <button
+              key={provider}
+              type="button"
+              disabled={busy !== null}
+              onClick={() => void signInWith(provider)}
+              className="rounded-md border border-[var(--color-rule)] px-4 py-2 text-sm disabled:opacity-50"
+            >
+              {busy === provider ? "Redirecting…" : SSO_LABELS[provider]}
+            </button>
+          ))}
+        </div>
+      )}
     </main>
   );
 }

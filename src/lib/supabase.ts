@@ -22,7 +22,14 @@ export function supabase(): SupabaseClient {
     );
   }
   client = createClient(url, anonKey, {
-    auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false },
+    // PKCE so an OAuth return carries a one-time `?code=` that /auth exchanges
+    // explicitly, instead of tokens in the URL hash picked up implicitly.
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: false,
+      flowType: "pkce",
+    },
   });
   return client;
 }
