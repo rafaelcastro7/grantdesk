@@ -66,7 +66,11 @@ export function contentHash(text: string): string {
   return createHash("sha256").update(text).digest("hex");
 }
 
-export async function embed(texts: string[], model: string = EMBED_MODEL): Promise<number[][]> {
+export async function embed(
+  texts: string[],
+  model: string = EMBED_MODEL,
+  timeoutMs = 300_000,
+): Promise<number[][]> {
   const env = serverEnv();
   const out: number[][] = [];
 
@@ -82,7 +86,7 @@ export async function embed(texts: string[], model: string = EMBED_MODEL): Promi
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ model, input: chunk }),
-      signal: AbortSignal.timeout(300_000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     if (!response.ok) {
       throw new Error(`embedding failed: HTTP ${response.status} from ${env.OLLAMA_BASE_URL}`);
@@ -106,8 +110,13 @@ export async function embed(texts: string[], model: string = EMBED_MODEL): Promi
   return out;
 }
 
+/**
+ * One short text, for a request a person is waiting on. Twenty seconds, not
+ * the batch job's five minutes: a query embed that slow means the embedder is
+ * down, and callers already degrade to word matching when this throws.
+ */
 export async function embedOne(text: string, model: string = EMBED_MODEL): Promise<number[]> {
-  const [vector] = await embed([text], model);
+  const [vector] = await embed([text], model, 20_000);
   if (!vector) throw new Error("the embedder returned no vector");
   return vector;
 }
@@ -122,6 +131,23 @@ export function grantText(grant: {
     .filter((part) => !!part && String(part).trim().length > 0)
     .join("\n\n")
     .slice(0, 8000);
+}
+
+async function readAll<T>(
+  page: (
+    from: number,
+    to: number,
+  ) => PromiseLike<{ data: unknown[] | null; error: { message: string } | null }>,
+  max: number,
+): Promise<T[]> {
+  const out: T[] = [];
+  for (let from = 0; out.length < max; from += 1000) {
+    const { data, error } = await page(from, from + 999);
+    if (error) throw new Error(`could not read for embedding: ${error.message}`);
+    out.push(...((data ?? []) as T[]));
+    if ((data ?? []).length < 1000) break;
+  }
+  return out.slice(0, max);
 }
 
 export type EmbedCatalogResult = {
@@ -140,29 +166,37 @@ export async function embedCatalog(
   supabase: SupabaseClient,
   options: { limit?: number } = {},
 ): Promise<EmbedCatalogResult> {
-  const { data: grants, error } = await supabase
-    .from("grants")
-    .select("id, title, summary, eligibility_note")
-    .eq("status", "open")
-    .limit(options.limit ?? 5000);
-  if (error) throw new Error(`could not read grants: ${error.message}`);
-
-  const rows = (grants ?? []) as Array<{
+  type GrantRow = {
     id: string;
     title: string;
     summary: string | null;
     eligibility_note: string | null;
-  }>;
-
-  const { data: existing } = await supabase
-    .from("grant_embeddings")
-    .select("grant_id, content_hash");
-  const known = new Map(
-    ((existing ?? []) as Array<{ grant_id: string; content_hash: string }>).map((r) => [
-      r.grant_id,
-      r.content_hash,
-    ]),
+  };
+  // Paged and ordered: an unordered .limit() returns an arbitrary subset, and
+  // a hosted row cap would silently leave the rest of the catalog unembedded.
+  const rows = await readAll<GrantRow>(
+    (from, to) =>
+      supabase
+        .from("grants")
+        .select("id, title, summary, eligibility_note")
+        .eq("status", "open")
+        .order("id")
+        .range(from, to),
+    options.limit ?? 50_000,
   );
+
+  // A failed read here used to look like "nothing embedded yet" and
+  // re-embedded the entire catalog — an hour of CPU on this machine.
+  const existing = await readAll<{ grant_id: string; content_hash: string }>(
+    (from, to) =>
+      supabase
+        .from("grant_embeddings")
+        .select("grant_id, content_hash")
+        .order("grant_id")
+        .range(from, to),
+    Number.POSITIVE_INFINITY,
+  );
+  const known = new Map(existing.map((r) => [r.grant_id, r.content_hash]));
 
   const stale = rows
     .map((row) => ({ row, text: grantText(row), hash: contentHash(grantText(row)) }))

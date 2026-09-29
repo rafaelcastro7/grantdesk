@@ -24,18 +24,6 @@ function safeUrl(url: string | undefined): string | null {
   }
 }
 
-export interface EmailOutboxRow {
-  id?: string;
-  tenant_id?: string;
-  recipient_email: string;
-  subject: string;
-  body_html: string;
-  kind: "new_grant_match" | "deadline_reminder" | "system_alert";
-  grant_id?: string | null;
-  client_id?: string | null;
-  status?: "pending" | "sent" | "failed";
-}
-
 /**
  * Creates HTML template for a newly discovered grant matching a client.
  */
@@ -201,7 +189,11 @@ export async function scanAndAlertNewGrants({
   if (!clients) return { queued: 0 };
 
   // Fetch consultant emails
-  const { data: consultants } = await supabase.from("consultants").select("id, email");
+  const { data: consultants, error: consultantError } = await supabase
+    .from("consultants")
+    .select("id, email");
+  // An empty map would queue nothing and look like a quiet day.
+  if (consultantError) throw new Error(`could not read recipients: ${consultantError.message}`);
   const emailMap = new Map(
     (consultants ?? []).map((c: { id: string; email: string }) => [c.id, c.email]),
   );
@@ -314,7 +306,10 @@ export async function scanAndAlertNewGrants({
           status: "pending",
         });
 
+        // 23505 is the daily dedup index doing its job; anything else is real.
         if (!insertErr) queued++;
+        else if (insertErr.code !== "23505")
+          throw new Error(`could not queue alert: ${insertErr.message}`);
       }
     }
   }
@@ -361,7 +356,11 @@ export async function scanAndAlertDeadlines({
     ),
   );
 
-  const { data: consultants } = await supabase.from("consultants").select("id, email");
+  const { data: consultants, error: consultantError } = await supabase
+    .from("consultants")
+    .select("id, email");
+  // An empty map would queue nothing and look like a quiet day.
+  if (consultantError) throw new Error(`could not read recipients: ${consultantError.message}`);
   const emailMap = new Map(
     (consultants ?? []).map((c: { id: string; email: string }) => [c.id, c.email]),
   );
@@ -423,6 +422,8 @@ export async function scanAndAlertDeadlines({
     });
 
     if (!insertErr) queued++;
+    else if (insertErr.code !== "23505")
+      throw new Error(`could not queue reminder: ${insertErr.message}`);
   }
 
   return { queued };

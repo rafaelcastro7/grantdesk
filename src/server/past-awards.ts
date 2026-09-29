@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { catalogWriter } from "./caller";
 
 /**
  * Who has won this program before.
@@ -163,21 +164,30 @@ export async function loadPastAwards(
   const awards = await fetchPastAwards(listing);
 
   if (awards.length > 0) {
-    await supabase.from("past_awards").upsert(
-      awards.map((award) => ({
-        funder_id: grant.funder_id,
-        grant_id: grant.id,
-        recipient_name: award.recipientName,
-        amount: award.amount,
-        awarded_on: award.awardedOn,
-        recipient_location: award.location,
-        assistance_listing: listing,
-        fetched_at: new Date().toISOString(),
-        source_key: SOURCE_KEY,
-        source_hash: createHash("sha256").update(`${SOURCE_KEY}:${award.externalId}`).digest("hex"),
-      })),
-      { onConflict: "source_hash" },
-    );
+    // Shared catalog data: consultants may read it, only the server writes it.
+    // Written as the caller, this upsert was silently refused by RLS, so the
+    // cache above never filled and every view paid USAspending again.
+    const { error: cacheError } = await catalogWriter()
+      .from("past_awards")
+      .upsert(
+        awards.map((award) => ({
+          funder_id: grant.funder_id,
+          grant_id: grant.id,
+          recipient_name: award.recipientName,
+          amount: award.amount,
+          awarded_on: award.awardedOn,
+          recipient_location: award.location,
+          assistance_listing: listing,
+          fetched_at: new Date().toISOString(),
+          source_key: SOURCE_KEY,
+          source_hash: createHash("sha256")
+            .update(`${SOURCE_KEY}:${award.externalId}`)
+            .digest("hex"),
+        })),
+        { onConflict: "source_hash" },
+      );
+    // The answer is still correct without the cache; say so in the log.
+    if (cacheError) console.warn(`past_awards cache write failed: ${cacheError.message}`);
   }
 
   return { known: true, listing, awards };

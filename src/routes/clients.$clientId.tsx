@@ -4,6 +4,8 @@ import { useServerFn } from "@tanstack/react-start";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { accessToken } from "@/lib/session";
+import { parseMoney } from "@/lib/parse-money";
+import { useRequireSession } from "@/lib/use-require-session";
 import { extractProfile } from "@/server/profile.functions";
 import { assessProfile, nextGap, type ProfileFields } from "@/lib/profile-completeness";
 import { PipelineLog } from "@/components/PipelineLog";
@@ -39,6 +41,7 @@ type StoredProfile = {
   partner_lead_time_weeks: number | null;
   capability_domains: string[] | null;
   requires_go_decision: boolean | null;
+  currency: string | null;
 };
 
 function toFields(profile: StoredProfile | null): ProfileFields {
@@ -54,6 +57,7 @@ function toFields(profile: StoredProfile | null): ProfileFields {
 }
 
 function ClientDetail() {
+  useRequireSession();
   const { clientId } = Route.useParams();
   const runExtraction = useServerFn(extractProfile);
 
@@ -99,7 +103,7 @@ function ClientDetail() {
           .select(
             "sectors, jurisdictions, stage, annual_budget, capabilities, beneficiaries, " +
               "reviewed_at, lead_time_weeks, funded_partner_pathway, partner_lead_time_weeks, " +
-              "capability_domains, requires_go_decision",
+              "capability_domains, requires_go_decision, currency",
           )
           .eq("client_id", clientId)
           .maybeSingle(),
@@ -336,9 +340,24 @@ function ClientDetail() {
         .filter(Boolean);
 
     await run("save", async () => {
-      const budget = Number(text("annualBudget").replace(/[,\s$]/g, ""));
-      const leadTime = Number(text("leadTimeWeeks"));
-      const partnerLeadTime = Number(text("partnerLeadTimeWeeks"));
+      const budget = parseMoney(text("annualBudget"));
+      // Weeks: empty means "not set"; anything else must be a whole 1–52, or
+      // the save is refused with the reason instead of storing nothing.
+      const weeks = (key: string, label: string) => {
+        const raw = text(key);
+        if (!raw) return null;
+        const n = Number(raw);
+        if (!Number.isInteger(n) || n < 1 || n > 52) {
+          throw new Error(`${label} must be a whole number of weeks from 1 to 52.`);
+        }
+        return n;
+      };
+      if (Number.isNaN(budget)) {
+        throw new Error("Could not read the annual budget. Write it like 450000, 450,000 or 450k.");
+      }
+      const leadTime = weeks("leadTimeWeeks", "Lead time");
+      const partnerLeadTime = weeks("partnerLeadTimeWeeks", "Lead time as partner");
+      const currency = text("currency").toUpperCase() || null;
       const { error: saveError } = await supabase()
         .from("client_profiles")
         .upsert(
@@ -347,21 +366,12 @@ function ClientDetail() {
             sectors: list("sectors"),
             jurisdictions: list("jurisdictions").map((j) => j.toUpperCase()),
             stage: text("stage") || null,
-            // An unreadable number is left unset rather than stored as zero,
-            // which the scale rule would read as a real budget of nothing.
-            annual_budget: Number.isFinite(budget) && budget > 0 ? budget : null,
+            annual_budget: budget && budget > 0 ? budget : null,
+            currency,
             capabilities: text("capabilities") || null,
             beneficiaries: text("beneficiaries") || null,
-            // Left unset rather than clamped: the column's own 0-52 check
-            // constraint is the actual bound, and clamping a typo like "520"
-            // to 52 here would silently save a number the consultant never
-            // typed rather than telling them the save failed.
-            lead_time_weeks:
-              Number.isFinite(leadTime) && leadTime > 0 && leadTime <= 52 ? leadTime : null,
-            partner_lead_time_weeks:
-              Number.isFinite(partnerLeadTime) && partnerLeadTime > 0 && partnerLeadTime <= 52
-                ? partnerLeadTime
-                : null,
+            lead_time_weeks: leadTime,
+            partner_lead_time_weeks: partnerLeadTime,
             funded_partner_pathway: form.get("fundedPartnerPathway") === "on",
             requires_go_decision: form.get("requiresGoDecision") === "on",
             capability_domains: list("capabilityDomains"),
@@ -465,100 +475,116 @@ function ClientDetail() {
         <form
           onSubmit={saveProfile}
           data-testid="profile-form"
+          aria-busy={busy === "extract"}
           className="mt-3 grid gap-px overflow-hidden rounded-md border border-[var(--color-rule)] bg-[var(--color-rule)] sm:grid-cols-2"
         >
-          <EditField
-            name="jurisdictions"
-            label="Operates in"
-            hint="Country or province codes, comma separated — CA, CA-ON, US"
-            defaultValue={(fields.jurisdictions ?? []).join(", ")}
-          />
-          <EditField
-            name="sectors"
-            label="Sectors"
-            hint="Comma separated — environment, education"
-            defaultValue={(fields.sectors ?? []).join(", ")}
-          />
-          <EditField
-            name="stage"
-            label="Stage"
-            hint="nonprofit, charity, startup, university…"
-            defaultValue={fields.stage ?? ""}
-          />
-          <EditField
-            name="annualBudget"
-            label="Annual budget"
-            hint="Approximate, in their own currency"
-            defaultValue={fields.annualBudget ? String(fields.annualBudget) : ""}
-          />
-          <EditField
-            name="leadTimeWeeks"
-            label="Lead time"
-            hint="Weeks this client usually needs to write a credible application"
-            defaultValue={fields.leadTimeWeeks ? String(fields.leadTimeWeeks) : ""}
-          />
-          <EditField
-            name="partnerLeadTimeWeeks"
-            label="Lead time as partner"
-            hint="Weeks needed when a partner must apply as lead (default 8)"
-            defaultValue={
-              profile?.partner_lead_time_weeks ? String(profile.partner_lead_time_weeks) : ""
-            }
-          />
-          <EditField
-            name="capabilityDomains"
-            label="Capability domains"
-            hint="Comma separated — supply chain, micro-credentials, smart cities"
-            defaultValue={(profile?.capability_domains ?? []).join(", ")}
-          />
-          <div className="bg-[var(--color-surface)] px-4 py-3 sm:col-span-2">
-            <label className="flex items-start gap-2 text-sm">
-              <input
-                type="checkbox"
-                name="fundedPartnerPathway"
-                key={String(profile?.funded_partner_pathway ?? false)}
-                defaultChecked={profile?.funded_partner_pathway ?? false}
-                className="mt-1"
-              />
-              <span>
-                Can join as a <strong>funded partner</strong> — an eligible lead (usually a
-                municipality) applies and writes this client into the budget as a paid partner.
-              </span>
-            </label>
-            <label className="mt-2 flex items-start gap-2 text-sm">
-              <input
-                type="checkbox"
-                name="requiresGoDecision"
-                key={String(profile?.requires_go_decision ?? false)}
-                defaultChecked={profile?.requires_go_decision ?? false}
-                className="mt-1"
-              />
-              <span>
-                Requires a <strong>leadership go / no-go</strong> on the Opportunity Brief before
-                any drafting.
-              </span>
-            </label>
-          </div>
-          <EditField
-            name="capabilities"
-            label="Track record"
-            defaultValue={fields.capabilities ?? ""}
-          />
-          <EditField
-            name="beneficiaries"
-            label="Who benefits"
-            defaultValue={fields.beneficiaries ?? ""}
-          />
+          {/* Locked while their site is being read: the read replaces these
+              fields when it lands, and typing meanwhile would be wiped. */}
+          <fieldset disabled={busy === "extract"} className="contents">
+            <EditField
+              name="jurisdictions"
+              label="Operates in"
+              hint="Country or province codes, comma separated — CA, CA-ON, US"
+              defaultValue={(fields.jurisdictions ?? []).join(", ")}
+            />
+            <EditField
+              name="sectors"
+              label="Sectors"
+              hint="Comma separated — environment, education"
+              defaultValue={(fields.sectors ?? []).join(", ")}
+            />
+            <EditField
+              name="stage"
+              label="Stage"
+              hint="nonprofit, charity, startup, university…"
+              defaultValue={fields.stage ?? ""}
+            />
+            <EditField
+              name="annualBudget"
+              label="Annual budget"
+              hint="Approximate — e.g. 450000 or 450k"
+              defaultValue={fields.annualBudget ? String(fields.annualBudget) : ""}
+            />
+            <EditField
+              name="currency"
+              label="Budget currency"
+              hint="CAD, USD, MXN, BRL"
+              defaultValue={profile?.currency ?? ""}
+            />
+            <EditField
+              name="leadTimeWeeks"
+              label="Lead time (weeks)"
+              hint="Weeks to write a credible application — blank uses 3"
+              defaultValue={fields.leadTimeWeeks ? String(fields.leadTimeWeeks) : ""}
+            />
+            <EditField
+              name="partnerLeadTimeWeeks"
+              label="Lead time as partner (weeks)"
+              hint="When a partner must apply as lead — blank uses 8"
+              defaultValue={
+                profile?.partner_lead_time_weeks ? String(profile.partner_lead_time_weeks) : ""
+              }
+            />
+            <EditField
+              name="capabilityDomains"
+              label="Capability domains"
+              hint="Comma separated — supply chain, micro-credentials, smart cities"
+              defaultValue={(profile?.capability_domains ?? []).join(", ")}
+            />
+            <div className="bg-[var(--color-surface)] px-4 py-3 sm:col-span-2">
+              <label className="flex items-start gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  name="fundedPartnerPathway"
+                  key={String(profile?.funded_partner_pathway ?? false)}
+                  defaultChecked={profile?.funded_partner_pathway ?? false}
+                  className="mt-1"
+                />
+                <span>
+                  Can join as a <strong>funded partner</strong> — an eligible lead (usually a
+                  municipality) applies and writes this client into the budget as a paid partner.
+                </span>
+              </label>
+              <label className="mt-2 flex items-start gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  name="requiresGoDecision"
+                  key={String(profile?.requires_go_decision ?? false)}
+                  defaultChecked={profile?.requires_go_decision ?? false}
+                  className="mt-1"
+                />
+                <span>
+                  Requires a <strong>leadership go / no-go</strong> on the Opportunity Brief before
+                  any drafting.
+                </span>
+              </label>
+            </div>
+            <EditField
+              name="capabilities"
+              label="Track record"
+              defaultValue={fields.capabilities ?? ""}
+            />
+            <EditField
+              name="beneficiaries"
+              label="Who benefits"
+              defaultValue={fields.beneficiaries ?? ""}
+            />
 
-          <div className="bg-[var(--color-surface)] px-4 py-3 sm:col-span-2">
-            <button
-              type="submit"
-              disabled={busy !== null}
-              className="rounded-md border border-[var(--color-rule)] px-3 py-1.5 text-sm font-medium disabled:opacity-50"
-            >
-              {busy === "save" ? "Saving…" : "Save profile"}
-            </button>
-          </div>
+            <div className="bg-[var(--color-surface)] px-4 py-3 sm:col-span-2">
+              <button
+                type="submit"
+                disabled={busy !== null}
+                className="rounded-md border border-[var(--color-rule)] px-3 py-1.5 text-sm font-medium disabled:opacity-50"
+              >
+                {busy === "save" ? "Saving…" : "Save profile"}
+              </button>
+              {busy === "extract" && (
+                <span className="ml-3 text-sm text-[var(--color-ink-soft)]" aria-live="polite">
+                  Reading their site — the fields unlock when it finishes.
+                </span>
+              )}
+            </div>
+          </fieldset>
         </form>
 
         {/* One concrete question, not a list of six gaps: a list gets ignored. */}
@@ -641,6 +667,7 @@ function ClientDetail() {
             <input
               type="email"
               name="teammateEmail"
+              aria-label="Colleague's email address"
               value={teammateEmail}
               onChange={(event) => setTeammateEmail(event.target.value)}
               placeholder="colleague@yourfirm.com"

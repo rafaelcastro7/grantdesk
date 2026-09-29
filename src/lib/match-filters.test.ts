@@ -16,6 +16,7 @@ function row(over: {
   amount?: number | null;
   role?: string;
   fit?: "pass" | "unknown";
+  currency?: string;
 }): FilterableMatch {
   return {
     grants: {
@@ -24,6 +25,7 @@ function row(over: {
       country: over.country ?? "CA",
       amount_max: over.amount ?? null,
       amount_min: null,
+      currency: over.currency ?? "CAD",
       deadline: over.deadline === undefined ? "2026-12-31" : over.deadline,
       funders: { name: "Funder" },
     },
@@ -62,10 +64,31 @@ describe("match filters", () => {
   it("drops calls with no published amount when a minimum is set", () => {
     const rows = [row({ title: "big", amount: 100000 }), row({ title: "unknown", amount: null })];
     expect(
-      applyMatchFilters(rows, { ...DEFAULT_MATCH_FILTERS, minAmount: 50000 }, opts).map(
+      applyMatchFilters(
+        rows,
+        { ...DEFAULT_MATCH_FILTERS, minAmount: 50000, currency: "CAD" },
+        opts,
+      ).map((r) => r.grants?.title),
+    ).toEqual(["big"]);
+  });
+
+  it("never compares amounts across currencies", () => {
+    const rows = [
+      row({ title: "mxn", amount: 500000, currency: "MXN" }),
+      row({ title: "cad", amount: 100000, currency: "CAD" }),
+    ];
+    expect(
+      applyMatchFilters(
+        rows,
+        { ...DEFAULT_MATCH_FILTERS, minAmount: 200000, currency: "CAD" },
+        opts,
+      ).map((r) => r.grants?.title),
+    ).toEqual([]);
+    expect(
+      applyMatchFilters(rows, { ...DEFAULT_MATCH_FILTERS, sort: "amount" }, opts).map(
         (r) => r.grants?.title,
       ),
-    ).toEqual(["big"]);
+    ).toEqual(["cad", "mxn"]);
   });
 
   it("separates lead from funded-partner calls", () => {

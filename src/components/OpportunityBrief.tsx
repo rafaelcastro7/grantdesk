@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { errorMessage } from "@/lib/error-message";
 import { draftingGate, fromRow, type Decision, type DraftingGate } from "@/lib/go-decision";
+import { parseMoney } from "@/lib/parse-money";
 
 type BriefRow = {
   role: "lead" | "funded_partner" | "other" | null;
@@ -88,6 +89,7 @@ export function OpportunityBrief({
   onGate,
   prefill,
   locked = false,
+  ready = true,
 }: {
   clientId: string;
   grantId: string;
@@ -96,6 +98,8 @@ export function OpportunityBrief({
   prefill: BriefPrefill;
   /** After submission the record must match what was sent. */
   locked?: boolean;
+  /** False while the call is still being read; a new brief waits for it. */
+  ready?: boolean;
 }) {
   const [row, setRow] = useState<BriefRow | null>(null);
   const [required, setRequired] = useState(false);
@@ -168,10 +172,24 @@ export function OpportunityBrief({
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const text = (key: string) => String(form.get(key) ?? "").trim() || null;
-    const money = (key: string) => {
-      const value = Number(String(form.get(key) ?? "").replace(/[,\s$]/g, ""));
-      return String(form.get(key) ?? "").trim() && Number.isFinite(value) ? value : null;
+    const unreadable: string[] = [];
+    const money = (key: string, label: string) => {
+      const value = parseMoney(String(form.get(key) ?? ""));
+      if (Number.isNaN(value)) unreadable.push(label);
+      return value !== null && Number.isFinite(value) ? value : null;
     };
+    const amounts = {
+      request_amount: money("requestAmount", "Request amount"),
+      net_revenue: money("netRevenue", "Net revenue"),
+      match_required: money("matchRequired", "Match required"),
+      in_kind_cap: money("inKindCap", "In-kind cap"),
+    };
+    if (unreadable.length > 0) {
+      setFailure(
+        `Not saved — could not read ${unreadable.join(", ")}. Write amounts like 50000, 50,000 or 50k.`,
+      );
+      return;
+    }
     const decision = (text("decision") ?? "pending") as Decision;
 
     setSaving(true);
@@ -190,10 +208,7 @@ export function OpportunityBrief({
             application_structure: text("applicationStructure"),
             strategic_angle: text("strategicAngle"),
             mandatory_components: text("mandatoryComponents"),
-            request_amount: money("requestAmount"),
-            net_revenue: money("netRevenue"),
-            match_required: money("matchRequired"),
-            in_kind_cap: money("inKindCap"),
+            ...amounts,
             cash_match_confirmed: form.get("cashMatchConfirmed") === "on",
             risks: text("risks"),
             recommendation: text("recommendation"),
@@ -256,11 +271,10 @@ export function OpportunityBrief({
     mandatory_components: prefill.mandatoryComponents || null,
     risks: prefill.risks || null,
   };
-  // Re-keyed when the pre-fill arrives late (requirements are read after the
-  // brief loads), so the uncontrolled fields pick it up.
-  const k = row
-    ? `saved-${row.updated_at}`
-    : `new-${roleFromRules ?? ""}-${prefill.mandatoryComponents.length}`;
+  // Keyed only on the saved version. A new brief is rendered once, after the
+  // call has been read, so nothing arriving later can remount it under the
+  // consultant's typing.
+  const k = row ? `saved-${row.updated_at}` : "new";
   const unit = prefill.currency ?? "currency not published";
 
   return (
@@ -282,127 +296,134 @@ export function OpportunityBrief({
           : "One page for whoever signs off. Optional for this client — drafting is not locked on it."}
       </p>
 
-      <form
-        key={k}
-        onSubmit={save}
-        className="mt-3 grid gap-px overflow-hidden rounded-md border border-[var(--color-rule)] bg-[var(--color-rule)] sm:grid-cols-2"
-      >
-        <Choice
-          name="role"
-          label="Role"
-          value={r?.role}
-          options={[
-            ["lead", "Lead applicant"],
-            ["funded_partner", "Funded partner"],
-            ["other", "Other"],
-          ]}
-        />
-        <Text name="roleOther" label="Other role (specify)" value={r?.role_other} />
-        <Choice
-          name="intake"
-          label="Intake"
-          value={r?.intake}
-          options={[
-            ["fixed", "Fixed deadline"],
-            ["rolling", "Rolling"],
-          ]}
-        />
-        <Choice
-          name="applicationStructure"
-          label="Application structure"
-          value={r?.application_structure}
-          options={[
-            ["one_stage", "One-stage"],
-            ["two_stage", "Two-stage (EOI first)"],
-          ]}
-        />
-        <Area
-          name="strategicAngle"
-          label="Strategic angle"
-          hint="Which capability this leverages, and what the client gains"
-          value={r?.strategic_angle}
-        />
-        <Area
-          name="mandatoryComponents"
-          label="Mandatory components"
-          hint="Every required study, deliverable or partner type — the guide's exact words"
-          value={r?.mandatory_components}
-        />
-        <Text name="requestAmount" label={`Request amount (${unit})`} value={r.request_amount} />
-        <Text name="netRevenue" label={`Net revenue (${unit})`} value={r.net_revenue} />
-        <Text name="matchRequired" label={`Match required (${unit})`} value={r.match_required} />
-        <Text name="inKindCap" label={`In-kind cap (${unit})`} value={r.in_kind_cap} />
-        <Check
-          name="cashMatchConfirmed"
-          label="Whoever controls the budget has confirmed any cash match can be covered"
-          value={r?.cash_match_confirmed}
-        />
-        <Area
-          name="risks"
-          label="Risks and unknowns"
-          hint="Eligibility ambiguities, capacity, open questions, partner dependencies"
-          value={r?.risks}
-        />
-        <Choice
-          name="recommendation"
-          label="Recommendation"
-          value={r?.recommendation}
-          options={[
-            ["go", "Go"],
-            ["no_go", "No-go"],
-            ["go_conditional", "Go-conditional"],
-          ]}
-        />
-        <Text name="recommendationReason" label="Reason" value={r?.recommendation_reason} />
-        <Area name="condition" label="Condition (if go-conditional)" value={r?.condition} />
+      {!row && !ready ? (
+        <p data-testid="brief-preparing" className="mt-3 text-sm text-[var(--color-ink-soft)]">
+          Preparing the brief from the call…
+        </p>
+      ) : (
+        <form
+          key={k}
+          onSubmit={save}
+          className="mt-3 grid gap-px overflow-hidden rounded-md border border-[var(--color-rule)] bg-[var(--color-rule)] sm:grid-cols-2"
+        >
+          <Choice
+            name="role"
+            label="Role"
+            value={r?.role}
+            options={[
+              ["lead", "Lead applicant"],
+              ["funded_partner", "Funded partner"],
+              ["other", "Other"],
+            ]}
+          />
+          <Text name="roleOther" label="Other role (specify)" value={r?.role_other} />
+          <Choice
+            name="intake"
+            label="Intake"
+            value={r?.intake}
+            options={[
+              ["fixed", "Fixed deadline"],
+              ["rolling", "Rolling"],
+            ]}
+          />
+          <Choice
+            name="applicationStructure"
+            label="Application structure"
+            value={r?.application_structure}
+            options={[
+              ["one_stage", "One-stage"],
+              ["two_stage", "Two-stage (EOI first)"],
+            ]}
+          />
+          <Area
+            name="strategicAngle"
+            label="Strategic angle"
+            hint="Which capability this leverages, and what the client gains"
+            value={r?.strategic_angle}
+          />
+          <Area
+            name="mandatoryComponents"
+            label="Mandatory components"
+            hint="Every required study, deliverable or partner type — the guide's exact words"
+            value={r?.mandatory_components}
+          />
+          <Text name="requestAmount" label={`Request amount (${unit})`} value={r.request_amount} />
+          <Text name="netRevenue" label={`Net revenue (${unit})`} value={r.net_revenue} />
+          <Text name="matchRequired" label={`Match required (${unit})`} value={r.match_required} />
+          <Text name="inKindCap" label={`In-kind cap (${unit})`} value={r.in_kind_cap} />
+          <Check
+            name="cashMatchConfirmed"
+            label="Whoever controls the budget has confirmed any cash match can be covered"
+            value={r?.cash_match_confirmed}
+          />
+          <Area
+            name="risks"
+            label="Risks and unknowns"
+            hint="Eligibility ambiguities, capacity, open questions, partner dependencies"
+            value={r?.risks}
+          />
+          <Choice
+            name="recommendation"
+            label="Recommendation"
+            value={r?.recommendation}
+            options={[
+              ["go", "Go"],
+              ["no_go", "No-go"],
+              ["go_conditional", "Go-conditional"],
+            ]}
+          />
+          <Text name="recommendationReason" label="Reason" value={r?.recommendation_reason} />
+          <Area name="condition" label="Condition (if go-conditional)" value={r?.condition} />
 
-        <div className="bg-[var(--color-accent-soft)] px-4 py-3 sm:col-span-2">
-          <p className="text-xs font-semibold uppercase tracking-wide">Leadership decision</p>
-        </div>
-        <Choice
-          name="decision"
-          label="Decision"
-          value={r?.decision ?? "pending"}
-          options={[
-            ["pending", "Pending"],
-            ["go", "GO"],
-            ["no_go", "NO-GO"],
-            ["go_conditional", "GO-CONDITIONAL"],
-          ]}
-        />
-        <Text name="decidedBy" label="Approved by" value={r?.decided_by} />
-        <Text name="decisionReason" label="Decision reason" value={r?.decision_reason} />
-        <Check
-          name="conditionMet"
-          label="Condition confirmed met with leadership"
-          value={r?.condition_met}
-        />
+          <div className="bg-[var(--color-accent-soft)] px-4 py-3 sm:col-span-2">
+            <p className="text-xs font-semibold uppercase tracking-wide">Leadership decision</p>
+          </div>
+          <Choice
+            name="decision"
+            label="Decision"
+            value={r?.decision ?? "pending"}
+            options={[
+              ["pending", "Pending"],
+              ["go", "GO"],
+              ["no_go", "NO-GO"],
+              ["go_conditional", "GO-CONDITIONAL"],
+            ]}
+          />
+          <Text name="decidedBy" label="Approved by" value={r?.decided_by} />
+          <Text name="decisionReason" label="Decision reason" value={r?.decision_reason} />
+          <Check
+            name="conditionMet"
+            label="Condition confirmed met with leadership"
+            value={r?.condition_met}
+          />
 
-        <div className="bg-[var(--color-surface)] px-4 py-3 sm:col-span-2">
-          <button
-            type="submit"
-            disabled={saving || locked}
-            data-testid="save-brief"
-            className="rounded-md border border-[var(--color-rule)] px-3 py-1.5 text-sm font-medium disabled:opacity-50"
-          >
-            {saving ? "Saving…" : locked ? "Locked after submission" : "Save brief"}
-          </button>
-          {r.decided_at && (
-            <span
-              data-testid="decision-record"
-              className="ml-3 text-xs text-[var(--color-ink-soft)]"
+          <div className="bg-[var(--color-surface)] px-4 py-3 sm:col-span-2">
+            <button
+              type="submit"
+              disabled={saving || locked}
+              data-testid="save-brief"
+              className="rounded-md border border-[var(--color-rule)] px-3 py-1.5 text-sm font-medium disabled:opacity-50"
             >
-              Decided {new Date(r.decided_at).toLocaleDateString()} · approver {r.decided_by}
-              {r.recorder?.email ? ` · recorded by ${r.recorder.email}` : ""}
-            </span>
-          )}
-          {!row && (
-            <p className="mt-2 text-xs text-[var(--color-ink-soft)]">
-              Pre-filled from the call and the eligibility rules. Check each field, then save.
-            </p>
-          )}
-        </div>
-      </form>
+              {saving ? "Saving…" : locked ? "Locked after submission" : "Save brief"}
+            </button>
+            {r.decided_at && (
+              <span
+                data-testid="decision-record"
+                className="ml-3 text-xs text-[var(--color-ink-soft)]"
+              >
+                Decided {new Date(r.decided_at).toLocaleDateString()}
+                {r.decided_by ? ` · approver ${r.decided_by}` : ""}
+                {r.recorder?.email ? ` · recorded by ${r.recorder.email}` : ""}
+              </span>
+            )}
+            {!row && (
+              <p className="mt-2 text-xs text-[var(--color-ink-soft)]">
+                Pre-filled from the call and the eligibility rules. Check each field, then save.
+              </p>
+            )}
+          </div>
+        </form>
+      )}
 
       {!gate.allowed && (
         <p

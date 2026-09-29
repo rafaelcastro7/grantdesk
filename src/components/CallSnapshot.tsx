@@ -57,8 +57,10 @@ export function CallSnapshot({ grant }: { grant: CallSnapshotGrant }) {
         <span className="text-[var(--color-ineligible)]">{grant.status}</span>
       ) : days !== null && days < 0 ? (
         <span className="text-[var(--color-ineligible)]">Deadline passed</span>
-      ) : (
+      ) : grant.status === "open" ? (
         "Open"
+      ) : (
+        "Not published"
       ),
     ],
     ["Award", amount],

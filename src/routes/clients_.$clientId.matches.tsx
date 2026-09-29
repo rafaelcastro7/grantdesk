@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { accessToken } from "@/lib/session";
 import { useAction } from "@/lib/use-action";
+import { useRequireSession } from "@/lib/use-require-session";
+import { formatMoney } from "@/lib/money";
 import { relevanceFrom } from "@/lib/match-explain";
 import { bandOf } from "@/lib/regions";
 import { axisBreakdown } from "@/lib/axis-breakdown";
@@ -87,6 +89,7 @@ const GROUPS: Array<{ verdict: Verdict; heading: string; blurb: string }> = [
 const RULED_OUT_SHOWN = 12;
 
 function MatchesPage() {
+  useRequireSession();
   const { clientId } = Route.useParams();
   const runMatching = useServerFn(findMatches);
 
@@ -99,37 +102,38 @@ function MatchesPage() {
   const autoRan = useRef(false);
 
   const load = useCallback(async () => {
-    const { data: client } = await supabase()
-      .from("clients")
-      .select("name")
-      .eq("id", clientId)
-      .maybeSingle();
-    setClientName((client as { name: string } | null)?.name ?? "");
-
     // Read alongside the client, not alongside each match row: it is one
     // fact about the client, not one per result, and grouping by it should
     // not depend on the join surviving a future column rename.
-    const { data: profile } = await supabase()
-      .from("client_profiles")
-      .select("jurisdictions")
-      .eq("client_id", clientId)
-      .maybeSingle();
-    setJurisdictions((profile as { jurisdictions: string[] | null } | null)?.jurisdictions ?? []);
-
-    const { data, error: readError } = await supabase()
-      .from("matches")
-      .select(
-        "id, verdict, relevance, retrieval, " +
-          "grants(id, title, summary, url, country, currency, amount_min, amount_max, deadline, funders(name)), " +
-          "eligibility_checks(rule_key, status, is_hard_gate, detail)",
-      )
-      .eq("client_id", clientId)
-      .order("relevance", { ascending: false, nullsFirst: false });
-
+    const [clientResult, profileResult, matchResult] = await Promise.all([
+      supabase().from("clients").select("name").eq("id", clientId).maybeSingle(),
+      supabase()
+        .from("client_profiles")
+        .select("jurisdictions")
+        .eq("client_id", clientId)
+        .maybeSingle(),
+      supabase()
+        .from("matches")
+        .select(
+          "id, verdict, relevance, retrieval, " +
+            "grants(id, title, summary, url, country, currency, amount_min, amount_max, deadline, funders(name)), " +
+            "eligibility_checks(rule_key, status, is_hard_gate, detail)",
+        )
+        .eq("client_id", clientId)
+        .order("relevance", { ascending: false, nullsFirst: false }),
+    ]);
+    // Any failure is shown: a failed profile read used to leave the home
+    // country empty and quietly turn off home-country-first ordering.
+    const readError = clientResult.error ?? profileResult.error ?? matchResult.error;
     if (readError) {
       setError(readError.message);
       return;
     }
+    setClientName((clientResult.data as { name: string } | null)?.name ?? "");
+    setJurisdictions(
+      (profileResult.data as { jurisdictions: string[] | null } | null)?.jurisdictions ?? [],
+    );
+    const data = matchResult.data;
     setMatches((data ?? []) as unknown as MatchRow[]);
   }, [clientId]);
 
@@ -209,6 +213,11 @@ function MatchesPage() {
       .map(({ m }) => m);
   };
   const filtering = isFiltering(filters);
+  const currencies = [
+    ...new Set(
+      (matches ?? []).map((m) => m.grants?.currency?.toUpperCase()).filter((c): c is string => !!c),
+    ),
+  ].sort();
   const set = (patch: Partial<MatchFilters>) => setFilters((current) => ({ ...current, ...patch }));
 
   return (
@@ -253,7 +262,11 @@ function MatchesPage() {
           </button>
         )}
         {note && (
-          <p data-testid="match-summary" className="text-sm text-[var(--color-ink-soft)]">
+          <p
+            data-testid="match-summary"
+            aria-live="polite"
+            className="text-sm text-[var(--color-ink-soft)]"
+          >
             {note}
           </p>
         )}
@@ -321,17 +334,37 @@ function MatchesPage() {
           </label>
           <label className="flex flex-col gap-1">
             <span className="text-xs uppercase tracking-wide text-[var(--color-ink-soft)]">
-              Minimum award
+              Currency
+            </span>
+            <select
+              value={filters.currency}
+              onChange={(e) => set({ currency: e.target.value })}
+              className="rounded-md border border-[var(--color-rule)] bg-[var(--color-paper)] px-2 py-1.5"
+            >
+              <option value="any">Any currency</option>
+              {currencies.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-xs uppercase tracking-wide text-[var(--color-ink-soft)]">
+              Minimum award{filters.currency !== "any" ? ` (${filters.currency})` : ""}
             </span>
             <input
+              type="text"
               inputMode="numeric"
               value={filters.minAmount ?? ""}
+              disabled={filters.currency === "any"}
+              title={filters.currency === "any" ? "Choose a currency first" : undefined}
               onChange={(e) => {
                 const n = Number(e.target.value.replace(/[^\d]/g, ""));
                 set({ minAmount: e.target.value.trim() && n > 0 ? n : null });
               }}
-              placeholder="e.g. 50000"
-              className="rounded-md border border-[var(--color-rule)] bg-[var(--color-paper)] px-2 py-1.5"
+              placeholder={filters.currency === "any" ? "Choose a currency first" : "e.g. 50000"}
+              className="rounded-md border border-[var(--color-rule)] bg-[var(--color-paper)] px-2 py-1.5 disabled:opacity-50"
             />
           </label>
           <label className="flex flex-col gap-1">
@@ -461,12 +494,11 @@ const VERDICT_COLOR: Record<Verdict, string> = {
 };
 
 function money(row: NonNullable<MatchRow["grants"]>): string | null {
-  const unit = row.currency ?? "";
   if (row.amount_min && row.amount_max) {
-    return `${unit} ${row.amount_min.toLocaleString()}–${row.amount_max.toLocaleString()}`;
+    return `${formatMoney(row.amount_min, row.currency)} – ${formatMoney(row.amount_max, row.currency)}`;
   }
-  if (row.amount_max) return `up to ${unit} ${row.amount_max.toLocaleString()}`;
-  if (row.amount_min) return `from ${unit} ${row.amount_min.toLocaleString()}`;
+  if (row.amount_max) return `up to ${formatMoney(row.amount_max, row.currency)}`;
+  if (row.amount_min) return `from ${formatMoney(row.amount_min, row.currency)}`;
   return null;
 }
 

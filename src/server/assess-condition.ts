@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { callLlm } from "./llm";
+import { UNTRUSTED_RULE, untrusted } from "./prompt-safety";
 import { NoProfileError } from "./draft";
 
 /**
@@ -46,7 +47,9 @@ says, matched against the condition's own wording:
   you. If the profile is too thin to say anything, say exactly that.
 
 Two or three sentences. No preamble, no "Based on the information provided".
-Address the consultant directly ("This client's profile states...").`;
+Address the consultant directly ("This client's profile states...").
+
+${UNTRUSTED_RULE}`;
 
 function buildPrompt(condition: AssessableCondition, client: ConditionProfile): string {
   const quote = condition.sourceQuote ?? condition.detail ?? condition.label;
@@ -60,7 +63,13 @@ function buildPrompt(condition: AssessableCondition, client: ConditionProfile): 
     .filter((line): line is string => line !== null)
     .join("\n");
 
-  return [`Condition ("${condition.label}"): ${quote}`, "", "Client profile:", profile].join("\n");
+  return [
+    "Condition:",
+    untrusted(`funder condition: ${condition.label}`, quote),
+    "",
+    "Client profile:",
+    untrusted("client profile", profile),
+  ].join("\n");
 }
 
 export type ConditionAssessment = { assessment: string; model: string };

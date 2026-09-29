@@ -5,8 +5,49 @@ import { readRequirementsForGrant } from "./read-requirements";
 import { assessCondition } from "./assess-condition";
 import { draftSection, NoProfileError, saveAnswer, type DraftRequirement } from "./draft";
 import { draftingGate, fromRow, type DecisionRow } from "@/lib/go-decision";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 const auth = z.string().min(10, ACCESS_TOKEN_MESSAGE);
+
+class MismatchError extends Error {}
+
+/**
+ * The three ids a request carries must describe one application: the
+ * proposal belongs to the client, and the requirement is on that proposal's
+ * call and is either shared or this client's own. RLS alone cannot say that —
+ * a consultant owns all their clients, so it happily lets a request mix
+ * client A's profile, client B's proposal and a third grant's requirement,
+ * which also sidestepped the go / no-go lock by naming a client without one.
+ */
+async function assertOneApplication(
+  supabase: SupabaseClient,
+  ids: { clientId: string; proposalId: string; requirementId: string },
+): Promise<{ grantId: string }> {
+  const [{ data: proposal, error: proposalError }, { data: requirement, error: reqError }] =
+    await Promise.all([
+      supabase
+        .from("proposals")
+        .select("client_id, grant_id")
+        .eq("id", ids.proposalId)
+        .maybeSingle(),
+      supabase
+        .from("requirements")
+        .select("grant_id, client_id")
+        .eq("id", ids.requirementId)
+        .maybeSingle(),
+    ]);
+  if (proposalError) throw new Error(proposalError.message);
+  if (reqError) throw new Error(reqError.message);
+  const p = proposal as { client_id: string; grant_id: string } | null;
+  const r = requirement as { grant_id: string; client_id: string | null } | null;
+  if (!p || p.client_id !== ids.clientId) {
+    throw new MismatchError("That application does not belong to this client.");
+  }
+  if (!r || r.grant_id !== p.grant_id || (r.client_id !== null && r.client_id !== p.client_id)) {
+    throw new MismatchError("That requirement is not part of this application.");
+  }
+  return { grantId: p.grant_id };
+}
 
 export const readRequirements = createServerFn({ method: "POST" })
   .validator(z.object({ grantId: z.string().uuid(), accessToken: auth }))
@@ -38,6 +79,7 @@ export const assessRequirement = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const supabase = callerClient(data.accessToken);
     try {
+      await assertOneApplication(supabase, data);
       const { data: cached, error: cacheError } = await supabase
         .from("requirement_assessments")
         .select("assessment")
@@ -95,6 +137,7 @@ export const draftProposalSection = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const supabase = callerClient(data.accessToken);
     try {
+      await assertOneApplication(supabase, data);
       const { data: requirement, error } = await supabase
         .from("requirements")
         .select(
@@ -168,25 +211,40 @@ export const draftProposalSection = createServerFn({ method: "POST" })
       );
       if (!gate.allowed) return { ok: false as const, error: gate.reason };
 
+      // The record must match what the funder received.
+      const { data: sent, error: sentError } = await supabase
+        .from("submissions")
+        .select("id")
+        .eq("proposal_id", data.proposalId)
+        .limit(1);
+      if (sentError) throw new Error(sentError.message);
+      if ((sent ?? []).length > 0) {
+        return { ok: false as const, error: "This application was submitted and is locked." };
+      }
+
       const result = await draftSection(supabase, data.clientId, target);
 
       // Captured before the overwrite below, so a re-draft that turns out
       // worse than the last one is a click to go back to, not a rewrite from
-      // scratch.
-      const { data: previous } = await supabase
+      // scratch. If the old version cannot be kept, the new one is not written.
+      const { data: previous, error: previousError } = await supabase
         .from("proposal_sections")
         .select("content, word_count, drafted_by")
         .eq("proposal_id", data.proposalId)
         .eq("requirement_id", data.requirementId)
         .maybeSingle();
+      if (previousError) throw new Error(previousError.message);
       if (previous?.content?.trim()) {
-        await supabase.from("proposal_section_revisions").insert({
+        const { error: revisionError } = await supabase.from("proposal_section_revisions").insert({
           proposal_id: data.proposalId,
           requirement_id: data.requirementId,
           content: previous.content,
           word_count: previous.word_count,
           drafted_by: previous.drafted_by,
         });
+        if (revisionError) {
+          throw new Error(`the previous version could not be kept: ${revisionError.message}`);
+        }
       }
 
       const { error: writeError } = await supabase.from("proposal_sections").upsert(

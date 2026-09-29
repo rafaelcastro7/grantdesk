@@ -5,7 +5,20 @@ import { supabase } from "@/lib/supabase";
 
 export const Route = createFileRoute("/clients/")({ component: ClientsPage });
 
-type ClientRow = { id: string; name: string; website: string | null; country: string };
+type ClientRow = {
+  id: string;
+  name: string;
+  website: string | null;
+  client_profiles:
+    { jurisdictions: string[] | null } | Array<{ jurisdictions: string[] | null }> | null;
+};
+
+/** Where the profile says they operate — not the column default every client gets. */
+function operatesIn(row: ClientRow): string {
+  const profile = Array.isArray(row.client_profiles) ? row.client_profiles[0] : row.client_profiles;
+  const places = profile?.jurisdictions ?? [];
+  return places.length ? places.join(", ") : "profile not filled";
+}
 
 /**
  * The client switcher is the top-level surface, not a settings page: a
@@ -32,11 +45,14 @@ function ClientsPage() {
       }
       const { data, error: loadError } = await supabase()
         .from("clients")
-        .select("id, name, website, country")
+        .select("id, name, website, client_profiles(jurisdictions)")
         .is("archived_at", null)
         .order("name");
-      if (loadError) setError(loadError.message);
-      setClients((data as ClientRow[]) ?? []);
+      if (loadError) {
+        setError(loadError.message);
+        return;
+      }
+      setClients((data as unknown as ClientRow[]) ?? []);
     })();
   }, [navigate]);
 
@@ -109,7 +125,7 @@ function ClientsPage() {
 
       <section className="mt-8">
         {clients === null ? (
-          <p className="text-sm text-[var(--color-ink-soft)]">Loading…</p>
+          <p className="text-sm text-[var(--color-ink-soft)]">{error ? "" : "Loading…"}</p>
         ) : clients.length === 0 ? (
           <p className="text-sm text-[var(--color-ink-soft)]">
             No clients yet. Add the first one above.
@@ -125,7 +141,7 @@ function ClientsPage() {
                 >
                   <span className="font-medium">{client.name}</span>
                   <span className="font-mono text-xs text-[var(--color-ink-soft)]">
-                    {client.country}
+                    {operatesIn(client)}
                   </span>
                 </Link>
               </li>

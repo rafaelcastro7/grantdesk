@@ -3,6 +3,7 @@ import { OpportunityBrief } from "@/components/OpportunityBrief";
 import type { DraftingGate } from "@/lib/go-decision";
 import { CallSnapshot, type CallSnapshotGrant } from "@/components/CallSnapshot";
 import { formatMoney } from "@/lib/money";
+import { useRequireSession } from "@/lib/use-require-session";
 import { useServerFn } from "@tanstack/react-start";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
@@ -18,6 +19,13 @@ import {
 import { checkReadiness, getPastAwards, submitProposal } from "@/server/submit.functions";
 import type { Blocker } from "@/lib/submit-gate";
 import type { PastAwardsResult } from "@/server/past-awards";
+
+const OUTCOME_LABEL: Record<string, string> = {
+  awaiting: "Awaiting a decision",
+  awarded: "Awarded",
+  declined: "Declined",
+  withdrawn: "Withdrawn",
+};
 
 export const Route = createFileRoute("/clients_/$clientId/proposals/$grantId")({
   component: ProposalPage,
@@ -59,6 +67,7 @@ type Section = {
  * it stays inside the page budget in ADR-0002 rather than needing an exception.
  */
 function ProposalPage() {
+  useRequireSession();
   const { clientId, grantId } = Route.useParams();
   const runRead = useServerFn(readRequirements);
   const runDraft = useServerFn(draftProposalSection);
@@ -86,6 +95,7 @@ function ProposalPage() {
   const [assessments, setAssessments] = useState<Record<string, string>>({});
   const [gate, setGate] = useState<DraftingGate>({ allowed: true });
   const assessing = useRef(new Set<string>());
+  const assessFailed = useRef(new Set<string>());
   const { busy, error, note, run, setError } = useAction();
   const autoRead = useRef(false);
   /** Acknowledgement writes that have not reached Postgres yet. */
@@ -254,7 +264,8 @@ function ProposalPage() {
         requirement.is_critical &&
         (requirement.kind === "eligibility" || requirement.kind === "attachment") &&
         !assessments[requirement.id] &&
-        !assessing.current.has(requirement.id)
+        !assessing.current.has(requirement.id) &&
+        !assessFailed.current.has(requirement.id)
       ) {
         void assessOne(requirement);
       }
@@ -275,7 +286,13 @@ function ProposalPage() {
       });
       if (result.ok) {
         setAssessments((current) => ({ ...current, [requirement.id]: result.assessment }));
+      } else {
+        assessFailed.current.add(requirement.id);
       }
+    } catch {
+      // Remembered so the effect does not retry it on every other success —
+      // each retry is a model call charged against the drafting budget.
+      assessFailed.current.add(requirement.id);
     } finally {
       assessing.current.delete(requirement.id);
     }
@@ -322,6 +339,17 @@ function ProposalPage() {
     if (!label) return;
     const limit = Number(String(data.get("wordLimit") ?? "").replace(/\D/g, ""));
 
+    // Already on the call under that heading: work on that one rather than
+    // creating a second, identically named section beside it.
+    const existing = (requirements ?? []).find(
+      (r) => r.label.trim().toLowerCase() === label.toLowerCase(),
+    );
+    if (existing) {
+      form.reset();
+      setError(null);
+      return;
+    }
+
     await run("add", async () => {
       const { error: insertError } = await supabase()
         .from("requirements")
@@ -367,12 +395,19 @@ function ProposalPage() {
    */
   async function saveLocation(requirement: Requirement, location: string) {
     if (!proposalId || !acknowledged.has(requirement.id)) return;
+    const before = locations[requirement.id];
     setLocations((current) => ({ ...current, [requirement.id]: location }));
-    await supabase()
+    const { error: locationError } = await supabase()
       .from("requirement_acknowledgements")
       .update({ location: location.trim() || null })
       .eq("proposal_id", proposalId)
       .eq("requirement_id", requirement.id);
+    // Put back only this field, and say so: a location that looks saved and
+    // is not is how an attachment goes missing on submission day.
+    if (locationError) {
+      setLocations((current) => ({ ...current, [requirement.id]: before ?? "" }));
+      setError(`Could not save where "${requirement.label}" is: ${locationError.message}`);
+    }
   }
 
   /**
@@ -544,8 +579,8 @@ function ProposalPage() {
       return `Kept "${requirement.label}" — the next call that asks this will reuse it.`;
     });
 
-  async function saveEdit(requirement: Requirement, content: string) {
-    if (!proposalId) return;
+  async function saveEdit(requirement: Requirement, content: string): Promise<boolean> {
+    if (!proposalId) return false;
     const previous = sections[requirement.id];
     if (previous?.content?.trim()) {
       // Refuse to overwrite if the earlier version could not be kept: losing
@@ -559,7 +594,7 @@ function ProposalPage() {
       });
       if (revisionError) {
         setError(`Not saved — the previous version could not be kept: ${revisionError.message}`);
-        return;
+        return false;
       }
     }
     const { error: saveError } = await supabase()
@@ -581,8 +616,12 @@ function ProposalPage() {
         },
         { onConflict: "proposal_id, requirement_id" },
       );
-    if (saveError) setError(errorMessage(saveError));
-    else await load();
+    if (saveError) {
+      setError(errorMessage(saveError));
+      return false;
+    }
+    await load();
+    return true;
   }
 
   const writable = (requirements ?? []).filter((r) => r.kind === "section");
@@ -739,7 +778,7 @@ function ProposalPage() {
         )}
 
         {note && <p className="mt-3 text-sm text-[var(--color-ink-soft)]">{note}</p>}
-        {error && (
+        {error && grant && (
           <p role="alert" className="mt-3 text-sm text-[var(--color-ineligible)]">
             {error}
           </p>
@@ -870,6 +909,9 @@ function ProposalPage() {
             grantId={grantId}
             onGate={setGate}
             locked={!!submission}
+            // The pre-fill reads the call's requirements; showing the form
+            // before they arrive and swapping it afterwards would wipe typing.
+            ready={requirements !== null && busy !== "read"}
             prefill={{
               deadline: grant.deadline,
               amountMax: grant.amount_max,
@@ -925,6 +967,7 @@ function ProposalPage() {
                   section={sections[requirement.id]}
                   busy={busy === requirement.id}
                   disabled={busy !== null || !gate.allowed || !!submission}
+                  locked={!!submission}
                   onDraft={() => draft(requirement)}
                   onSave={(content) => saveEdit(requirement, content)}
                   onKeep={(content) => keepAnswer(requirement, content)}
@@ -979,7 +1022,8 @@ function ProposalPage() {
               <>
                 <p data-testid="submitted" className="mt-2 text-sm">
                   <span className="font-medium text-[var(--color-eligible)]">Submitted</span>{" "}
-                  {new Date(submission.submitted_at).toLocaleDateString()} · {submission.outcome}
+                  {new Date(submission.submitted_at).toLocaleDateString()} ·{" "}
+                  {OUTCOME_LABEL[submission.outcome ?? "awaiting"] ?? submission.outcome}
                   {submission.confirmation_number && ` · ref ${submission.confirmation_number}`}
                 </p>
 
@@ -1145,18 +1189,22 @@ function SectionCard({
   onDraft,
   onSave,
   onKeep,
+  locked = false,
 }: {
   proposalId: string;
   requirement: Requirement;
   section: Section | undefined;
   busy: boolean;
   disabled: boolean;
+  /** Submitted: the text is the record of what was sent. */
+  locked?: boolean;
   onDraft: () => void;
-  onSave: (content: string) => void;
+  onSave: (content: string) => Promise<boolean>;
   onKeep: (content: string) => void;
 }) {
   const [text, setText] = useState(section?.content ?? "");
   const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [revisions, setRevisions] = useState<Revision[] | null>(null);
   const [showHistory, setShowHistory] = useState(false);
 
@@ -1234,6 +1282,7 @@ function SectionCard({
 
       <textarea
         value={text}
+        readOnly={locked}
         onChange={(event) => {
           setText(event.target.value);
           setDirty(true);
@@ -1254,8 +1303,14 @@ function SectionCard({
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <button
           type="button"
-          onClick={onDraft}
-          disabled={disabled}
+          onClick={() => {
+            // A new draft replaces the text box; unsaved hand edits would
+            // otherwise stay on screen over it and then be saved on top of it.
+            if (dirty && !window.confirm("Replace your unsaved edits with a new draft?")) return;
+            setDirty(false);
+            onDraft();
+          }}
+          disabled={disabled || saving}
           className="rounded-md border border-[var(--color-rule)] px-3 py-1.5 text-sm font-medium disabled:opacity-50"
         >
           {busy ? "Writing…" : section?.content ? "Draft again" : "Draft this"}
@@ -1263,14 +1318,18 @@ function SectionCard({
         {dirty && (
           <button
             type="button"
-            onClick={() => {
-              onSave(text);
-              setDirty(false);
+            onClick={async () => {
+              // Clean only once the save is confirmed: marking it clean first
+              // let a failed save swap the consultant's edit for the old text.
+              setSaving(true);
+              const saved = await onSave(text);
+              setSaving(false);
+              if (saved) setDirty(false);
             }}
-            disabled={disabled}
+            disabled={disabled || saving}
             className="rounded-md bg-[var(--color-accent)] px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
           >
-            Save
+            {saving ? "Saving…" : "Save"}
           </button>
         )}
         {text.length > 40 && (

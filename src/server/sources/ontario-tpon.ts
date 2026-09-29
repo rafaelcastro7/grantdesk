@@ -101,10 +101,6 @@ export function parseAmounts(text: string): { min: number | null; max: number | 
   return { min: null, max };
 }
 
-export function parseAmountMax(text: string): number | null {
-  return parseAmounts(text).max;
-}
-
 function sections(html: string): Map<string, string> {
   const out = new Map<string, string>();
   const parts = html.split(/<h3[^>]*>/i).slice(1);

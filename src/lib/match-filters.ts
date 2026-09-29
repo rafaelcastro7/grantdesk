@@ -14,6 +14,7 @@ export type FilterableMatch = {
     country: string;
     amount_max: number | null;
     amount_min: number | null;
+    currency?: string | null;
     deadline: string | null;
     funders: { name: string } | null;
   } | null;
@@ -24,6 +25,8 @@ export type MatchFilters = {
   text: string;
   closes: "any" | "30" | "90" | "rolling";
   minAmount: number | null;
+  /** Amounts are only comparable within one currency; "any" compares none. */
+  currency: string;
   role: "any" | "lead" | "funded_partner";
   fitOnly: boolean;
   homeOnly: boolean;
@@ -34,6 +37,7 @@ export const DEFAULT_MATCH_FILTERS: MatchFilters = {
   text: "",
   closes: "any",
   minAmount: null,
+  currency: "any",
   role: "any",
   fitOnly: false,
   homeOnly: false,
@@ -68,7 +72,12 @@ export function applyMatchFilters<T extends FilterableMatch>(
       const days = daysUntil(g.deadline, options.today);
       if (days < 0 || days > Number(filters.closes)) return false;
     }
-    if (filters.minAmount !== null) {
+    if (filters.currency !== "any" && (g.currency ?? "").toUpperCase() !== filters.currency) {
+      return false;
+    }
+    // A minimum only means something within one currency, so it applies only
+    // once one is chosen.
+    if (filters.minAmount !== null && filters.currency !== "any") {
       const best = g.amount_max ?? g.amount_min;
       if (best === null || best < filters.minAmount) return false;
     }
@@ -87,8 +96,11 @@ export function applyMatchFilters<T extends FilterableMatch>(
     );
   }
   if (filters.sort === "amount") {
+    // Grouped by currency, largest first within each: 500,000 MXN is not
+    // larger than 100,000 CAD, and a single numeric sort said it was.
     const best = (m: T) => m.grants?.amount_max ?? m.grants?.amount_min ?? -1;
-    return [...kept].sort((a, b) => best(b) - best(a));
+    const unit = (m: T) => (m.grants?.currency ?? "~").toUpperCase();
+    return [...kept].sort((a, b) => unit(a).localeCompare(unit(b)) || best(b) - best(a));
   }
   return kept;
 }
@@ -97,7 +109,8 @@ export function isFiltering(filters: MatchFilters): boolean {
   return (
     filters.text.trim() !== "" ||
     filters.closes !== "any" ||
-    filters.minAmount !== null ||
+    (filters.minAmount !== null && filters.currency !== "any") ||
+    filters.currency !== "any" ||
     filters.role !== "any" ||
     filters.fitOnly ||
     filters.homeOnly

@@ -4,7 +4,7 @@ import { getTenantBranding, resolveTenantSlug } from "@/lib/tenant";
 import { supabase } from "@/lib/supabase";
 
 const LINKS: Array<{ to: string; label: string }> = [
-  { to: "/", label: "Due this week" },
+  { to: "/", label: "What is due" },
   { to: "/clients", label: "Clients" },
   { to: "/catalog", label: "Funder Coverage" },
 ];
@@ -17,6 +17,7 @@ const LINKS: Array<{ to: string; label: string }> = [
 export function Nav() {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const [tenantSlug, setTenantSlug] = useState<string | null>(null);
+  const [signedIn, setSignedIn] = useState(false);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -27,6 +28,7 @@ export function Nav() {
     });
     void (async () => {
       const { data: session } = await supabase().auth.getSession();
+      if (!cancelled) setSignedIn(!!session.session);
       if (!session.session) {
         if (!cancelled) setTenantSlug(fromHost);
         return;
@@ -116,6 +118,18 @@ export function Nav() {
               );
             })}
           </div>
+          {signedIn && (
+            <button
+              type="button"
+              onClick={async () => {
+                await supabase().auth.signOut();
+                window.location.assign("/auth");
+              }}
+              className="px-3 py-1.5 rounded-md text-sm text-[var(--color-ink-soft)] hover:text-[var(--color-ink)]"
+            >
+              Sign out
+            </button>
+          )}
         </div>
       </div>
     </nav>

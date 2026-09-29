@@ -21,7 +21,15 @@ type Row = {
 const DECISION_LABEL: Record<string, string> = {
   pending: "awaiting go / no-go",
   go: "GO",
-  go_conditional: "GO-conditional",
+  go_conditional: "GO-CONDITIONAL",
+};
+
+/** The same words the submission form uses, not the stored codes. */
+const OUTCOME_LABEL: Record<string, string> = {
+  awaiting: "Awaiting a decision",
+  awarded: "Awarded",
+  declined: "Declined",
+  withdrawn: "Withdrawn",
 };
 
 /**
@@ -227,12 +235,20 @@ function Home() {
                 className="flex items-baseline justify-between gap-3 bg-[var(--color-surface)] px-4 py-3"
               >
                 <span className="text-sm">
-                  {row.grants?.title}
+                  {/* The outcome is recorded on the application itself. */}
+                  <Link
+                    to="/clients/$clientId/proposals/$grantId"
+                    params={{ clientId: row.client_id, grantId: row.grant_id }}
+                    className="text-[var(--color-accent)]"
+                  >
+                    {row.grants?.title ?? "Application"}
+                  </Link>
                   <span className="text-[var(--color-ink-soft)]"> · {row.clients?.name}</span>
                 </span>
                 <span className="shrink-0 text-xs text-[var(--color-ink-soft)]">
-                  {row.submissions[0]?.outcome ?? "awaiting"} ·{" "}
-                  {new Date(row.submissions[0]!.submitted_at).toLocaleDateString()}
+                  {OUTCOME_LABEL[row.submissions[0]?.outcome ?? "awaiting"] ??
+                    row.submissions[0]?.outcome}{" "}
+                  · {new Date(row.submissions[0]!.submitted_at).toLocaleDateString()}
                 </span>
               </li>
             ))}

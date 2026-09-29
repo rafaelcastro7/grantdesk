@@ -195,6 +195,7 @@ async function callProvider(
   request: LlmRequest,
   timeoutMs: number,
   retried = false,
+  deadline?: number,
 ): Promise<LlmResponse> {
   const model = provider.models[request.role];
   const started = Date.now();
@@ -241,9 +242,11 @@ async function callProvider(
     // own. Waited once, briefly, and only for this.
     if (response.status === 429 && !retried && !request.noWait) {
       const wait = retryAfterMs(response.headers);
-      if (wait !== null) {
+      // Only if the wait fits inside what is left of this call's budget.
+      if (wait !== null && (!deadline || Date.now() + wait + 5_000 < deadline)) {
         await new Promise((resolve) => setTimeout(resolve, wait));
-        return callProvider(provider, request, timeoutMs, true);
+        const left = deadline ? Math.min(timeoutMs, deadline - Date.now()) : timeoutMs;
+        return callProvider(provider, request, left, true, deadline);
       }
     }
     throw new Error(
@@ -371,11 +374,19 @@ export class LlmUnavailableError extends Error {
   }
 }
 
+/** Kept for the local model, so the floor always gets its turn. */
+const OLLAMA_RESERVE_MS = 60_000;
+
 export async function callLlm(
   request: LlmRequest,
-  options: { timeoutMs?: number } = {},
+  options: { timeoutMs?: number; overallMs?: number } = {},
 ): Promise<LlmResponse> {
   const timeoutMs = options.timeoutMs ?? 60_000;
+  // One budget for the whole chain. Per-attempt timeouts alone summed to
+  // several minutes across three providers, a rate-limit wait each and the
+  // local model — long past any browser or proxy giving up on the request.
+  const deadline = Date.now() + (options.overallMs ?? timeoutMs * 2 + OLLAMA_RESERVE_MS);
+  const cloudDeadline = deadline - OLLAMA_RESERVE_MS;
   const ranked = order(request.role);
   const chain = providers()
     .filter((p) => !!p.apiKey)
@@ -388,8 +399,19 @@ export async function callLlm(
       attempts.push(`${provider.name}: skipped, still failing`);
       continue;
     }
+    const left = cloudDeadline - Date.now();
+    if (left < 5_000) {
+      attempts.push(`${provider.name}: skipped, out of time`);
+      continue;
+    }
     try {
-      const result = await callProvider(provider, request, timeoutMs);
+      const result = await callProvider(
+        provider,
+        request,
+        Math.min(timeoutMs, left),
+        false,
+        cloudDeadline,
+      );
       if (request.validate && !request.validate(result.text)) {
         attempts.push(`${provider.name}: failed caller validation`);
         continue;
@@ -403,7 +425,10 @@ export async function callLlm(
   }
 
   try {
-    const result = await callOllama(request, timeoutMs);
+    const result = await callOllama(
+      request,
+      Math.max(OLLAMA_RESERVE_MS, Math.min(timeoutMs, deadline - Date.now())),
+    );
     if (!request.validate || request.validate(result.text)) return { ...result, attempts };
     attempts.push("ollama: failed caller validation");
   } catch (error) {

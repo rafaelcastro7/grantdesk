@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { htmlToText, htmlTitle } from "@/lib/html-text";
 import { callLlm } from "./llm";
-import { safeFetch } from "./safe-fetch";
+import { readTextCapped, safeFetch } from "./safe-fetch";
+import { UNTRUSTED_RULE, untrusted } from "./prompt-safety";
 import type { ProfileFields } from "@/lib/profile-completeness";
 import {
   normalizeBudget,
@@ -62,7 +63,9 @@ Rules:
   correct; an invented one is a defect.
 - confidence reflects how much of this the page actually supported.
 
-Reply with a single JSON object and nothing else.`;
+Reply with a single JSON object and nothing else.
+
+${UNTRUSTED_RULE}`;
 
 function buildUserPrompt(text: string, sourceUrl: string, title: string | null): string {
   return [
@@ -70,7 +73,7 @@ function buildUserPrompt(text: string, sourceUrl: string, title: string | null):
     title ? `Page title: ${title}` : null,
     "",
     "Page text:",
-    text,
+    untrusted(sourceUrl, text),
     "",
     'Return: {"sectors":[],"jurisdictions":[],"stage":"","annualBudget":null,"currency":null,"capabilities":null,"beneficiaries":null,"confidence":0}',
   ]
@@ -161,5 +164,5 @@ export async function extractProfileFromUrl(sourceUrl: string): Promise<Extracti
     signal: AbortSignal.timeout(30_000),
   });
   if (!response.ok) throw new Error(`fetch ${sourceUrl} returned HTTP ${response.status}`);
-  return extractProfileFromHtml(await response.text(), sourceUrl);
+  return extractProfileFromHtml(await readTextCapped(response), sourceUrl);
 }

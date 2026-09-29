@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { htmlToText, htmlTitle, relatedLinks } from "@/lib/html-text";
 import { callLlm } from "./llm";
-import { safeFetch } from "./safe-fetch";
+import { readTextCapped, safeFetch } from "./safe-fetch";
+import { UNTRUSTED_RULE, untrusted } from "./prompt-safety";
 
 /**
  * Read a funding call and record what it actually asks for.
@@ -159,7 +160,9 @@ consultant a list they cannot act on. Prefer the funder's own heading.
 
 If the page is not a funding call, or lists no requirements, return an empty array.
 
-Reply with a single JSON object: {"requirements":[...]} and nothing else.`;
+Reply with a single JSON object: {"requirements":[...]} and nothing else.
+
+${UNTRUSTED_RULE}`;
 
 export type RequirementExtraction = {
   requirements: ExtractedRequirement[];
@@ -217,7 +220,7 @@ async function extractFromPages(pages: Page[]): Promise<RequirementExtraction> {
               page.title ? `Page title: ${page.title}` : null,
               "",
               "Call text:",
-              page.text,
+              untrusted(page.url, page.text),
             ]
               .filter((line) => line !== null)
               .join("\n"),
@@ -269,7 +272,9 @@ failure to find something wrong.
 
 Reply with a single JSON object: {"complete": true|false, "concerns": ["..."]}.
 concerns is empty when complete is true. At most five concerns; the most
-important ones, not an exhaustive list.`;
+important ones, not an exhaustive list.
+
+${UNTRUSTED_RULE}`;
 
 export type ExtractionCritique = { complete: boolean; concerns: string[] };
 
@@ -320,7 +325,9 @@ export async function critiqueExtraction(
           {
             role: "user",
             content: [
-              pages.map((page) => `Source: ${page.url}\n\n${page.text}`).join("\n\n---\n\n"),
+              pages
+                .map((page) => `Source: ${page.url}\n\n${untrusted(page.url, page.text)}`)
+                .join("\n\n---\n\n"),
               "",
               "Extracted requirements:",
               listing,
@@ -372,7 +379,7 @@ async function fetchPage(url: string, timeoutMs: number, minChars: number): Prom
     signal: AbortSignal.timeout(timeoutMs),
   });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  const html = await response.text();
+  const html = await readTextCapped(response);
   const body = htmlToText(html);
   if (body.length < minChars) {
     throw new Error(`too little text to be worth adding (${body.length} chars)`);
@@ -503,7 +510,7 @@ export async function extractRequirementsFromText(
           title ? `Call: ${title}` : null,
           "",
           "Call text:",
-          text.slice(0, 24_000),
+          untrusted(source, text.slice(0, 24_000)),
         ]
           .filter((line) => line !== null)
           .join("\n"),

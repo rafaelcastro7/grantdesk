@@ -57,6 +57,9 @@ function psqlFile(sqlText) {
       "postgres",
       "-v",
       "ON_ERROR_STOP=1",
+      // All or nothing: a migration that failed halfway used to leave its
+      // first statements committed and the re-run tripping over them.
+      "--single-transaction",
       "-f",
       "-",
     ],
@@ -91,8 +94,12 @@ let count = 0;
 for (const file of files) {
   if (applied.has(file)) continue;
   process.stdout.write(`applying ${file} ... `);
-  psqlFile(readFileSync(join(MIGRATIONS_DIR, file), "utf8"));
-  psql(`insert into schema_migrations (version) values ('${file}')`);
+  // The log row rides in the same transaction, so a migration is recorded
+  // exactly when its effects are.
+  const version = file.replace(/'/g, "''");
+  psqlFile(
+    `${readFileSync(join(MIGRATIONS_DIR, file), "utf8")}\n;\ninsert into schema_migrations (version) values ('${version}');\n`,
+  );
   console.log("ok");
   count++;
 }

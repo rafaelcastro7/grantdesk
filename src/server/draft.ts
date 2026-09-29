@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { callLlm } from "./llm";
+import { UNTRUSTED_RULE, untrusted } from "./prompt-safety";
 import { ANSWER_EMBED_MODEL, embedOne } from "./embed";
 import { listPlaces } from "@/lib/applicant-types";
 import { fabrications, type Fabrication } from "@/lib/fabrication";
@@ -185,7 +186,9 @@ Absolute rules:
   answer entirely is the right call when it does not fit, and padding a section
   with material from a different question is worse than a shorter section.
 - Plain prose. No headings, no bullet lists unless the requirement asks for
-  them, no preamble like "Here is the section".`;
+  them, no preamble like "Here is the section".
+
+${UNTRUSTED_RULE}`;
 
 function buildPrompt(
   requirement: DraftRequirement,
@@ -211,14 +214,17 @@ function buildPrompt(
     lines.push("");
   }
 
-  lines.push(`Funder's requirement: ${requirement.label}`);
-  if (requirement.detail) lines.push(`What it must cover: ${requirement.detail}`);
-  if (requirement.evaluationNote) lines.push(`How it is evaluated: ${requirement.evaluationNote}`);
+  lines.push(`Funder's requirement:`, untrusted("requirement heading", requirement.label));
+  if (requirement.detail)
+    lines.push(`What it must cover:`, untrusted("funder", requirement.detail));
+  if (requirement.evaluationNote)
+    lines.push(`How it is evaluated:`, untrusted("funder", requirement.evaluationNote));
   if (requirement.wordLimit)
     lines.push(
       `Hard word limit: ${requirement.wordLimit}. Aim for about ${Math.round(requirement.wordLimit * 0.9)}.`,
     );
-  if (requirement.sourceQuote) lines.push(`The call says, verbatim: "${requirement.sourceQuote}"`);
+  if (requirement.sourceQuote)
+    lines.push(`The call says, verbatim:`, untrusted("call text", requirement.sourceQuote));
 
   lines.push("", `Organization: ${client.name}`);
   if (client.stage) lines.push(`Legal form: ${client.stage}`);
@@ -231,7 +237,7 @@ function buildPrompt(
   if (reused.length > 0) {
     lines.push("", "Previously approved answers from this client, to build on:");
     for (const answer of reused) {
-      lines.push(`--- ${answer.label} ---`, answer.content);
+      lines.push(untrusted(`approved answer: ${answer.label}`, answer.content));
     }
   }
 

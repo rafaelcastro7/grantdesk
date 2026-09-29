@@ -246,7 +246,7 @@ test("a consultant goes from a new client to a recorded submission", async ({ pa
   await outcome.getByLabel("What happened").selectOption("awarded");
   await outcome.getByLabel("Their reference number").fill(`REF-${stamp}`);
   await outcome.getByTestId("save-outcome").click();
-  await expect(submitted).toContainText("awarded", { timeout: 30_000 });
+  await expect(submitted).toContainText(/awarded/i, { timeout: 30_000 });
   await expect(submitted).toContainText(`REF-${stamp}`);
 
   // ── And it shows up on the desk ───────────────────────────────────────────
@@ -256,7 +256,7 @@ test("a consultant goes from a new client to a recorded submission", async ({ pa
   const sent = page.getByTestId("sent-list");
   await expect(sent).toBeVisible({ timeout: 30_000 });
   // The desk shows what actually happened, not a frozen "awaiting".
-  await expect(sent).toContainText("awarded");
+  await expect(sent).toContainText(/Awarded ·/);
 
   expect(consoleErrors, `page errors: ${consoleErrors.join("; ")}`).toEqual([]);
 });

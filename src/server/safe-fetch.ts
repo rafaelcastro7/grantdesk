@@ -27,11 +27,14 @@ export function isPrivateAddress(ip: string): boolean {
       (a === 169 && b === 254) ||
       (a === 172 && b >= 16 && b <= 31) ||
       (a === 192 && b === 168) ||
+      (a === 198 && (b === 18 || b === 19)) ||
       a >= 224
     );
   }
   if (isIP(v) === 6) {
     if (v.startsWith("::ffff:")) return isPrivateAddress(v.slice(7));
+    // NAT64 and 6to4 both embed an IPv4 address that may be private.
+    if (v.startsWith("64:ff9b:") || v.startsWith("2002:")) return true;
     return v === "::" || v === "::1" || /^f[cd]/.test(v) || /^fe[89ab]/.test(v);
   }
   return true;
@@ -49,6 +52,34 @@ async function assertPublic(url: URL): Promise<void> {
   }
 }
 
+/**
+ * Read a body up to `maxBytes`. A pasted URL can point at a multi-gigabyte
+ * file; reading it whole would take the server down with it.
+ */
+export async function readTextCapped(response: Response, maxBytes = 5_000_000): Promise<string> {
+  const reader = response.body?.getReader();
+  if (!reader) return "";
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel();
+      throw new Error(
+        `the page is larger than ${Math.round(maxBytes / 1_000_000)} MB and was not read`,
+      );
+    }
+    chunks.push(value);
+  }
+  return new TextDecoder().decode(Buffer.concat(chunks));
+}
+
+/**
+ * Note: the address is checked at resolution time and fetch resolves again,
+ * which leaves a DNS-rebinding window; closing it needs a pinned-IP agent.
+ */
 export async function safeFetch(
   input: string,
   init: RequestInit & { maxRedirects?: number } = {},

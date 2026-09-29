@@ -4,6 +4,14 @@ import { z } from "zod";
 import { ACCESS_TOKEN_MESSAGE, callerClient } from "./caller";
 import { assessSubmission, type Blocker, type SubmitCandidate } from "@/lib/submit-gate";
 import { loadPastAwards } from "./past-awards";
+import { draftingGate, fromRow, type DecisionRow, type DraftingGate } from "@/lib/go-decision";
+
+/** A client whose policy requires a go cannot send without one either. */
+function withGoBlocker(blockers: Blocker[], gate: DraftingGate): Blocker[] {
+  return gate.allowed
+    ? blockers
+    : [{ key: "go_decision", detail: gate.reason, isHard: true }, ...blockers];
+}
 
 const auth = z.string().min(10, ACCESS_TOKEN_MESSAGE);
 
@@ -11,7 +19,12 @@ async function buildCandidate(
   supabase: SupabaseClient,
   proposalId: string,
   humanReviewed: boolean,
-): Promise<{ candidate: SubmitCandidate; clientId: string; grantId: string }> {
+): Promise<{
+  candidate: SubmitCandidate;
+  clientId: string;
+  grantId: string;
+  goGate: DraftingGate;
+}> {
   const { data: proposal, error } = await supabase
     .from("proposals")
     .select("id, client_id, grant_id, grants(deadline)")
@@ -27,18 +40,14 @@ async function buildCandidate(
     grants: { deadline: string | null } | null;
   };
 
-  const [
-    { data: requirements },
-    { data: sections },
-    { data: match },
-    { data: acks },
-    { count },
-    { data: profile },
-  ] = await Promise.all([
+  const results = await Promise.all([
+    // Shared requirements plus this client's own headings — never another
+    // client's, which the caller may also own and RLS would therefore return.
     supabase
       .from("requirements")
       .select("id, label, kind, word_limit, is_critical")
-      .eq("grant_id", row.grant_id),
+      .eq("grant_id", row.grant_id)
+      .or(`client_id.is.null,client_id.eq.${row.client_id}`),
     supabase
       .from("proposal_sections")
       .select("requirement_id, content, word_count, drafted_by")
@@ -59,10 +68,34 @@ async function buildCandidate(
       .eq("proposal_id", proposalId),
     supabase
       .from("client_profiles")
-      .select("updated_at")
+      .select("updated_at, requires_go_decision")
       .eq("client_id", row.client_id)
       .maybeSingle(),
+    supabase
+      .from("opportunity_decisions")
+      .select("decision, decided_by, condition, condition_met")
+      .eq("client_id", row.client_id)
+      .eq("grant_id", row.grant_id)
+      .maybeSingle(),
   ]);
+  // A failed read must stop the gate, not empty it: an empty requirement or
+  // acknowledgement list reads as "nothing outstanding" and lets a submission
+  // through that the funder would reject.
+  const failed = results.find((r) => r.error);
+  if (failed?.error) throw new Error(`readiness could not be checked: ${failed.error.message}`);
+  const [
+    { data: requirements },
+    { data: sections },
+    { data: match },
+    { data: acks },
+    { count },
+    { data: profile },
+    { data: decision },
+  ] = results;
+  const goGate = draftingGate(
+    fromRow(decision as DecisionRow | null),
+    !!(profile as { requires_go_decision?: boolean } | null)?.requires_go_decision,
+  );
 
   const reqs = (requirements ?? []) as Array<{
     id: string;
@@ -88,6 +121,7 @@ async function buildCandidate(
   return {
     clientId: row.client_id,
     grantId: row.grant_id,
+    goGate,
     candidate: {
       verdict: (match as { verdict: SubmitCandidate["verdict"] } | null)?.verdict ?? null,
       verdictAt: (match as { matched_at: string } | null)?.matched_at ?? null,
@@ -121,7 +155,7 @@ export const checkReadiness = createServerFn({ method: "POST" })
   .validator(z.object({ proposalId: z.string().uuid(), accessToken: auth }))
   .handler(async ({ data }) => {
     try {
-      const { candidate } = await buildCandidate(
+      const { candidate, goGate } = await buildCandidate(
         callerClient(data.accessToken),
         data.proposalId,
         // Readiness is reported as if review had not happened, so the checklist
@@ -130,7 +164,7 @@ export const checkReadiness = createServerFn({ method: "POST" })
         false,
       );
       const assessed = assessSubmission(candidate);
-      return { ok: true as const, blockers: assessed.blockers };
+      return { ok: true as const, blockers: withGoBlocker(assessed.blockers, goGate) };
     } catch (error) {
       return { ok: false as const, error: error instanceof Error ? error.message : String(error) };
     }
@@ -157,8 +191,9 @@ export const submitProposal = createServerFn({ method: "POST" })
       // Reassessed here, on the server, with humanReviewed true — the click is
       // the confirmation. Trusting the browser's last assessment would let a
       // deadline pass between page load and submit.
-      const { candidate } = await buildCandidate(supabase, data.proposalId, true);
+      const { candidate, goGate } = await buildCandidate(supabase, data.proposalId, true);
       const assessed = assessSubmission(candidate);
+      assessed.blockers = withGoBlocker(assessed.blockers, goGate);
 
       const hard = assessed.blockers.filter((b) => b.isHard);
       if (hard.length > 0) {

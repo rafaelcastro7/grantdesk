@@ -87,7 +87,7 @@ function AuthPage() {
         />
       )}
       {branding && !branding.logoUrl && <p className="text-lg font-semibold">{branding.name}</p>}
-      <h1 className="mt-6 text-2xl font-semibold tracking-tight">Grant Desk</h1>
+      <h1 className="mt-6 text-2xl font-semibold tracking-tight">GrantDesk</h1>
       <p className="mt-2 text-sm text-[var(--color-ink-soft)]">
         Sign in to your desk. Each client&rsquo;s material stays isolated at the database level.
       </p>

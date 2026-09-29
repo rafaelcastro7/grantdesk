@@ -71,7 +71,12 @@ export async function readRequirementsForGrant(
   // reading proposal_sections from this client only ever shows the caller's
   // own — so this code used to delete requirements another consultant had
   // already drafted against, silently unlinking their work.
-  await writer.rpc("replace_extracted_requirements", { target_grant: grantId });
+  // Stop on failure: merging a fresh read into a stale one piles up
+  // near-duplicate labels, the exact thing the replace exists to prevent.
+  const { error: replaceError } = await writer.rpc("replace_extracted_requirements", {
+    target_grant: grantId,
+  });
+  if (replaceError) throw new Error(`could not replace the previous read: ${replaceError.message}`);
 
   const { error: writeError } = await writer.from("requirements").upsert(
     requirements.map((r) => ({

@@ -25,5 +25,4 @@ export function sourceByKey(key: string): SourceAdapter | undefined {
   return SOURCES.find((source) => source.key === key);
 }
 
-export type { SourceAdapter, SourceGrant, SourceFunder, SourceHarvest } from "./types";
-export { craFoundations };
+export type { SourceAdapter, SourceGrant } from "./types";

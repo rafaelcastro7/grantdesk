@@ -75,6 +75,28 @@ only once its condition is marked met; a decision needs a named approver.
   not sent. Every self sign-up still joins the IIAL tenant (`handle_new_user`)
   — a deployment choice to revisit before other tenants onboard.
 
+## Third audit (same day)
+
+- Server functions that take a client, proposal and requirement verify the
+  three describe one application (`assertOneApplication`); mixing ids had
+  bypassed the go / no-go lock and drafted one client's facts into another's
+  proposal. Submission also blocks without a required go.
+- Re-reading a call keeps any requirement another tenant has acknowledged or
+  assessed; the migration log is no longer writable through the API; a
+  client's tenant is pinned like its owner; migrations apply atomically.
+- Funder, website and answer text reaches models only inside `<untrusted>`
+  fences with a rule that it is data (`src/server/prompt-safety.ts`).
+- One time budget per model call across the whole provider chain; query
+  embeds wait 20 s, not 5 min; catalog reads are paged.
+- UI: saving never discards an edit on failure; a redraft over unsaved edits
+  asks first; the brief waits for the call to be read before it can be typed
+  in; the profile is locked while a site is read; money fields refuse what they
+  cannot parse; amounts are filtered and sorted only within one currency;
+  signed-out visitors are sent to sign in; there is a sign-out.
+- Debt: four unused dependencies removed, the undeclared build dependency
+  declared (its transitive packages were missing from the lockfile), dead
+  exports deleted.
+
 ## Consequences
 
 - Funded-partner detection only recognises public bodies as leads. That matches

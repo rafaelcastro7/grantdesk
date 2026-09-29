@@ -21,6 +21,8 @@ import { embedCatalog } from "../src/server/embed";
 import { scanAndAlertNewGrants, scanAndAlertDeadlines } from "../src/server/notifications";
 import { todayIn } from "../src/lib/deadline";
 
+// Same precedence as the app: .env.local overrides .env per key.
+config({ path: ".env.local" });
 config({ path: ".env" });
 
 const ONCE = process.argv.slice(2).includes("--once");
@@ -151,11 +153,25 @@ export async function runDiscoveryCycle(
 }
 
 if (import.meta.main || process.argv[1]?.includes("daemon-continuous-discovery")) {
-  await runDiscoveryCycle();
-  if (!ONCE) {
-    console.log(
-      `[Discovery Daemon] Listening 24/7. Next run scheduled in ${INTERVAL_MINUTES} minutes.`,
-    );
-    setInterval(runDiscoveryCycle, INTERVAL_MINUTES * 60 * 1000);
-  }
+  // Each cycle schedules the next only after it finishes: a fixed interval let
+  // a slow cycle overlap the next one, and a rejection there went unhandled.
+  const cycle = async () => {
+    try {
+      const result = await runDiscoveryCycle();
+      if (result.sourcesRun < SOURCES.length) {
+        console.error(`[Discovery Daemon] ${SOURCES.length - result.sourcesRun} source(s) failed.`);
+        process.exitCode = 1;
+      }
+    } catch (err) {
+      console.error(
+        `[Discovery Daemon] Cycle crashed: ${err instanceof Error ? err.message : err}`,
+      );
+      process.exitCode = 1;
+    }
+    if (!ONCE) {
+      console.log(`[Discovery Daemon] Next run in ${INTERVAL_MINUTES} minutes.`);
+      setTimeout(cycle, INTERVAL_MINUTES * 60 * 1000);
+    }
+  };
+  await cycle();
 }

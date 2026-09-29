@@ -23,7 +23,7 @@ test("a consultant adds a client and fills its profile from a website", async ({
   page.on("pageerror", (error) => consoleErrors.push(error.message));
 
   await page.goto("/auth");
-  await expect(page.getByRole("heading", { name: "Grant Desk" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "GrantDesk" })).toBeVisible();
   // Server-rendered markup is clickable before React binds its handlers, so an
   // early click is a silent no-op: the form kept its values, showed no error,
   // and simply never submitted. Wait for the interactive signal instead.

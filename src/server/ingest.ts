@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { serverEnv } from "@/lib/env.server";
-import { sourceByKey, type SourceAdapter, type SourceGrant } from "./sources";
+import type { SourceAdapter, SourceGrant } from "./sources";
 import { todayIn } from "@/lib/deadline";
 
 /**
@@ -73,14 +73,20 @@ export async function runSource(
       fundersUpserted += data?.length ?? 0;
     }
 
-    const { data: funderRows, error: funderReadError } = await supabase
-      .from("funders")
-      .select("id, name, country");
-    if (funderReadError) throw new Error(funderReadError.message);
-
+    // Paged: a hosted PostgREST caps unpaged reads (1000 rows by default), and
+    // a funder past the cap would silently drop every grant it funds.
     const funderId = new Map<string, string>();
-    for (const row of (funderRows ?? []) as Array<{ id: string; name: string; country: string }>) {
-      funderId.set(`${row.name.toLowerCase()}|${row.country}`, row.id);
+    for (let from = 0; ; from += 1000) {
+      const { data: page, error: funderReadError } = await supabase
+        .from("funders")
+        .select("id, name, country")
+        .order("id")
+        .range(from, from + 999);
+      if (funderReadError) throw new Error(funderReadError.message);
+      for (const row of (page ?? []) as Array<{ id: string; name: string; country: string }>) {
+        funderId.set(`${row.name.toLowerCase()}|${row.country}`, row.id);
+      }
+      if ((page ?? []).length < 1000) break;
     }
 
     const rows: Array<Record<string, unknown>> = [];
@@ -122,6 +128,13 @@ export async function runSource(
         last_seen_at: new Date().toISOString(),
       });
     }
+
+    // One row per key. Two harvested items with the same external id in one
+    // batch make Postgres refuse the whole upsert ("cannot affect row a second
+    // time"), which failed the entire source over a duplicate listing.
+    const unique = [...new Map(rows.map((row) => [row.source_hash as string, row])).values()];
+    rows.length = 0;
+    rows.push(...unique);
 
     let grantsUpserted = 0;
     for (let i = 0; i < rows.length; i += 100) {
@@ -168,10 +181,4 @@ export async function runSource(
     }
     throw error;
   }
-}
-
-export async function runSourceByKey(key: string, options: { limit?: number } = {}) {
-  const adapter = sourceByKey(key);
-  if (!adapter) throw new Error(`unknown source: ${key}`);
-  return runSource(adapter, options);
 }
