@@ -30,6 +30,8 @@ const SOURCE_LABEL: Record<string, string> = {
   "cra-foundations": "CRA charities data",
   "ontario-tpon": "Ontario — Transfer Payment Ontario",
   otf: "Ontario Trillium Foundation",
+  esdc: "Employment and Social Development Canada",
+  "canada-council": "Canada Council for the Arts",
 };
 
 /**

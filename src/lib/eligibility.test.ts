@@ -222,6 +222,39 @@ describe("applicant type", () => {
     expect(decision.verdict).toBe("eligible");
   });
 
+  it("does not fail an unlisted type when the list also admits 'others' (code 25)", () => {
+    const listed = {
+      eligibleApplicantTypes: ["government" as const],
+      applicantListOpenEnded: true,
+    };
+    const open = decideEligibility(
+      input({ grant: { country: "US", ...listed }, client: { jurisdictions: ["US"] } }),
+    );
+    expect(check(open, "applicant_type").status).toBe("unknown");
+    const closed = decideEligibility(
+      input({
+        grant: {
+          country: "US",
+          eligibleApplicantTypes: ["government"],
+          applicantListOpenEnded: false,
+        },
+        client: { jurisdictions: ["US"] },
+      }),
+    );
+    expect(check(closed, "applicant_type").status).toBe("fail");
+    const member = decideEligibility(
+      input({
+        grant: {
+          country: "US",
+          eligibleApplicantTypes: ["nonprofit"],
+          applicantListOpenEnded: true,
+        },
+        client: { jurisdictions: ["US"] },
+      }),
+    );
+    expect(check(member, "applicant_type").status).toBe("pass");
+  });
+
   it("does not invent a restriction when the funder published no applicant list", () => {
     const decision = decideEligibility(input({ grant: { eligibleApplicantTypes: [] } }));
 

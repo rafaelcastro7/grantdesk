@@ -36,6 +36,14 @@ export type SourceGrant = {
    * fill this in by inference.
    */
   eligibleApplicantTypes?: readonly string[];
+  /**
+   * The structured list names some types *and* "others, see the text" — so a
+   * type missing from it is unknown, not excluded. Only set by sources that
+   * can tell (Grants.gov code 25).
+   */
+  applicantListOpenEnded?: boolean | null;
+  /** How the money is given: grant, cooperative agreement, contract… */
+  fundingInstruments?: readonly string[];
   /** The funder's own eligibility sentence, quoted rather than paraphrased. */
   eligibilityNote?: string | null;
   /**

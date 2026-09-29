@@ -1,0 +1,359 @@
+{
+  "Funding": [
+    {
+      "Title": "Compensation for Employers of Reservists",
+      "Program": "Compensation for Employers of Reservists Program",
+      "URL": "https://www.canada.ca/en/employment-social-development/services/funding/employer-compensation-reservists-guide.html",
+      "Description": "Financial support to offset operational costs incured when reservist employees deploy on full-time operational activity, or participate in military skills training for a minimum of 30 days.",
+      "FundingAmount": "Funding amounts are determined based on the assessment of the application.",
+      "Status": [
+        {
+          "Text": "Accepting applications",
+          "Tag": "open",
+          "ClassName": "text-success",
+          "Icon": "fas fa-check-circle",
+          "Order": "1"
+        }
+      ],
+      "EndDate": "",
+      "ProcessType": [
+        {
+          "Text": "Continuous Intake",
+          "Tag": "process-continuous"
+        }
+      ],
+      "Applicants": [
+        {
+          "Text": "Employers",
+          "Tag": "apply-employers"
+        },
+        {
+          "Text": "Self-employed individuals",
+          "Tag": "apply-selfemployed"
+        },
+        {
+          "Text": "Municipal, Provincial and Territorial governments, institutions, agencies and Crown Corporations",
+          "Tag": "apply-govenments"
+        }
+      ]
+    },
+    {
+      "Title": "Indigenous Early Learning and Child Care (IELCC) - Quality Improvement Projects (QIP) ",
+      "Program": "Indigenous Early Learning and Child Care",
+      "URL": "https://www.canada.ca/en/employment-social-development/services/funding/indigenous-early-learning-quality-improvement.html",
+      "Description": "This funding opportunity aims to support the implementation of the Indigenous Early Learning and Child Care (IELCC) distinctions-based results frameworks. It will fund projects that support: the production of narratives on the progress of the IELCC Initiative since 2018; data collection and management; transition to the distinction-based results frameworks; assessment of future years of reporting under those frameworks.",
+      "FundingAmount": "Up to $1,000,000 for project over 36 months",
+      "Status": [
+        {
+          "Text": "Accepting applications",
+          "Tag": "open",
+          "ClassName": "text-success",
+          "Icon": "fas fa-check-circle",
+          "Order": "1"
+        }
+      ],
+      "EndDate": "until November 6, 2026 at 3:00 pm Eastern Standard Time (EST)",
+      "ProcessType": [
+        {
+          "Text": "Solicited Application",
+          "Tag": "process-solicited"
+        }
+      ],
+      "Applicants": [
+        {
+          "Text": "Applicants invited by ESDC",
+          "Tag": "apply-esdc"
+        }
+      ]
+    },
+    {
+      "Title": "Investments in Training Equipment",
+      "Program": "Canadian Apprenticeship Strategy (CAS)",
+      "URL": "https://www.canada.ca/en/employment-social-development/services/funding/investments-training-equipment.html",
+      "Description": "Funding for projects that demonstrate a need for trades training equipment and materials that meet industry standards or investments in new technology to train pre-apprentices and apprentices in Red Seal trades.",
+      "FundingAmount": "Up to $5,000,000 per project",
+      "Status": [
+        {
+          "Text": "Accepting applications",
+          "Tag": "open",
+          "ClassName": "text-success",
+          "Icon": "fas fa-check-circle",
+          "Order": "1"
+        }
+      ],
+      "EndDate": "",
+      "ProcessType": [
+        {
+          "Text": "Continuous Intake",
+          "Tag": "process-continuous"
+        }
+      ],
+      "Applicants": [
+        {
+          "Text": "Municipal, Provincial and Territorial governments, institutions, agencies and Crown Corporations",
+          "Tag": "apply-govenments"
+        },
+        {
+          "Text": "Unions",
+          "Tag": "apply-unions"
+        }
+      ]
+    },
+    {
+      "Title": "Parents of Young Victims of Crime",
+      "Program": "Canadian Benefit for Parents of Young Victims of Crime",
+      "URL": "https://www.canada.ca/en/employment-social-development/services/parents-young-victims-crime.html",
+      "Description": "Income support for parents or legal guardians who are considering to or have taken time away from work and suffered a loss of income to cope with the death or disappearance of your child or children.",
+      "FundingAmount": "$500 per week",
+      "Status": [
+        {
+          "Text": "Accepting applications",
+          "Tag": "open",
+          "ClassName": "text-success",
+          "Icon": "fas fa-check-circle",
+          "Order": "1"
+        }
+      ],
+      "EndDate": "",
+      "ProcessType": [
+        {
+          "Text": "Continuous Intake",
+          "Tag": "process-continuous"
+        }
+      ],
+      "Applicants": [
+        {
+          "Text": "Employers",
+          "Tag": "apply-employers"
+        },
+        {
+          "Text": "Self-employed individuals",
+          "Tag": "apply-selfemployed"
+        },
+        {
+          "Text": "Individuals",
+          "Tag": "apply-individuals"
+        }
+      ]
+    },
+    {
+      "Title": "Sectoral Workforce Innovation Fund  ",
+      "Program": "Sectoral Workforce Development Program",
+      "URL": "https://www.canada.ca/en/employment-social-development/services/funding/sectoral-workforce-innovation-fund/overview.html",
+      "Description": "This funding aims to support targeted, real-time strategic investments that enable and mobilize workforce solutions to advance government missions and growth strategies across Canada",
+      "FundingAmount": "$10,000,000",
+      "Status": [
+        {
+          "Text": "Accepting applications",
+          "Tag": "open",
+          "ClassName": "text-success",
+          "Icon": "fas fa-check-circle",
+          "Order": "1"
+        }
+      ],
+      "EndDate": "",
+      "ProcessType": [
+        {
+          "Text": "Continuous Intake",
+          "Tag": "process-continuous"
+        }
+      ],
+      "Applicants": [
+        {
+          "Text": "Employers",
+          "Tag": "apply-employers"
+        },
+        {
+          "Text": "For-profit organizations",
+          "Tag": "apply-forprofit"
+        },
+        {
+          "Text": "Indigenous Organizations (including band councils, tribal councils and self-government entities)",
+          "Tag": "apply-indigenous"
+        },
+        {
+          "Text": "Not-for-profit organizations or charities",
+          "Tag": "apply-notprofit"
+        },
+        {
+          "Text": "Municipal, Provincial and Territorial governments, institutions, agencies and Crown Corporations",
+          "Tag": "apply-govenments"
+        },
+        {
+          "Text": "Individuals",
+          "Tag": "apply-individuals"
+        },
+        {
+          "Text": "Self-employed individuals",
+          "Tag": "apply-selfemployed"
+        },
+        {
+          "Text": "Tradespeople and apprentices",
+          "Tag": "apply-tradespeople"
+        },
+        {
+          "Text": "Unions",
+          "Tag": "apply-unions"
+        }
+      ]
+    },
+    {
+      "Title": "Social Development Partnership Program - Disability Component - Disability Benefits Navigation ",
+      "Program": "Social Development Partnership Program",
+      "URL": "https://www.canada.ca/en/employment-social-development/services/funding/social-development-partnerships-program-disability-benefits-navigation.html ",
+      "Description": "The Disability Benefits Navigation program will help to facilitate greater access to disability benefits for persons with disabilities and their families, including the Disability Tax Credit (DTC), the Canada Disability Benefit (CDB), as well as other federal, provincial and territorial disability benefits. Disability Benefits Navigation (DBN) targets individuals who may be eligible for disability benefits yet remain underserved, disconnected from services, or face intersecting barriers to access. ",
+      "FundingAmount": "Up to $1,000,000 (up to $500,000 per year) for a project that is 2 years in duration",
+      "Status": [
+        {
+          "Text": "Accepting applications",
+          "Tag": "open",
+          "ClassName": "text-success",
+          "Icon": "fas fa-check-circle",
+          "Order": "1"
+        }
+      ],
+      "EndDate": "until October 8, 2026 at 3:00 PM, Eastern Daylight Time (EDT)",
+      "ProcessType": [
+        {
+          "Text": "Call for Proposal",
+          "Tag": "process-proposal"
+        }
+      ],
+      "Applicants": [
+        {
+          "Text": "Not-for-profit organizations or charities",
+          "Tag": "apply-notprofit"
+        }
+      ]
+    },
+    {
+      "Title": "Team Canada Strong Youth Placements",
+      "Program": "Team Canada Strong Youth Placements Program",
+      "URL": "https://www.canada.ca/en/employment-social-development/services/funding/team-canada-strong-youth-placements.html ",
+      "Description": "This funding opportunity aims to provide youth aged 15-30 with paid, entry level construction and trades related work placements supporting pathways into apprenticeships.  It will fund projects that help participants, including those facing barriers, develop skills and gain exposure to construction and trades-related occupations, build professional networks, and advance toward long-term careers in the skilled trades. ",
+      "FundingAmount": "Eligible organizations may request up to $15 million per year. Projects may be funded for up to two years (24 months), for a maximum of $30 million, with the possibility of extension based on performance and available funding.",
+      "Status": [
+        {
+          "Text": "Accepting applications",
+          "Tag": "open",
+          "ClassName": "text-success",
+          "Icon": "fas fa-check-circle",
+          "Order": "1"
+        }
+      ],
+      "EndDate": "until October 23rd, 2026 at 11:59 pm Pacific Time (PT) ",
+      "ProcessType": [
+        {
+          "Text": "Expression of Interest",
+          "Tag": "process-interest"
+        }
+      ],
+      "Applicants": []
+    },
+    {
+      "Title": "Worker Retention Grant for Work-Sharing Employers",
+      "Program": "Work-Sharing",
+      "URL": "https://canada.ca/en/employment-social-development/services/funding/worker-retention-grant.html",
+      "Description": "The Worker Retention Grant (WRG) is designed to enable employers with an approved and implemented Work-Sharing agreement to provide additional income support for their Employment Insurance (EI) eligible employees. This grant helps maintain employees’ income by keeping their earnings closer to their normal wages throughout the duration of the Work-Sharing agreement.",
+      "FundingAmount": "More than $5,000,000",
+      "Status": [
+        {
+          "Text": "Accepting applications",
+          "Tag": "open",
+          "ClassName": "text-success",
+          "Icon": "fas fa-check-circle",
+          "Order": "1"
+        }
+      ],
+      "EndDate": "until December 31, 2026 at 3:00 pm Eastern Daylight Time (EDT)",
+      "ProcessType": [null],
+      "Applicants": [null]
+    },
+    {
+      "Title": "Canada Summer Jobs",
+      "Program": "Youth Employment and Skills Strategy (YESS)",
+      "URL": "https://www.canada.ca/en/employment-social-development/services/funding/canada-summer-jobs.html",
+      "Description": "Canada Summer Jobs (CSJ) provides wage subsidies to support employers to create quality summer work experiences for youth aged 15 to 30 years.",
+      "FundingAmount": "Up to 100% of the minimum wage for not-for-profit employers, and up to 50% of the wage for public and private sector employers",
+      "Status": [null],
+      "EndDate": "",
+      "ProcessType": [
+        {
+          "Text": "Call for Proposal",
+          "Tag": "process-proposal"
+        }
+      ],
+      "Applicants": [
+        {
+          "Text": "Employers",
+          "Tag": "apply-employers"
+        },
+        {
+          "Text": "For-profit organizations",
+          "Tag": "apply-forprofit"
+        },
+        {
+          "Text": "Indigenous Organizations (including band councils, tribal councils and self-government entities)",
+          "Tag": "apply-indigenous"
+        },
+        {
+          "Text": "Municipal, Provincial and Territorial governments, institutions, agencies and Crown Corporations",
+          "Tag": "apply-govenments"
+        },
+        {
+          "Text": "Not-for-profit organizations or charities",
+          "Tag": "apply-notprofit"
+        },
+        {
+          "Text": "Unions",
+          "Tag": "apply-unions"
+        }
+      ]
+    },
+    {
+      "Title": " Strategic Collaboration projects",
+      "Program": "Youth Employment and Skills Strategy (YESS) Program",
+      "URL": "https://www.canada.ca/en/employment-social-development/services/funding/yess-strategic-collaboration.html",
+      "Description": "The Youth Employment and Skills Strategy (YESS) Program provides funding to organizations to deliver a range of activities that help youth (aged 15 to 30) overcome barriers to employment. Only specific organizations can apply.",
+      "FundingAmount": "",
+      "Status": [
+        {
+          "Text": "Not accepting applications ",
+          "Tag": "closed",
+          "ClassName": "text-danger",
+          "Icon": "far fa-times-circle",
+          "Order": "0"
+        }
+      ],
+      "EndDate": "",
+      "ProcessType": [
+        {
+          "Text": "Call for Proposal",
+          "Tag": "process-proposal"
+        }
+      ],
+      "Applicants": [
+        {
+          "Text": "For-profit organizations",
+          "Tag": "apply-forprofit"
+        },
+        {
+          "Text": "Indigenous Organizations (including band councils, tribal councils and self-government entities)",
+          "Tag": "apply-indigenous"
+        },
+        {
+          "Text": "Municipal, Provincial and Territorial governments, institutions, agencies and Crown Corporations",
+          "Tag": "apply-govenments"
+        },
+        {
+          "Text": "Not-for-profit organizations or charities",
+          "Tag": "apply-notprofit"
+        },
+        {
+          "Text": "Employers",
+          "Tag": "apply-employers"
+        }
+      ]
+    }
+  ]
+}
