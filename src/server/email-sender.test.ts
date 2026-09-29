@@ -3,11 +3,17 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   MAX_ATTEMPTS,
   RESEND_ENDPOINT,
+  deliver,
   emailConfig,
   planRow,
   runOutbox,
   sendOutbox,
+  smtpError,
+  toTransport,
   type OutboxRow,
+  type SmtpTransport,
+  type TenantTransportRow,
+  type Transport,
 } from "./email-sender";
 
 const NOW = new Date("2026-09-29T12:00:00Z");
@@ -195,5 +201,228 @@ describe("runOutbox", () => {
     expect(from).not.toHaveBeenCalled();
     expect(log).toHaveBeenCalledWith(expect.stringContaining("email not configured"));
     log.mockRestore();
+  });
+
+  it("reads tenant settings with the key and sends even without the env fallback", async () => {
+    const { client } = fakeSupabase([row({ tenant_id: TENANT_A })]);
+    const rpc = vi.fn(async () => ({
+      data: [
+        {
+          tenant_id: TENANT_A,
+          provider: "resend",
+          from_name: null,
+          from_address: "a@iial.ca",
+          reply_to: null,
+          smtp_host: null,
+          smtp_port: null,
+          smtp_secure: null,
+          smtp_user: null,
+          secret: "re_x",
+          enabled: true,
+        },
+      ],
+      error: null,
+    }));
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () => new Response("{}", { status: 200 }));
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const result = await runOutbox(Object.assign(client, { rpc }) as unknown as SupabaseClient, {
+      EMAIL_SETTINGS_KEY: "0123456789abcdef0123",
+    });
+    expect(rpc).toHaveBeenCalledWith("get_tenant_email_transports", {
+      p_encryption_key: "0123456789abcdef0123",
+    });
+    expect(result).toMatchObject({ sent: 1, unconfigured: 0 });
+    fetchMock.mockRestore();
+    log.mockRestore();
+  });
+});
+
+const TENANT_A = "aaaaaaaa-0000-0000-0000-000000000000";
+const TENANT_B = "bbbbbbbb-0000-0000-0000-000000000000";
+
+const gmail: SmtpTransport = {
+  kind: "smtp",
+  host: "smtp.gmail.com",
+  port: 465,
+  secure: "tls",
+  user: "me@gmail.com",
+  pass: "abcd efgh ijkl mnop",
+  from: "IIAL <me@gmail.com>",
+  replyTo: "grants@iial.ca",
+};
+
+function mockSmtp(fail?: Error) {
+  const sent: Array<Record<string, unknown>> = [];
+  const close = vi.fn();
+  const factory = vi.fn((_t: SmtpTransport) => ({
+    sendMail: vi.fn(async (options: Record<string, unknown>) => {
+      if (fail) throw fail;
+      sent.push(options);
+      return { messageId: options.messageId };
+    }),
+    close,
+  }));
+  return { sent, close, factory };
+}
+
+describe("provider selection", () => {
+  it("sends a tenant with SMTP settings over SMTP, others through the env fallback", async () => {
+    const { client, updates } = fakeSupabase([
+      row({ id: "a1", tenant_id: TENANT_A }),
+      row({ id: "a2", tenant_id: TENANT_A }),
+      row({ id: "b1", tenant_id: TENANT_B }),
+    ]);
+    const smtp = mockSmtp();
+    const fetchImpl = vi.fn(async () => new Response("{}", { status: 200 }));
+
+    const result = await sendOutbox({
+      supabase: client,
+      config,
+      tenantTransports: new Map<string, Transport>([[TENANT_A, gmail]]),
+      fetchImpl,
+      smtpFactory: smtp.factory,
+      now: NOW,
+    });
+
+    expect(result.sent).toBe(3);
+    // One pooled client for the tenant, reused and closed at the end.
+    expect(smtp.factory).toHaveBeenCalledTimes(1);
+    expect(smtp.close).toHaveBeenCalledTimes(1);
+    expect(smtp.sent).toHaveLength(2);
+    expect(smtp.sent[0]).toMatchObject({
+      from: "IIAL <me@gmail.com>",
+      to: "ana@example.org",
+      replyTo: "grants@iial.ca",
+      subject: "Due soon",
+      messageId: "<outbox-a1@grantdesk.local>",
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(updates.map((u) => u.fields.status)).toEqual(["sent", "sent", "sent"]);
+  });
+
+  it("uses a tenant's Resend key instead of the env key", async () => {
+    const { client } = fakeSupabase([row({ tenant_id: TENANT_A })]);
+    const fetchImpl = vi.fn(async (_url: string, init: RequestInit) => {
+      expect((init.headers as Record<string, string>).Authorization).toBe("Bearer re_tenant");
+      expect(JSON.parse(init.body as string)).toMatchObject({
+        from: "iial@iial.ca",
+        reply_to: "grants@iial.ca",
+      });
+      return new Response("{}", { status: 200 });
+    });
+    const result = await sendOutbox({
+      supabase: client,
+      config,
+      tenantTransports: new Map<string, Transport>([
+        [
+          TENANT_A,
+          { kind: "resend", apiKey: "re_tenant", from: "iial@iial.ca", replyTo: "grants@iial.ca" },
+        ],
+      ]),
+      fetchImpl,
+      now: NOW,
+    });
+    expect(result.sent).toBe(1);
+  });
+
+  it("leaves a row untouched when neither the tenant nor the env has a sender", async () => {
+    const { client, updates } = fakeSupabase([row({ tenant_id: TENANT_B })]);
+    const fetchImpl = vi.fn();
+    const result = await sendOutbox({
+      supabase: client,
+      config: null,
+      tenantTransports: new Map<string, Transport>([[TENANT_A, gmail]]),
+      fetchImpl,
+      now: NOW,
+    });
+    expect(result.unconfigured).toBe(1);
+    expect(updates).toHaveLength(0);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("records an SMTP login failure in plain words, without the password", async () => {
+    const { client, updates } = fakeSupabase([row({ tenant_id: TENANT_A })]);
+    const failure = Object.assign(
+      new Error("Invalid login: 535-5.7.8 Username and Password not accepted"),
+      { responseCode: 535 },
+    );
+    const smtp = mockSmtp(failure);
+    const result = await sendOutbox({
+      supabase: client,
+      tenantTransports: new Map<string, Transport>([[TENANT_A, gmail]]),
+      smtpFactory: smtp.factory,
+      now: NOW,
+    });
+    expect(result.failed).toBe(1);
+    const error = String(updates[0]!.fields.error);
+    expect(error).toMatch(/^smtp: .*App Password/);
+    expect(error).not.toContain(gmail.pass);
+    expect(updates[0]!.fields.attempts).toBe(1);
+  });
+});
+
+describe("deliver", () => {
+  it("opens and closes its own SMTP client for a one-off send", async () => {
+    const smtp = mockSmtp();
+    const outcome = await deliver(
+      gmail,
+      { to: "me@gmail.com", subject: "Test", html: "<p>t</p>", idempotencyKey: "settings-test-1" },
+      { smtpFactory: smtp.factory },
+    );
+    expect(outcome).toEqual({ ok: true });
+    expect(smtp.close).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("toTransport", () => {
+  const base: TenantTransportRow = {
+    tenant_id: TENANT_A,
+    provider: "smtp",
+    from_name: "IIAL Grants",
+    from_address: "me@gmail.com",
+    reply_to: null,
+    smtp_host: "smtp.gmail.com",
+    smtp_port: 465,
+    smtp_secure: "tls",
+    smtp_user: "me@gmail.com",
+    secret: "app-password",
+    enabled: true,
+  };
+  it("builds SMTP with a formatted From", () => {
+    expect(toTransport(base)).toEqual({
+      ok: true,
+      transport: expect.objectContaining({
+        kind: "smtp",
+        host: "smtp.gmail.com",
+        secure: "tls",
+        from: "IIAL Grants <me@gmail.com>",
+      }),
+    });
+  });
+  it("builds STARTTLS for Microsoft 365", () => {
+    const built = toTransport({
+      ...base,
+      smtp_host: "smtp.office365.com",
+      smtp_port: 587,
+      smtp_secure: "starttls",
+    });
+    expect(built.ok && built.transport.kind === "smtp" && built.transport.secure).toBe("starttls");
+  });
+  it("builds Resend from a saved key", () => {
+    expect(toTransport({ ...base, provider: "resend", secret: "re_x" })).toMatchObject({
+      ok: true,
+      transport: { kind: "resend", apiKey: "re_x" },
+    });
+  });
+  it("refuses settings without a secret", () => {
+    expect(toTransport({ ...base, secret: null })).toMatchObject({ ok: false });
+  });
+});
+
+describe("smtpError", () => {
+  it("passes other errors through", () => {
+    expect(smtpError(new Error("connect ETIMEDOUT"))).toBe("connect ETIMEDOUT");
   });
 });

@@ -14,6 +14,7 @@ import { Route as AuthRouteImport } from './routes/auth'
 import { Route as CatalogRouteImport } from './routes/catalog'
 import { Route as ClientsIndexRouteImport } from './routes/clients.index'
 import { Route as ClientsClientIdRouteImport } from './routes/clients.$clientId'
+import { Route as SettingsEmailRouteImport } from './routes/settings.email'
 import { Route as ApiCalendarTokenRouteImport } from './routes/api.calendar.$token'
 import { Route as ClientsClientIdMatchesRouteImport } from './routes/clients_.$clientId.matches'
 import { Route as ClientsClientIdProposalsGrantIdRouteImport } from './routes/clients_.$clientId.proposals.$grantId'
@@ -43,6 +44,11 @@ const ClientsClientIdRoute = ClientsClientIdRouteImport.update({
   path: '/clients/$clientId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SettingsEmailRoute = SettingsEmailRouteImport.update({
+  id: '/settings/email',
+  path: '/settings/email',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiCalendarTokenRoute = ApiCalendarTokenRouteImport.update({
   id: '/api/calendar/$token',
   path: '/api/calendar/$token',
@@ -65,6 +71,7 @@ export interface FileRoutesByFullPath {
   '/auth': typeof AuthRoute
   '/catalog': typeof CatalogRoute
   '/clients/$clientId': typeof ClientsClientIdRoute
+  '/settings/email': typeof SettingsEmailRoute
   '/clients/': typeof ClientsIndexRoute
   '/api/calendar/$token': typeof ApiCalendarTokenRoute
   '/clients/$clientId/matches': typeof ClientsClientIdMatchesRoute
@@ -75,6 +82,7 @@ export interface FileRoutesByTo {
   '/auth': typeof AuthRoute
   '/catalog': typeof CatalogRoute
   '/clients/$clientId': typeof ClientsClientIdRoute
+  '/settings/email': typeof SettingsEmailRoute
   '/clients': typeof ClientsIndexRoute
   '/api/calendar/$token': typeof ApiCalendarTokenRoute
   '/clients/$clientId/matches': typeof ClientsClientIdMatchesRoute
@@ -86,6 +94,7 @@ export interface FileRoutesById {
   '/auth': typeof AuthRoute
   '/catalog': typeof CatalogRoute
   '/clients/$clientId': typeof ClientsClientIdRoute
+  '/settings/email': typeof SettingsEmailRoute
   '/clients/': typeof ClientsIndexRoute
   '/api/calendar/$token': typeof ApiCalendarTokenRoute
   '/clients_/$clientId/matches': typeof ClientsClientIdMatchesRoute
@@ -98,6 +107,7 @@ export interface FileRouteTypes {
     | '/auth'
     | '/catalog'
     | '/clients/$clientId'
+    | '/settings/email'
     | '/clients/'
     | '/api/calendar/$token'
     | '/clients/$clientId/matches'
@@ -108,6 +118,7 @@ export interface FileRouteTypes {
     | '/auth'
     | '/catalog'
     | '/clients/$clientId'
+    | '/settings/email'
     | '/clients'
     | '/api/calendar/$token'
     | '/clients/$clientId/matches'
@@ -118,6 +129,7 @@ export interface FileRouteTypes {
     | '/auth'
     | '/catalog'
     | '/clients/$clientId'
+    | '/settings/email'
     | '/clients/'
     | '/api/calendar/$token'
     | '/clients_/$clientId/matches'
@@ -129,6 +141,7 @@ export interface RootRouteChildren {
   AuthRoute: typeof AuthRoute
   CatalogRoute: typeof CatalogRoute
   ClientsClientIdRoute: typeof ClientsClientIdRoute
+  SettingsEmailRoute: typeof SettingsEmailRoute
   ClientsIndexRoute: typeof ClientsIndexRoute
   ApiCalendarTokenRoute: typeof ApiCalendarTokenRoute
   ClientsClientIdMatchesRoute: typeof ClientsClientIdMatchesRoute
@@ -172,6 +185,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ClientsClientIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/settings/email': {
+      id: '/settings/email'
+      path: '/settings/email'
+      fullPath: '/settings/email'
+      preLoaderRoute: typeof SettingsEmailRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/calendar/$token': {
       id: '/api/calendar/$token'
       path: '/api/calendar/$token'
@@ -201,6 +221,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuthRoute: AuthRoute,
   CatalogRoute: CatalogRoute,
   ClientsClientIdRoute: ClientsClientIdRoute,
+  SettingsEmailRoute: SettingsEmailRoute,
   ClientsIndexRoute: ClientsIndexRoute,
   ApiCalendarTokenRoute: ApiCalendarTokenRoute,
   ClientsClientIdMatchesRoute: ClientsClientIdMatchesRoute,
