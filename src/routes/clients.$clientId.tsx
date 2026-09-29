@@ -5,9 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { extractProfile } from "@/server/profile.functions";
 import { assessProfile, nextGap, type ProfileFields } from "@/lib/profile-completeness";
-import { ProposalPipelineBoard } from "@/components/ProposalPipelineBoard";
-import { GrantBudgetPlanner } from "@/components/GrantBudgetPlanner";
-import { GrantPrioritizationMatrix } from "@/components/GrantPrioritizationMatrix";
+import { PipelineLog } from "@/components/PipelineLog";
 
 export const Route = createFileRoute("/clients/$clientId")({ component: ClientDetail });
 
@@ -36,6 +34,10 @@ type StoredProfile = {
   beneficiaries: string | null;
   reviewed_at: string | null;
   lead_time_weeks: number | null;
+  funded_partner_pathway: boolean | null;
+  partner_lead_time_weeks: number | null;
+  capability_domains: string[] | null;
+  requires_go_decision: boolean | null;
 };
 
 function toFields(profile: StoredProfile | null): ProfileFields {
@@ -95,7 +97,8 @@ function ClientDetail() {
           .from("client_profiles")
           .select(
             "sectors, jurisdictions, stage, annual_budget, capabilities, beneficiaries, " +
-              "reviewed_at, lead_time_weeks",
+              "reviewed_at, lead_time_weeks, funded_partner_pathway, partner_lead_time_weeks, " +
+              "capability_domains, requires_go_decision",
           )
           .eq("client_id", clientId)
           .maybeSingle(),
@@ -325,6 +328,7 @@ function ClientDetail() {
     await run("save", async () => {
       const budget = Number(text("annualBudget").replace(/[,\s$]/g, ""));
       const leadTime = Number(text("leadTimeWeeks"));
+      const partnerLeadTime = Number(text("partnerLeadTimeWeeks"));
       const { error: saveError } = await supabase()
         .from("client_profiles")
         .upsert(
@@ -344,6 +348,13 @@ function ClientDetail() {
             // typed rather than telling them the save failed.
             lead_time_weeks:
               Number.isFinite(leadTime) && leadTime > 0 && leadTime <= 52 ? leadTime : null,
+            partner_lead_time_weeks:
+              Number.isFinite(partnerLeadTime) && partnerLeadTime > 0 && partnerLeadTime <= 52
+                ? partnerLeadTime
+                : null,
+            funded_partner_pathway: form.get("fundedPartnerPathway") === "on",
+            requires_go_decision: form.get("requiresGoDecision") === "on",
+            capability_domains: list("capabilityDomains"),
             // A human just confirmed this, which is exactly what the field means.
             reviewed_at: new Date().toISOString(),
           },
@@ -476,6 +487,48 @@ function ClientDetail() {
             hint="Weeks this client usually needs to write a credible application"
             defaultValue={fields.leadTimeWeeks ? String(fields.leadTimeWeeks) : ""}
           />
+          <EditField
+            name="partnerLeadTimeWeeks"
+            label="Lead time as partner"
+            hint="Weeks needed when a partner must apply as lead (default 8)"
+            defaultValue={
+              profile?.partner_lead_time_weeks ? String(profile.partner_lead_time_weeks) : ""
+            }
+          />
+          <EditField
+            name="capabilityDomains"
+            label="Capability domains"
+            hint="Comma separated — supply chain, micro-credentials, smart cities"
+            defaultValue={(profile?.capability_domains ?? []).join(", ")}
+          />
+          <div className="bg-[var(--color-surface)] px-4 py-3 sm:col-span-2">
+            <label className="flex items-start gap-2 text-sm">
+              <input
+                type="checkbox"
+                name="fundedPartnerPathway"
+                key={String(profile?.funded_partner_pathway ?? false)}
+                defaultChecked={profile?.funded_partner_pathway ?? false}
+                className="mt-1"
+              />
+              <span>
+                Can join as a <strong>funded partner</strong> — an eligible lead (usually a
+                municipality) applies and writes this client into the budget as a paid partner.
+              </span>
+            </label>
+            <label className="mt-2 flex items-start gap-2 text-sm">
+              <input
+                type="checkbox"
+                name="requiresGoDecision"
+                key={String(profile?.requires_go_decision ?? false)}
+                defaultChecked={profile?.requires_go_decision ?? false}
+                className="mt-1"
+              />
+              <span>
+                Requires a <strong>leadership go / no-go</strong> on the Opportunity Brief before
+                any drafting.
+              </span>
+            </label>
+          </div>
           <EditField
             name="capabilities"
             label="Track record"
@@ -630,81 +683,7 @@ function ClientDetail() {
         </section>
       )}
 
-      {/* Lovable-Inspired Proposal Pipeline & Budget Tracker */}
-      <section className="mt-8 space-y-6" data-testid="proposal-pipeline-section">
-        <h2 className="text-lg font-bold text-[var(--color-ink)]">Proposal Funnel & Budgeting</h2>
-        <ProposalPipelineBoard
-          proposals={[
-            {
-              id: "p1",
-              grantId: "g1",
-              grantTitle: "Clean Technology Innovation Program",
-              funderName: "Innovation Canada",
-              amountMax: 150000,
-              currency: "CAD",
-              deadline: "2026-11-30",
-              relevance: 0.92,
-              stage: "draft",
-            },
-            {
-              id: "p2",
-              grantId: "g2",
-              grantTitle: "Community Green Infrastructure Grant",
-              funderName: "Ontario Trillium Foundation",
-              amountMax: 75000,
-              currency: "CAD",
-              deadline: "2026-10-15",
-              relevance: 0.88,
-              stage: "in_review",
-            },
-            {
-              id: "p3",
-              grantId: "g3",
-              grantTitle: "Subsidies for Youth Employment",
-              funderName: "ESDC Canada",
-              amountMax: 35000,
-              currency: "CAD",
-              deadline: "2026-12-01",
-              relevance: 0.75,
-              stage: "submitted",
-            },
-          ]}
-        />
-        <GrantBudgetPlanner grantMaxAmount={150000} />
-
-        {/* Prioritization Matrix */}
-        <GrantPrioritizationMatrix
-          grants={[
-            {
-              id: "m1",
-              title: "Clean Technology Innovation Program",
-              funderName: "Innovation Canada",
-              amountMax: 150000,
-              relevance: 0.92,
-              requirementCount: 3,
-              deadline: "2026-11-30",
-            },
-            {
-              id: "m2",
-              title: "Community Green Infrastructure Grant",
-              funderName: "Ontario Trillium Foundation",
-              amountMax: 75000,
-              relevance: 0.88,
-              requirementCount: 2,
-              deadline: "2026-10-15",
-            },
-            {
-              id: "m3",
-              title: "Subsidies for Youth Employment",
-              funderName: "ESDC Canada",
-              amountMax: 35000,
-              relevance: 0.75,
-              requirementCount: 4,
-              deadline: "2026-12-01",
-            },
-          ]}
-        />
-      </section>
+      <PipelineLog clientId={clientId} />
     </main>
   );
 }

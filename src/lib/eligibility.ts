@@ -1,4 +1,5 @@
 import { fromClientStage, listApplicantTypes, type ApplicantType } from "./applicant-types";
+import { matchedTerms } from "./match-explain";
 
 /**
  * Eligibility is decided by rules, never by a model.
@@ -35,6 +36,7 @@ export type Verdict = "eligible" | "ineligible" | "needs_input";
 
 export type EligibilityInput = {
   grant: {
+    title?: string | null;
     country: string;
     deadline?: string | null;
     status?: string | null;
@@ -57,6 +59,16 @@ export type EligibilityInput = {
      * an opportunity, and the predecessor learned this the expensive way.
      */
     leadTimeWeeks?: number | null;
+    /**
+     * The client can be written into an eligible lead's budget as the paid
+     * delivery partner — usually for a municipality. A call closed to the
+     * client's own legal form is then a partner question, not a rejection.
+     */
+    fundedPartnerPathway?: boolean | null;
+    /** Weeks needed when a partner must apply as lead; its sign-off is slow. */
+    partnerLeadTimeWeeks?: number | null;
+    /** The client's capability domains, for the strategic-fit check. */
+    capabilityDomains?: readonly string[] | null;
   };
   /** Injected so the verdict is reproducible in tests and in the past. */
   today: Date;
@@ -196,6 +208,67 @@ function deadlineRule(input: EligibilityInput): RuleResult {
   };
 }
 
+export type ClientRole = "lead" | "funded_partner" | "none" | "unknown";
+
+/** Lead types a client can join as a paid partner when it cannot lead itself. */
+const PARTNER_LEADS: readonly ApplicantType[] = ["government"];
+
+/**
+ * In what capacity could this client take part at all?
+ *
+ * Lead when its own legal form is invited; funded partner when only a public
+ * body may lead and the client works that way; unknown when either side of the
+ * comparison was never published.
+ */
+export function clientRole(input: EligibilityInput): ClientRole {
+  const declared = (input.grant.eligibleApplicantTypes ?? []).filter(Boolean) as ApplicantType[];
+  const clientTypes = fromClientStage(input.client.stage);
+  if (declared.length === 0 || clientTypes.length === 0) return "unknown";
+  if (clientTypes.some((type) => declared.includes(type))) return "lead";
+  if (input.client.fundedPartnerPathway && declared.some((t) => PARTNER_LEADS.includes(t))) {
+    return "funded_partner";
+  }
+  return "none";
+}
+
+function roleRule(input: EligibilityInput): RuleResult {
+  const role = clientRole(input);
+  if (role === "lead") {
+    return {
+      key: "role",
+      status: "pass",
+      isHardGate: false,
+      detail: "This client can apply as the lead applicant.",
+    };
+  }
+  if (role === "funded_partner") {
+    return {
+      key: "role",
+      status: "pass",
+      isHardGate: false,
+      detail:
+        "Funded partner: an eligible public body applies as lead and writes this client into " +
+        "the budget as its paid delivery partner.",
+    };
+  }
+  if (role === "none") {
+    return {
+      key: "role",
+      status: "fail",
+      isHardGate: false,
+      detail:
+        "No funded role for this client — only unpaid subcontracting, which needs an explicit " +
+        "strategic reason to pursue.",
+    };
+  }
+  return {
+    key: "role",
+    status: "unknown",
+    isHardGate: false,
+    detail: "We cannot tell in what role this client could take part until eligibility is known.",
+  };
+}
+
 function applicantTypeRule(input: EligibilityInput): RuleResult {
   const declared = (input.grant.eligibleApplicantTypes ?? []).filter(Boolean) as ApplicantType[];
   const clientTypes = fromClientStage(input.client.stage);
@@ -226,6 +299,18 @@ function applicantTypeRule(input: EligibilityInput): RuleResult {
       status: "pass",
       isHardGate: true,
       detail: `Open to ${listApplicantTypes(overlap)}, which is what this client is.`,
+    };
+  }
+  // Still a hard gate, but an open one: whether a lead will take the client on
+  // is a conversation, not something the funder's list can settle.
+  if (clientRole(input) === "funded_partner") {
+    return {
+      key: "applicant_type",
+      status: "unknown",
+      isHardGate: true,
+      detail:
+        `Open to ${listApplicantTypes(declared)} only — this client can take part as the funded ` +
+        `partner of an eligible lead. Confirm a lead partner before drafting.`,
     };
   }
   return {
@@ -340,9 +425,30 @@ export function detectCostSharePercent(text: string | null | undefined): number 
   return null;
 }
 
+/**
+ * How much of a required match may be in kind, when the funder says so —
+ * "in-kind contributions may cover up to 50% of the match". A cash match the
+ * client assumed it could meet in staff time is the classic late surprise.
+ */
+export function detectInKindCapPercent(text: string | null | undefined): number | null {
+  if (!text) return null;
+  const hay = text.toLowerCase();
+  const found =
+    /\bin[- ]kind\b[^.%]{0,60}?\b(?:up to|maximum of|max(?:imum)?|no more than|at most|limited to|cannot exceed)\s+(\d{1,3})\s*%/.exec(
+      hay,
+    ) ??
+    /\b(?:up to|maximum of|no more than|at most)\s+(\d{1,3})\s*%[^.]{0,40}?\bin[- ]kind\b/.exec(
+      hay,
+    );
+  if (!found?.[1]) return null;
+  const cap = Number(found[1]);
+  return cap >= 0 && cap <= 100 ? cap : null;
+}
+
 function costShareRule(input: EligibilityInput): RuleResult {
   const text = [input.grant.eligibilityNote, input.grant.summary].filter(Boolean).join(" ");
   const share = detectCostSharePercent(text);
+  const inKindCap = detectInKindCapPercent(text);
 
   if (share === null) {
     return {
@@ -360,11 +466,19 @@ function costShareRule(input: EligibilityInput): RuleResult {
       detail: "The funder covers the full cost.",
     };
   }
+  // Who carries the share depends on the role: as funded partner the lead
+  // pays it, which is exactly why the SOP treats that route as a real one.
+  const carrier =
+    clientRole(input) === "funded_partner" ? "The lead applicant is" : "The applicant is";
+  const inKind =
+    inKindCap === null ? "" : ` In-kind contributions may cover at most ${inKindCap}% of it.`;
   return {
     key: "cost_share",
     status: "fail",
     isHardGate: false,
-    detail: `The applicant is expected to carry about ${share}% of the cost. Confirm that before drafting.`,
+    detail:
+      `${carrier} expected to carry about ${share}% of the cost.${inKind} ` +
+      `Confirm with whoever controls the budget that any cash match can be covered — never assume it.`,
   };
 }
 
@@ -380,9 +494,14 @@ function costShareRule(input: EligibilityInput): RuleResult {
  * written, or may decide a rushed application is worth filing.
  */
 const DEFAULT_LEAD_TIME_WEEKS = 3;
+/** Municipal sign-off cycles are slow and outside the client's control. */
+const DEFAULT_PARTNER_LEAD_TIME_WEEKS = 8;
 
 function runwayRule(input: EligibilityInput): RuleResult {
-  const weeks = input.client.leadTimeWeeks ?? DEFAULT_LEAD_TIME_WEEKS;
+  const asPartner = clientRole(input) === "funded_partner";
+  const weeks = asPartner
+    ? (input.client.partnerLeadTimeWeeks ?? DEFAULT_PARTNER_LEAD_TIME_WEEKS)
+    : (input.client.leadTimeWeeks ?? DEFAULT_LEAD_TIME_WEEKS);
 
   if (!input.grant.deadline) {
     return {
@@ -412,7 +531,9 @@ function runwayRule(input: EligibilityInput): RuleResult {
       key: "runway",
       status: "fail",
       isHardGate: false,
-      detail: `${days} day${days === 1 ? "" : "s"} left, against the ${weeks} weeks this client usually needs. Winnable only if much of it is already written.`,
+      detail: asPartner
+        ? `${days} day${days === 1 ? "" : "s"} left, against the ${weeks} weeks needed when a partner must apply and sign off as lead.`
+        : `${days} day${days === 1 ? "" : "s"} left, against the ${weeks} weeks this client usually needs. Winnable only if much of it is already written.`,
     };
   }
   return {
@@ -423,13 +544,54 @@ function runwayRule(input: EligibilityInput): RuleResult {
   };
 }
 
+/**
+ * Does the funder's own text name any of this client's capability domains?
+ *
+ * Soft, and it never fails: absence of shared wording is not evidence of a poor
+ * fit — meaning-based retrieval already surfaced the call for a reason. It says
+ * which domain the funder names, or that fit is the consultant's call to make.
+ */
+function strategicFitRule(input: EligibilityInput): RuleResult {
+  const domains = (input.client.capabilityDomains ?? []).filter(Boolean);
+  if (domains.length === 0) {
+    return {
+      key: "strategic_fit",
+      status: "unknown",
+      isHardGate: false,
+      detail: "This client has no capability domains on its profile, so fit was not checked.",
+    };
+  }
+  const text = [input.grant.title, input.grant.summary, input.grant.eligibilityNote]
+    .filter(Boolean)
+    .join("\n");
+  const hits = matchedTerms(domains, text);
+  if (hits.length > 0) {
+    return {
+      key: "strategic_fit",
+      status: "pass",
+      isHardGate: false,
+      detail: `Maps to this client's capability in ${hits.map((h) => `"${h}"`).join(", ")}.`,
+    };
+  }
+  return {
+    key: "strategic_fit",
+    status: "unknown",
+    isHardGate: false,
+    detail:
+      "The funder's text names none of this client's capability domains — decide whether it fits " +
+      "an existing one before investing in it.",
+  };
+}
+
 const RULES = [
   jurisdictionRule,
   deadlineRule,
   applicantTypeRule,
+  roleRule,
   scaleRule,
   costShareRule,
   runwayRule,
+  strategicFitRule,
 ];
 
 export type EligibilityDecision = {
@@ -452,7 +614,11 @@ export function decideEligibility(input: EligibilityInput): EligibilityDecision 
   // Eligible, but say what we could not verify rather than implying we checked
   // everything. A consultant who is told "eligible" and later finds an
   // unpublished restriction stops trusting every other verdict too.
-  const unverified = checks.find((c) => !c.isHardGate && c.status === "unknown");
+  // Strategic fit is the client's judgement, not a published requirement, so it
+  // never stands in for "what we could not verify".
+  const unverified = checks.find(
+    (c) => !c.isHardGate && c.status === "unknown" && c.key !== "strategic_fit",
+  );
   const headline = unverified
     ? `Meets every published requirement we can check. ${unverified.detail}`
     : "Meets every published requirement.";

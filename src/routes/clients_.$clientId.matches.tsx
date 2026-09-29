@@ -8,7 +8,12 @@ import { relevanceFrom } from "@/lib/match-explain";
 import { bandOf } from "@/lib/regions";
 import { axisBreakdown } from "@/lib/axis-breakdown";
 import { findMatches } from "@/server/match.functions";
-import { ExplainableFitScorecard } from "@/components/ExplainableFitScorecard";
+import {
+  applyMatchFilters,
+  DEFAULT_MATCH_FILTERS,
+  isFiltering,
+  type MatchFilters,
+} from "@/lib/match-filters";
 
 export const Route = createFileRoute("/clients_/$clientId/matches")({ component: MatchesPage });
 
@@ -90,6 +95,7 @@ function MatchesPage() {
   const [matches, setMatches] = useState<MatchRow[] | null>(null);
   const { busy, error, note, run, setError } = useAction();
   const [showRuledOut, setShowRuledOut] = useState(false);
+  const [filters, setFilters] = useState<MatchFilters>(DEFAULT_MATCH_FILTERS);
   const autoRan = useRef(false);
 
   const load = useCallback(async () => {
@@ -183,15 +189,25 @@ function MatchesPage() {
    * ones regardless of which happened to score higher, because "priority" was
    * the actual ask and a relevance-only order cannot express it.
    */
-  const grouped = (verdict: Verdict) =>
-    (matches ?? [])
-      .filter((m) => m.verdict === verdict)
+  const allOf = (verdict: Verdict) => (matches ?? []).filter((m) => m.verdict === verdict);
+  const grouped = (verdict: Verdict) => {
+    const filtered = applyMatchFilters(allOf(verdict), filters, {
+      today: new Date(),
+      isHome: (country) => bandOf(country, jurisdictions) === "home",
+    });
+    // An explicit sort is what the consultant asked for; only the default
+    // relevance order gets the home-country-first split.
+    if (filters.sort !== "relevance") return filtered;
+    return filtered
       .map((m, index) => ({ m, index, band: bandOf(m.grants?.country, jurisdictions) }))
       .sort((a, b) => {
         const priority = (band: string) => (band === "home" ? 0 : 1);
         return priority(a.band) - priority(b.band) || a.index - b.index;
       })
       .map(({ m }) => m);
+  };
+  const filtering = isFiltering(filters);
+  const set = (patch: Partial<MatchFilters>) => setFilters((current) => ({ ...current, ...patch }));
 
   return (
     <main className="mx-auto max-w-3xl px-6 py-12">
@@ -242,9 +258,114 @@ function MatchesPage() {
         </p>
       )}
 
+      {matches !== null && matches.length > 0 && (
+        <section
+          data-testid="match-filters"
+          aria-label="Filter matches"
+          className="mt-6 grid gap-3 rounded-md border border-[var(--color-rule)] bg-[var(--color-surface)] p-4 text-sm sm:grid-cols-3"
+        >
+          <label className="flex flex-col gap-1 sm:col-span-3">
+            <span className="text-xs uppercase tracking-wide text-[var(--color-ink-soft)]">
+              Search title, summary or funder
+            </span>
+            <input
+              type="search"
+              value={filters.text}
+              onChange={(e) => set({ text: e.target.value })}
+              placeholder="e.g. climate adaptation, micro-credentials, Ontario"
+              className="rounded-md border border-[var(--color-rule)] bg-[var(--color-paper)] px-2 py-1.5"
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-xs uppercase tracking-wide text-[var(--color-ink-soft)]">
+              Closes
+            </span>
+            <select
+              value={filters.closes}
+              onChange={(e) => set({ closes: e.target.value as MatchFilters["closes"] })}
+              className="rounded-md border border-[var(--color-rule)] bg-[var(--color-paper)] px-2 py-1.5"
+            >
+              <option value="any">Any time</option>
+              <option value="30">Within 30 days</option>
+              <option value="90">Within 90 days</option>
+              <option value="rolling">Rolling intake only</option>
+            </select>
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-xs uppercase tracking-wide text-[var(--color-ink-soft)]">
+              Role
+            </span>
+            <select
+              value={filters.role}
+              onChange={(e) => set({ role: e.target.value as MatchFilters["role"] })}
+              className="rounded-md border border-[var(--color-rule)] bg-[var(--color-paper)] px-2 py-1.5"
+            >
+              <option value="any">Any role</option>
+              <option value="lead">Lead applicant</option>
+              <option value="funded_partner">Funded partner</option>
+            </select>
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-xs uppercase tracking-wide text-[var(--color-ink-soft)]">
+              Minimum award
+            </span>
+            <input
+              inputMode="numeric"
+              value={filters.minAmount ?? ""}
+              onChange={(e) => {
+                const n = Number(e.target.value.replace(/[^\d]/g, ""));
+                set({ minAmount: e.target.value.trim() && n > 0 ? n : null });
+              }}
+              placeholder="e.g. 50000"
+              className="rounded-md border border-[var(--color-rule)] bg-[var(--color-paper)] px-2 py-1.5"
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-xs uppercase tracking-wide text-[var(--color-ink-soft)]">
+              Sort
+            </span>
+            <select
+              value={filters.sort}
+              onChange={(e) => set({ sort: e.target.value as MatchFilters["sort"] })}
+              className="rounded-md border border-[var(--color-rule)] bg-[var(--color-paper)] px-2 py-1.5"
+            >
+              <option value="relevance">Relevance (home country first)</option>
+              <option value="deadline">Closing soonest</option>
+              <option value="amount">Largest award</option>
+            </select>
+          </label>
+          <label className="flex items-center gap-2 self-end">
+            <input
+              type="checkbox"
+              checked={filters.fitOnly}
+              onChange={(e) => set({ fitOnly: e.target.checked })}
+            />
+            Names a capability domain
+          </label>
+          <label className="flex items-center gap-2 self-end">
+            <input
+              type="checkbox"
+              checked={filters.homeOnly}
+              onChange={(e) => set({ homeOnly: e.target.checked })}
+            />
+            Home country only
+          </label>
+          {filtering && (
+            <button
+              type="button"
+              onClick={() => setFilters(DEFAULT_MATCH_FILTERS)}
+              className="self-end text-left text-[var(--color-accent)] sm:col-span-3"
+            >
+              Clear filters
+            </button>
+          )}
+        </section>
+      )}
+
       {GROUPS.map((group) => {
         const rows = grouped(group.verdict);
-        if (rows.length === 0) return null;
+        const total = allOf(group.verdict).length;
+        if (total === 0) return null;
         const collapsible = group.verdict === "ineligible";
         const open = !collapsible || showRuledOut;
         const visible = collapsible ? rows.slice(0, RULED_OUT_SHOWN) : rows;
@@ -255,7 +376,7 @@ function MatchesPage() {
               <h2 className="text-sm font-semibold">
                 {group.heading}{" "}
                 <span className="font-mono tabular-nums text-[var(--color-ink-soft)]">
-                  {rows.length}
+                  {filtering ? `${rows.length} of ${total}` : total}
                 </span>
               </h2>
               {collapsible && (
@@ -269,8 +390,13 @@ function MatchesPage() {
               )}
             </div>
             <p className="mt-1 text-sm text-[var(--color-ink-soft)]">{group.blurb}</p>
+            {open && rows.length === 0 && (
+              <p className="mt-3 text-sm text-[var(--color-ink-soft)]">
+                The filters hide all {total} in this group.
+              </p>
+            )}
 
-            {open && (
+            {open && rows.length > 0 && (
               <ul className="mt-3 flex flex-col gap-px overflow-hidden rounded-md border border-[var(--color-rule)] bg-[var(--color-rule)]">
                 {visible.map((row) => (
                   <MatchCard
@@ -306,6 +432,12 @@ function MatchesPage() {
 const FIELD_FOR_RULE: Partial<Record<string, string>> = {
   jurisdiction: "profile-jurisdictions",
   applicant_type: "profile-stage",
+};
+
+const VERDICT_LABEL: Record<Verdict, string> = {
+  eligible: "Can apply",
+  needs_input: "Needs an answer",
+  ineligible: "Ruled out",
 };
 
 const VERDICT_COLOR: Record<Verdict, string> = {
@@ -368,7 +500,7 @@ function MatchCard({
           {grant.title}
         </a>
         <span className={`shrink-0 text-xs font-medium ${VERDICT_COLOR[row.verdict]}`}>
-          {row.verdict === "needs_input" ? "Needs an answer" : row.verdict}
+          {VERDICT_LABEL[row.verdict]}
         </span>
       </div>
 
@@ -418,9 +550,6 @@ function MatchCard({
           "restricted to a country you're not in" with "this award is a bit
           large for your budget", and there is no honest way to average a
           fact with a guess. */}
-      <div className="mt-3">
-        <ExplainableFitScorecard relevance={row.relevance} verdict={row.verdict} axes={axes} />
-      </div>
       {axes.length > 0 && (
         <ul data-testid="axis-breakdown" className="mt-2 flex flex-wrap gap-2 text-xs">
           {axes.map((axis) => (
@@ -458,6 +587,19 @@ function MatchCard({
           className="mt-2 inline-block text-sm font-medium text-[var(--color-accent)]"
         >
           Draft this application →
+        </Link>
+      )}
+      {/* A partner question is answered by qualifying the call, not by
+          drafting it: the brief is where the lead partner, the cost share and
+          the leadership decision get written down. */}
+      {row.verdict === "needs_input" && (
+        <Link
+          to="/clients/$clientId/proposals/$grantId"
+          params={{ clientId, grantId: grant.id }}
+          data-testid="to-brief"
+          className="mt-2 inline-block text-sm font-medium text-[var(--color-accent)]"
+        >
+          Qualify it — open the Opportunity Brief →
         </Link>
       )}
 

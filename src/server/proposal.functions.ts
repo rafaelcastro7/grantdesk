@@ -4,6 +4,7 @@ import { ACCESS_TOKEN_MESSAGE, callerClient } from "./caller";
 import { readRequirementsForGrant } from "./read-requirements";
 import { assessCondition } from "./assess-condition";
 import { draftSection, NoProfileError, saveAnswer, type DraftRequirement } from "./draft";
+import { draftingGate, fromRow, type DecisionRow } from "@/lib/go-decision";
 
 const auth = z.string().min(10, ACCESS_TOKEN_MESSAGE);
 
@@ -112,6 +113,7 @@ export const draftProposalSection = createServerFn({ method: "POST" })
         word_limit: number | null;
         evaluation_note: string | null;
         source_quote: string | null;
+        grant_id: string;
         grants: {
           title: string;
           amount_min: number | null;
@@ -141,6 +143,30 @@ export const draftProposalSection = createServerFn({ method: "POST" })
             }
           : null,
       };
+
+      // Enforced here, not only by a disabled button: the SOP's rule is that no
+      // writing starts before leadership records a go on the brief.
+      const [{ data: policy, error: policyError }, { data: decisionRow, error: decisionError }] =
+        await Promise.all([
+          supabase
+            .from("client_profiles")
+            .select("requires_go_decision")
+            .eq("client_id", data.clientId)
+            .maybeSingle(),
+          supabase
+            .from("opportunity_decisions")
+            .select("decision, decided_by, condition, condition_met")
+            .eq("client_id", data.clientId)
+            .eq("grant_id", row.grant_id)
+            .maybeSingle(),
+        ]);
+      if (policyError) throw new Error(policyError.message);
+      if (decisionError) throw new Error(decisionError.message);
+      const gate = draftingGate(
+        fromRow(decisionRow as DecisionRow | null),
+        !!(policy as { requires_go_decision?: boolean } | null)?.requires_go_decision,
+      );
+      if (!gate.allowed) return { ok: false as const, error: gate.reason };
 
       const result = await draftSection(supabase, data.clientId, target);
 

@@ -1,5 +1,9 @@
 import { useState } from "react";
-import { calculateGrantRoi, type PrioritizationInput, type PrioritizationQuadrant } from "@/lib/prioritization";
+import {
+  calculateGrantRoi,
+  type PrioritizationInput,
+  type PrioritizationQuadrant,
+} from "@/lib/prioritization";
 
 type Props = {
   grants: PrioritizationInput[];
@@ -23,7 +27,16 @@ export function GrantPrioritizationMatrix({ grants, onSelectGrant }: Props) {
   });
 
   const handleExportCsv = () => {
-    const headers = ["ID", "Title", "Funder", "Max Amount", "Expected Value", "Est Hours", "ROI Score ($/hr)", "Quadrant"];
+    const headers = [
+      "ID",
+      "Title",
+      "Funder",
+      "Max Amount",
+      "Expected Value",
+      "Est Hours",
+      "ROI Score ($/hr)",
+      "Quadrant",
+    ];
     const rows = filtered.map((g) => [
       g.id,
       `"${g.title.replace(/"/g, '""')}"`,
@@ -34,7 +47,9 @@ export function GrantPrioritizationMatrix({ grants, onSelectGrant }: Props) {
       g.roiScore,
       g.quadrant,
     ]);
-    const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
+    const csvContent =
+      "data:text/csv;charset=utf-8," +
+      [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);

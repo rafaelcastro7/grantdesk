@@ -41,6 +41,9 @@ export type ProfileRow = {
   capabilities: string | null;
   beneficiaries: string | null;
   lead_time_weeks: number | null;
+  funded_partner_pathway: boolean | null;
+  partner_lead_time_weeks: number | null;
+  capability_domains: string[] | null;
 };
 
 export type MatchRow = {
@@ -110,7 +113,7 @@ export async function runMatch(
     .from("client_profiles")
     .select(
       "sectors, jurisdictions, stage, annual_budget, currency, capabilities, beneficiaries, " +
-        "lead_time_weeks",
+        "lead_time_weeks, funded_partner_pathway, partner_lead_time_weeks, capability_domains",
     )
     .eq("client_id", clientId)
     .maybeSingle();
@@ -205,6 +208,7 @@ export async function runMatch(
 
     const decision = decideEligibility({
       grant: {
+        title: grant.title,
         country: grant.country,
         deadline: grant.deadline,
         status: grant.status,
@@ -223,6 +227,9 @@ export async function runMatch(
         annualBudget: profile.annual_budget,
         currency: profile.currency,
         leadTimeWeeks: profile.lead_time_weeks,
+        fundedPartnerPathway: profile.funded_partner_pathway,
+        partnerLeadTimeWeeks: profile.partner_lead_time_weeks,
+        capabilityDomains: profile.capability_domains,
       },
       today,
     });

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   decideEligibility,
   detectCostSharePercent,
+  detectInKindCapPercent,
   statesForeignEligibility,
   type EligibilityInput,
 } from "./eligibility";
@@ -328,5 +329,116 @@ describe("runway", () => {
       decideEligibility(input({ grant: { deadline: null } })).checks.find((c) => c.key === "runway")
         ?.status,
     ).toBe("pass");
+  });
+});
+
+describe("role and the funded-partner pathway", () => {
+  const municipalOnly = { eligibleApplicantTypes: ["government"] };
+
+  it("rules a nonprofit out of a municipal-only call when it has no partner pathway", () => {
+    const decision = decideEligibility(input({ grant: municipalOnly }));
+    expect(decision.verdict).toBe("ineligible");
+    expect(check(decision, "role").status).toBe("fail");
+  });
+
+  it("turns that call into a partner question when the client works as a funded partner", () => {
+    const decision = decideEligibility(
+      input({ grant: municipalOnly, client: { fundedPartnerPathway: true } }),
+    );
+    expect(decision.verdict).toBe("needs_input");
+    expect(check(decision, "applicant_type").status).toBe("unknown");
+    expect(check(decision, "role").detail).toMatch(/Funded partner/);
+  });
+
+  it("names the lead as the one carrying the cost share in a partner role", () => {
+    const decision = decideEligibility(
+      input({
+        grant: { ...municipalOnly, eligibilityNote: "Covers 80% of eligible costs." },
+        client: { fundedPartnerPathway: true },
+      }),
+    );
+    expect(check(decision, "cost_share").detail).toMatch(
+      /lead applicant is expected to carry about 20%/,
+    );
+  });
+
+  it("reports the lead role when the client's own legal form is invited", () => {
+    const decision = decideEligibility(input({ grant: { eligibleApplicantTypes: ["nonprofit"] } }));
+    expect(check(decision, "role").status).toBe("pass");
+    expect(check(decision, "role").detail).toMatch(/lead applicant/);
+  });
+
+  it("needs eight weeks by default when a partner must apply as lead", () => {
+    // 2026-09-20 is 35 days out: enough as lead (4 weeks), not as partner.
+    const asLead = decideEligibility(
+      input({
+        grant: { deadline: "2026-09-20", eligibleApplicantTypes: ["nonprofit"] },
+        client: { leadTimeWeeks: 4 },
+      }),
+    );
+    expect(check(asLead, "runway").status).toBe("pass");
+
+    const asPartner = decideEligibility(
+      input({
+        grant: { deadline: "2026-09-20", ...municipalOnly },
+        client: { leadTimeWeeks: 4, fundedPartnerPathway: true },
+      }),
+    );
+    expect(check(asPartner, "runway").status).toBe("fail");
+    expect(check(asPartner, "runway").detail).toContain("8 weeks");
+  });
+});
+
+describe("in-kind cap", () => {
+  it("reads a cap on how much of the match may be in kind", () => {
+    expect(detectInKindCapPercent("In-kind contributions may cover up to 50% of the match.")).toBe(
+      50,
+    );
+    expect(detectInKindCapPercent("Matching funds are required.")).toBeNull();
+  });
+
+  it("states the cap and insists the cash match be confirmed", () => {
+    const decision = decideEligibility(
+      input({
+        grant: {
+          eligibilityNote:
+            "A 50% match is required. In-kind contributions may cover no more than 50% of the match.",
+        },
+      }),
+    );
+    const detail = check(decision, "cost_share").detail;
+    expect(detail).toContain("50%");
+    expect(detail).toMatch(/at most 50%/);
+    expect(detail).toMatch(/never assume/);
+  });
+});
+
+describe("strategic fit", () => {
+  it("is unknown, never a fail, when the client lists no capability domains", () => {
+    const decision = decideEligibility(input({}));
+    expect(check(decision, "strategic_fit").status).toBe("unknown");
+    expect(check(decision, "strategic_fit").isHardGate).toBe(false);
+  });
+
+  it("names the capability domain the funder's own text mentions", () => {
+    const decision = decideEligibility(
+      input({
+        grant: { title: "Smart Cities Challenge", summary: "Connected infrastructure pilots." },
+        client: { capabilityDomains: ["smart cities", "micro-credentials"] },
+      }),
+    );
+    expect(check(decision, "strategic_fit").status).toBe("pass");
+    expect(check(decision, "strategic_fit").detail).toContain("smart cities");
+  });
+
+  it("asks for a fit decision instead of ruling out a call that names no domain", () => {
+    const decision = decideEligibility(
+      input({
+        grant: { title: "Bridge deck repair", summary: "Structural repairs." },
+        client: { capabilityDomains: ["smart cities"] },
+      }),
+    );
+    expect(check(decision, "strategic_fit").status).toBe("unknown");
+    expect(decision.verdict).toBe("eligible");
   });
 });

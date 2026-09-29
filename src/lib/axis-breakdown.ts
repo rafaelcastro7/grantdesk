@@ -17,7 +17,7 @@ import type { RuleResult } from "./eligibility";
  * sentence a check already produced. Nothing here is inferred; it is sorted.
  */
 
-export type AxisKey = "eligibility" | "timeline" | "budget";
+export type AxisKey = "eligibility" | "timeline" | "budget" | "fit";
 
 export type AxisStatus = "pass" | "partial" | "fail" | "unknown";
 
@@ -33,18 +33,21 @@ export type Axis = {
 const AXIS_OF: Record<string, AxisKey> = {
   jurisdiction: "eligibility",
   applicant_type: "eligibility",
+  role: "eligibility",
   deadline: "timeline",
   runway: "timeline",
   scale: "budget",
   cost_share: "budget",
+  strategic_fit: "fit",
 };
 
-const AXIS_ORDER: AxisKey[] = ["eligibility", "timeline", "budget"];
+const AXIS_ORDER: AxisKey[] = ["eligibility", "timeline", "budget", "fit"];
 
 const AXIS_LABELS: Record<AxisKey, string> = {
   eligibility: "Eligibility",
   timeline: "Timeline",
   budget: "Budget fit",
+  fit: "Strategic fit",
 };
 
 /**

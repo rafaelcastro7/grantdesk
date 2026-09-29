@@ -1,7 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { ProposalApprovalWorkflow } from "@/components/ProposalApprovalWorkflow";
-import { GrantBudgetPlanner } from "@/components/GrantBudgetPlanner";
-import { ProposalDocumentExporter } from "@/components/ProposalDocumentExporter";
+import { OpportunityBrief } from "@/components/OpportunityBrief";
+import type { DraftingGate } from "@/lib/go-decision";
 import { useServerFn } from "@tanstack/react-start";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
@@ -89,6 +88,7 @@ function ProposalPage() {
   const [readText, setReadText] = useState<string | null>(null);
   const [concerns, setConcerns] = useState<string[]>([]);
   const [assessments, setAssessments] = useState<Record<string, string>>({});
+  const [gate, setGate] = useState<DraftingGate>({ allowed: true });
   const assessing = useRef(new Set<string>());
   const { busy, error, note, run, setError } = useAction();
   const autoRead = useRef(false);
@@ -821,6 +821,8 @@ function ProposalPage() {
           this was found against is a real, common example of — its own URL
           is an administrator's page, not the opportunity's, so extraction
           has nothing to read there by design, not by failure. */}
+        <OpportunityBrief clientId={clientId} grantId={grantId} onGate={setGate} />
+
         {requirements !== null && (
           <section className="mt-10">
             <div className="flex items-center justify-between gap-3">
@@ -853,7 +855,7 @@ function ProposalPage() {
                   requirement={requirement}
                   section={sections[requirement.id]}
                   busy={busy === requirement.id}
-                  disabled={busy !== null}
+                  disabled={busy !== null || !gate.allowed}
                   onDraft={() => draft(requirement)}
                   onSave={(content) => saveEdit(requirement, content)}
                   onKeep={(content) => keepAnswer(requirement, content)}
@@ -1032,39 +1034,6 @@ function ProposalPage() {
             )}
           </section>
         )}
-
-        {/* SmartRoute Workflow & Budget Planner */}
-        <div className="mt-6 space-y-6">
-          <ProposalApprovalWorkflow
-            currentStage="draft"
-            wordCount={
-              Array.isArray(sections)
-                ? sections.reduce(
-                    (sum: number, s: { word_count?: number | null }) => sum + (s.word_count || 0),
-                    0,
-                  )
-                : 0
-            }
-            wordLimit={5000}
-            unacknowledgedCount={0}
-            onStageChange={(newStage) => console.log("Stage changed to:", newStage)}
-          />
-          <GrantBudgetPlanner grantMaxAmount={100000} />
-
-          <ProposalDocumentExporter
-            clientName="Client Organization"
-            grantTitle={grant?.title || "Grant Proposal"}
-            funderName="Funder Program"
-            sections={
-              Array.isArray(sections)
-                ? sections.map((s: { heading?: string; content?: string | null }) => ({
-                    heading: s.heading || "Section",
-                    content: s.content ?? null,
-                  }))
-                : []
-            }
-          />
-        </div>
       </main>
 
       {/* Print-only: assembled as a plain document rather than mirroring the
