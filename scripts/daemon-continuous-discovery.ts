@@ -20,6 +20,7 @@ import { runSource } from "../src/server/ingest";
 import { embedCatalog } from "../src/server/embed";
 import { scanAndAlertNewGrants, scanAndAlertDeadlines } from "../src/server/notifications";
 import { todayIn } from "../src/lib/deadline";
+import { runOutbox } from "../src/server/email-sender";
 
 // Same precedence as the app: .env.local overrides .env per key.
 config({ path: ".env.local" });
@@ -135,6 +136,17 @@ export async function runDiscoveryCycle(
     } catch (err) {
       console.error(
         `[Discovery Daemon] Embedding failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  // After both scans, so this cycle's alerts go out in this cycle.
+  if (!options.skipAlerts) {
+    try {
+      await runOutbox(supabase);
+    } catch (err) {
+      console.error(
+        `[Discovery Daemon] Email delivery failed: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
   }

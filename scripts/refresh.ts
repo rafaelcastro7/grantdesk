@@ -28,6 +28,7 @@ const { SOURCES, sourceByKey } = await import("../src/server/sources");
 const { runSource } = await import("../src/server/ingest");
 const { embedCatalog, embedPendingAnswers, EMBED_MODEL } = await import("../src/server/embed");
 const { minutesUntilNextDue, sourcesDue } = await import("../src/lib/refresh-schedule");
+const { runOutbox } = await import("../src/server/email-sender");
 
 const force = process.argv.slice(2).includes("--force");
 
@@ -112,6 +113,15 @@ try {
   failures++;
   console.log(`FAILED  ${caught instanceof Error ? caught.message : String(caught)}`);
   console.error("  Meaning-based search will be stale for anything new. Is Ollama running?");
+}
+
+// Last, so anything queued by this run goes out with it.
+try {
+  const sent = await runOutbox(supabase);
+  if (sent && sent.failed > 0) failures++;
+} catch (caught) {
+  failures++;
+  console.log(`email FAILED  ${caught instanceof Error ? caught.message : String(caught)}`);
 }
 
 if (ingested > 0 || failures > 0) {

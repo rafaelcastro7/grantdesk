@@ -318,15 +318,62 @@ export async function scanAndAlertNewGrants({
 }
 
 /**
+ * The chat message for a deadline reminder. Slack and Teams incoming webhooks
+ * both accept a bare {text}, so one payload serves either without an adapter.
+ * Plain text: neither renders HTML, and funder titles must not become markup
+ * in either's own syntax, so angle brackets are stripped.
+ */
+export function buildDeadlineWebhookPayload({
+  grantTitle,
+  clientName,
+  daysLeft,
+  deadline,
+  link,
+}: {
+  grantTitle: string;
+  clientName: string;
+  daysLeft: number;
+  deadline: string;
+  link?: string | null;
+}): { text: string } {
+  const clean = (value: string) => value.replace(/[<>]/g, "").replace(/\s+/g, " ").trim();
+  const when = daysLeft === 1 ? "1 day left" : `${daysLeft} days left`;
+  const url = link && /^https:\/\//.test(link) ? ` ${link}` : "";
+  return {
+    text: `GrantDesk: ${when} for ${clean(clientName)} — ${clean(grantTitle)} (closes ${clean(deadline)}).${url}`,
+  };
+}
+
+type TenantRow = { slug: string; alert_webhook_url?: string | null };
+
+export type PostWebhook = (url: string, payload: { text: string }) => Promise<void>;
+
+const postWebhookViaSafeFetch: PostWebhook = async (url, payload) => {
+  // Imported here: safe-fetch needs node:dns, and this module's formatters are
+  // plain functions a test or a browser bundle may load.
+  const { safeFetch } = await import("./safe-fetch");
+  const response = await safeFetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(10_000),
+    maxRedirects: 0,
+  });
+  if (!response.ok) throw new Error(`webhook answered ${response.status}`);
+};
+
+/**
  * Evaluates impending deadlines (e.g. 14d, 7d, 3d, 1d) and queues alerts.
  */
 export async function scanAndAlertDeadlines({
   supabase,
   today = new Date(),
+  postWebhook = postWebhookViaSafeFetch,
 }: {
   supabase: SupabaseClient;
   today?: Date;
-}): Promise<{ queued: number }> {
+  postWebhook?: PostWebhook;
+}): Promise<{ queued: number; webhooksPosted: number; webhookFailures: number }> {
   const horizonDate = new Date(today.getTime() + 15 * 86_400_000);
   const todayStr = today.toISOString().slice(0, 10);
   const horizonStr = horizonDate.toISOString().slice(0, 10);
@@ -338,7 +385,8 @@ export async function scanAndAlertDeadlines({
         .from("proposals")
         .select(
           "id, client_id, grant_id, grant:grants!inner(id, title, deadline, status), " +
-            "client:clients!inner(id, name, consultant_id, tenant_id, tenant:tenants(slug)), " +
+            "client:clients!inner(id, name, consultant_id, tenant_id, " +
+            "tenant:tenants(slug, alert_webhook_url)), " +
             "submissions(id), proposal_sections(id)",
         )
         .gte("grant.deadline", todayStr)
@@ -349,7 +397,7 @@ export async function scanAndAlertDeadlines({
   if (error) throw new Error(`reminder scan could not read proposals: ${error.message}`);
   if (decisionError)
     throw new Error(`reminder scan could not read decisions: ${decisionError.message}`);
-  if (!proposals) return { queued: 0 };
+  if (!proposals) return { queued: 0, webhooksPosted: 0, webhookFailures: 0 };
   const decisionOf = new Map(
     ((decisions ?? []) as Array<{ client_id: string; grant_id: string; decision: string }>).map(
       (d) => [`${d.client_id}|${d.grant_id}`, d.decision],
@@ -366,6 +414,8 @@ export async function scanAndAlertDeadlines({
   );
 
   let queued = 0;
+  let webhooksPosted = 0;
+  let webhookFailures = 0;
 
   for (const row of proposals as unknown as Array<{
     client_id: string;
@@ -389,10 +439,11 @@ export async function scanAndAlertDeadlines({
       name: string;
       consultant_id: string;
       tenant_id: string | null;
-      tenant: { slug: string } | Array<{ slug: string }> | null;
+      tenant: TenantRow | TenantRow[] | null;
     } | null;
     if (!grant?.deadline || !client?.tenant_id) continue;
-    const tenantSlug = (Array.isArray(client.tenant) ? client.tenant[0] : client.tenant)?.slug;
+    const tenant = Array.isArray(client.tenant) ? client.tenant[0] : client.tenant;
+    const tenantSlug = tenant?.slug;
     if (!tenantSlug || (grant.status && grant.status !== "open")) continue;
 
     const daysLeft = daysUntilDeadline(grant.deadline, today);
@@ -421,10 +472,33 @@ export async function scanAndAlertDeadlines({
       status: "pending",
     });
 
-    if (!insertErr) queued++;
-    else if (insertErr.code !== "23505")
+    if (insertErr) {
+      if (insertErr.code === "23505") continue; // already reminded today, chat included
       throw new Error(`could not queue reminder: ${insertErr.message}`);
+    }
+    queued++;
+
+    if (tenant?.alert_webhook_url) {
+      try {
+        await postWebhook(
+          tenant.alert_webhook_url,
+          buildDeadlineWebhookPayload({
+            grantTitle: grant.title,
+            clientName: client.name,
+            daysLeft,
+            deadline: grant.deadline,
+          }),
+        );
+        webhooksPosted++;
+      } catch (caught) {
+        // The email is already queued; a chat outage must not stop the scan.
+        webhookFailures++;
+        console.error(
+          `deadline webhook failed for tenant ${tenantSlug}: ${caught instanceof Error ? caught.message : String(caught)}`,
+        );
+      }
+    }
   }
 
-  return { queued };
+  return { queued, webhooksPosted, webhookFailures };
 }
