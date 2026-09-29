@@ -4,6 +4,12 @@ import { supabase } from "@/lib/supabase";
 import { Landing } from "@/components/Landing";
 import { daysUntilDeadline } from "@/lib/deadline";
 import { buildIcs } from "@/lib/ics";
+import {
+  calendarFeedPath,
+  generateCalendarToken,
+  hashCalendarToken,
+  isInProgress,
+} from "@/lib/calendar-feed";
 import { useDocumentTitle } from "@/lib/use-document-title";
 
 export const Route = createFileRoute("/")({ component: Home });
@@ -95,12 +101,7 @@ function Home() {
 
   // In progress means real work exists — a section or a brief. Merely opening
   // a call to look at it is not an application, and a no-go is not due.
-  const active = (rows ?? []).filter(
-    (r) =>
-      r.submissions.length === 0 &&
-      r.decision !== "no_go" &&
-      (r.proposal_sections.length > 0 || r.decision != null),
-  );
+  const active = (rows ?? []).filter(isInProgress);
   const isClosed = (r: Row) =>
     !!r.grants?.deadline && daysUntilDeadline(r.grants.deadline, new Date()) < 0;
   const lapsed = active.filter(isClosed);
@@ -161,6 +162,7 @@ function Home() {
           Add these deadlines to my calendar (.ics)
         </button>
       )}
+      <CalendarSubscription />
 
       {error && (
         <p role="alert" className="mt-4 text-sm text-[var(--color-ineligible)]">
@@ -287,6 +289,134 @@ function Home() {
         </section>
       )}
     </main>
+  );
+}
+
+type ActiveToken = { id: string; created_at: string };
+
+/**
+ * A feed the calendar app keeps polling, unlike the one-off download above,
+ * which is out of date the first time a deadline moves. The raw link exists
+ * only in this component's state: the database keeps its hash, so a lost link
+ * is replaced, never recovered.
+ */
+function CalendarSubscription() {
+  const [active, setActive] = useState<ActiveToken | null | undefined>(undefined);
+  const [freshUrl, setFreshUrl] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    void (async () => {
+      const { data, error: readError } = await supabase()
+        .from("calendar_tokens")
+        .select("id, created_at")
+        .is("revoked_at", null)
+        .order("created_at", { ascending: false })
+        .limit(1);
+      if (readError) setError(`Could not read your calendar link: ${readError.message}`);
+      else setActive((data?.[0] as ActiveToken | undefined) ?? null);
+    })();
+  }, []);
+
+  const revokeAll = async () => {
+    const { error: revokeError } = await supabase()
+      .from("calendar_tokens")
+      .update({ revoked_at: new Date().toISOString() })
+      .is("revoked_at", null);
+    if (revokeError) throw new Error(revokeError.message);
+  };
+
+  const create = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const { data: session } = await supabase().auth.getSession();
+      const userId = session.session?.user.id;
+      if (!userId) throw new Error("Your session expired. Sign in again.");
+      // One live link per consultant: a new one retires the old.
+      await revokeAll();
+      const token = generateCalendarToken();
+      const { data, error: insertError } = await supabase()
+        .from("calendar_tokens")
+        .insert({ consultant_id: userId, token_hash: await hashCalendarToken(token) })
+        .select("id, created_at")
+        .single();
+      if (insertError) throw new Error(insertError.message);
+      setActive(data as ActiveToken);
+      setFreshUrl(`${window.location.origin}${calendarFeedPath(token)}`);
+    } catch (caught) {
+      setError(
+        `Could not create a calendar link: ${caught instanceof Error ? caught.message : String(caught)}`,
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const revoke = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await revokeAll();
+      setActive(null);
+      setFreshUrl(null);
+    } catch (caught) {
+      setError(
+        `Could not revoke the calendar link: ${caught instanceof Error ? caught.message : String(caught)}`,
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const buttonClass =
+    "rounded-md border border-[var(--color-rule)] px-3 py-1.5 text-sm font-medium disabled:opacity-50";
+
+  return (
+    <section data-testid="calendar-subscription" className="mt-3 text-sm">
+      {active === null && (
+        <button type="button" disabled={busy} onClick={() => void create()} className={buttonClass}>
+          Subscribe in Google/Outlook
+        </button>
+      )}
+      {freshUrl && (
+        <div className="mt-2 rounded-md border border-[var(--color-rule)] p-3">
+          <p>
+            Add this address in Google Calendar (Other calendars, From URL) or Outlook (Add
+            calendar, Subscribe from web). It is shown only now; anyone with it can see these
+            deadlines.
+          </p>
+          <input
+            readOnly
+            value={freshUrl}
+            onFocus={(e) => e.currentTarget.select()}
+            aria-label="Calendar subscription address"
+            className="mt-2 w-full rounded border border-[var(--color-rule)] px-2 py-1 font-mono text-xs"
+          />
+        </div>
+      )}
+      {active && (
+        <p className="mt-2 text-[var(--color-ink-soft)]">
+          {freshUrl
+            ? ""
+            : `A calendar subscription is active since ${new Date(active.created_at).toLocaleDateString()}. Lost the address? Revoke it and subscribe again. `}
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => void revoke()}
+            className="text-[var(--color-accent)] underline"
+          >
+            Revoke calendar link
+          </button>
+        </p>
+      )}
+      {error && (
+        <p role="alert" className="mt-2 text-[var(--color-ineligible)]">
+          {error}
+        </p>
+      )}
+    </section>
   );
 }
 

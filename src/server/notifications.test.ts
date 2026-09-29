@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { formatNewGrantEmail, formatDeadlineEmail } from "./notifications";
+import {
+  buildDeadlineWebhookPayload,
+  formatDeadlineEmail,
+  formatNewGrantEmail,
+} from "./notifications";
 
 describe("notifications formatting and logic", () => {
   it("formats new grant email with high fidelity and tenant branding", () => {
@@ -42,5 +46,36 @@ describe("notifications formatting and logic", () => {
 
     expect(upcoming.subject).toContain("14d");
     expect(upcoming.html).toContain("14 Days Remaining");
+  });
+});
+
+describe("buildDeadlineWebhookPayload", () => {
+  it("is a bare {text} that Slack and Teams both accept", () => {
+    const payload = buildDeadlineWebhookPayload({
+      grantTitle: "Community Health Grant",
+      clientName: "HealthOrg",
+      daysLeft: 7,
+      deadline: "2026-10-05",
+      link: "https://iial.grantdesk.app/clients/c/proposals/g",
+    });
+    expect(Object.keys(payload)).toEqual(["text"]);
+    expect(payload.text).toBe(
+      "GrantDesk: 7 days left for HealthOrg — Community Health Grant (closes 2026-10-05). " +
+        "https://iial.grantdesk.app/clients/c/proposals/g",
+    );
+  });
+
+  it("says 1 day, strips markup and refuses non-https links", () => {
+    const { text } = buildDeadlineWebhookPayload({
+      grantTitle: "<script>x</script>  Fund\n",
+      clientName: "<!channel> Org",
+      daysLeft: 1,
+      deadline: "2026-10-01",
+      link: "javascript:alert(1)",
+    });
+    expect(text).toBe(
+      "GrantDesk: 1 day left for !channel Org — scriptx/script Fund (closes 2026-10-01).",
+    );
+    expect(text).not.toMatch(/[<>]/);
   });
 });

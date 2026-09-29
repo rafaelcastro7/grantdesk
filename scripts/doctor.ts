@@ -324,6 +324,35 @@ try {
   record("ingestion", "broken", error instanceof Error ? error.message : String(error));
 }
 
+// ── Email delivery ──────────────────────────────────────────────────────────
+// Alerts queue whether or not anything sends them, so an outbox that only
+// grows looks exactly like a quiet week from every screen.
+try {
+  const { emailConfig } = await import("../src/server/email-sender");
+  const email = emailConfig(process.env);
+  const hourAgo = new Date(Date.now() - 3_600_000).toISOString();
+  const { count, error } = await supabase
+    .from("email_outbox")
+    .select("id", { count: "exact", head: true })
+    .eq("status", "pending")
+    .lt("created_at", hourAgo);
+  if (error) throw new Error(error.message);
+  const stuck = count ?? 0;
+  if (!email.ok) {
+    record("email", "degraded", `${email.reason}; ${stuck} pending row(s) older than 1h`);
+  } else if (stuck > 0) {
+    record(
+      "email",
+      "degraded",
+      `${stuck} pending row(s) older than 1h — run: bun run scripts/send-outbox.ts`,
+    );
+  } else {
+    record("email", "ok", "configured, nothing pending for over an hour");
+  }
+} catch (error) {
+  record("email", "broken", error instanceof Error ? error.message : String(error));
+}
+
 // ── Verdict ─────────────────────────────────────────────────────────────────
 const broken = checks.filter((c) => c.verdict === "broken");
 const degraded = checks.filter((c) => c.verdict === "degraded");
