@@ -3,6 +3,7 @@ import {
   buildDeadlineWebhookPayload,
   formatDeadlineEmail,
   formatNewGrantEmail,
+  formatReportDueEmail,
 } from "./notifications";
 
 describe("notifications formatting and logic", () => {
@@ -46,6 +47,21 @@ describe("notifications formatting and logic", () => {
 
     expect(upcoming.subject).toContain("14d");
     expect(upcoming.html).toContain("14 Days Remaining");
+  });
+
+  it("formats an award report reminder and escapes funder text", () => {
+    const { subject, html } = formatReportDueEmail({
+      grantTitle: "Skills <Fund>",
+      clientName: "HealthOrg",
+      reportLabel: "Year 1 interim",
+      kind: "interim",
+      daysLeft: 7,
+      dueOn: "2026-10-06",
+    });
+    expect(subject).toContain("Report due in 7d");
+    expect(html).toContain("Interim report");
+    expect(html).toContain("Skills &lt;Fund&gt;");
+    expect(html).not.toContain("<Fund>");
   });
 });
 

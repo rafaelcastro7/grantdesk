@@ -1,9 +1,12 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { errorMessage } from "@/lib/error-message";
 import { draftingGate, fromRow, type Decision, type DraftingGate } from "@/lib/go-decision";
 import { parseMoney } from "@/lib/parse-money";
 import { unsignedChecks } from "@/lib/assignments";
+import { detectCostSharePercent, detectInKindCapPercent } from "@/lib/eligibility";
+import type { BudgetTotals } from "@/lib/budget";
+import { BudgetBuilder } from "./BudgetBuilder";
 
 type BriefRow = {
   role: "lead" | "funded_partner" | "other" | null;
@@ -50,7 +53,10 @@ const CONFLICT =
 export type BriefPrefill = {
   deadline: string | null;
   amountMax: number | null;
+  amountMin?: number | null;
   currency: string | null;
+  /** The call's eligibility and summary text, read for cost-share and in-kind caps. */
+  costShareText?: string;
   mandatoryComponents: string;
   risks: string;
 };
@@ -125,6 +131,7 @@ export function OpportunityBrief({
   const [message, setMessage] = useState<string | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [roleFromRules, setRoleFromRules] = useState<BriefRow["role"]>(null);
+  const formRef = useRef<HTMLFormElement>(null);
 
   const load = useCallback(async () => {
     const [decisionResult, policyResult, matchResult] = await Promise.all([
@@ -336,6 +343,30 @@ export function OpportunityBrief({
   // consultant's typing.
   const k = row ? `saved-${row.updated_at}` : "new";
   const unit = prefill.currency ?? "currency not published";
+  const costSharePercent = detectCostSharePercent(prefill.costShareText);
+  const inKindCapPercent = detectInKindCapPercent(prefill.costShareText);
+
+  // Writes into the uncontrolled form rather than saving: the brief is a record
+  // leadership signs, so the totals land as edits the consultant then saves.
+  function applyBudgetTotals(totals: BudgetTotals) {
+    const form = formRef.current;
+    if (!form) return;
+    const set = (name: string, value: number) => {
+      const field = form.elements.namedItem(name);
+      if (field instanceof HTMLInputElement) field.value = String(Math.round(value * 100) / 100);
+    };
+    set("requestAmount", totals.request);
+    set("matchRequired", totals.match);
+    // The brief's cap is the funder's limit in money, which only exists when
+    // the call states a percentage; the budget's own in-kind is not a cap.
+    if (inKindCapPercent !== null) set("inKindCap", (inKindCapPercent / 100) * totals.match);
+    setFailure(null);
+    setMessage(
+      inKindCapPercent === null
+        ? "Request and match filled from the budget; the call states no in-kind cap, so that field was left as it was. Save the brief to keep them."
+        : "Request, match and in-kind cap filled from the budget. Save the brief to keep them.",
+    );
+  }
 
   return (
     <section className="mt-10" data-testid="opportunity-brief">
@@ -363,6 +394,7 @@ export function OpportunityBrief({
       ) : (
         <form
           key={k}
+          ref={formRef}
           onSubmit={save}
           className="mt-3 grid gap-px overflow-hidden rounded-md border border-[var(--color-rule)] bg-[var(--color-rule)] sm:grid-cols-2"
         >
@@ -512,6 +544,20 @@ export function OpportunityBrief({
             )}
           </div>
         </form>
+      )}
+
+      {(row || ready) && (
+        <BudgetBuilder
+          clientId={clientId}
+          grantId={grantId}
+          currency={prefill.currency}
+          amountMin={prefill.amountMin ?? null}
+          amountMax={prefill.amountMax}
+          costSharePercent={costSharePercent}
+          inKindCapPercent={inKindCapPercent}
+          locked={locked}
+          onUseTotals={applyBudgetTotals}
+        />
       )}
 
       {!gate.allowed && (

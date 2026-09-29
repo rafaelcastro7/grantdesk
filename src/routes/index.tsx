@@ -19,6 +19,8 @@ import {
   type Assignment,
   type DueGroup,
 } from "@/lib/assignments";
+import { errorMessage } from "@/lib/error-message";
+import { inRenewalWindow, REPORT_KIND_LABEL, type ReportKind } from "@/lib/post-award";
 
 export const Route = createFileRoute("/")({ component: Home });
 
@@ -37,6 +39,31 @@ type Row = {
   /** Joined in code from requirement_assignments. */
   assignments: Assignment[];
 };
+
+type ProposalRef = {
+  client_id: string;
+  grant_id: string;
+  clients: { name: string } | null;
+  grants: { title: string } | null;
+};
+
+type ReportRow = {
+  id: string;
+  label: string;
+  kind: ReportKind;
+  due_on: string;
+  proposals: ProposalRef | null;
+};
+
+type AwardRow = { proposal_id: string; end_on: string | null; proposals: ProposalRef | null };
+
+/** One line on the list: an application, a report owed, or a renewal window. */
+type DueItem =
+  | { type: "application"; date: string | null; row: Row }
+  | { type: "report"; date: string; report: ReportRow }
+  | { type: "renewal"; date: string; award: AwardRow };
+
+const REF = "client_id, grant_id, clients(name), grants(title)";
 
 const DECISION_LABEL: Record<string, string> = {
   pending: "awaiting go / no-go",
@@ -82,6 +109,9 @@ function Home() {
   const [signedIn, setSignedIn] = useState<boolean | null>(null);
   const [clientFilter, setClientFilter] = useState("");
   const [ownerFilter, setOwnerFilter] = useState("");
+  const [reports, setReports] = useState<ReportRow[]>([]);
+  const [awards, setAwards] = useState<AwardRow[]>([]);
+  const [marking, setMarking] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const { data: session } = await supabase().auth.getSession();
@@ -92,7 +122,7 @@ function Home() {
     setSignedIn(true);
     setMyId(session.session.user.id);
 
-    const [proposals, decisions, assignments, roster] = await Promise.all([
+    const [proposals, decisions, assignments, roster, reportResult, awardResult] = await Promise.all([
       supabase()
         .from("proposals")
         .select(
@@ -109,10 +139,25 @@ function Home() {
         .from("requirement_assignments")
         .select("proposal_id, requirement_id, owner_id, due_on, done_at"),
       supabase().rpc("client_team_roster", { target: null }),
+      supabase()
+        .from("award_reports")
+        .select(`id, label, kind, due_on, proposals(${REF})`)
+        .is("submitted_on", null)
+        .order("due_on"),
+      supabase()
+        .from("award_details")
+        .select(`proposal_id, end_on, proposals(${REF})`)
+        .not("end_on", "is", null),
     ]);
     // An owner filter over a failed assignment read would show "nothing due"
     // for someone with a full week; say it failed instead.
-    const readError = proposals.error ?? decisions.error ?? assignments.error ?? roster.error;
+    const readError =
+      proposals.error ??
+      decisions.error ??
+      assignments.error ??
+      roster.error ??
+      reportResult.error ??
+      awardResult.error;
     if (readError) {
       setError(readError.message);
       return;
@@ -157,6 +202,8 @@ function Home() {
         ).map((m) => [m.user_id, memberName({ email: m.email, displayName: m.display_name })]),
       ),
     );
+    setReports((reportResult.data ?? []) as unknown as ReportRow[]);
+    setAwards((awardResult.data ?? []) as unknown as AwardRow[]);
     setRows(
       ((proposals.data ?? []) as unknown as Row[]).map((r) => {
         const d = decisionOf.get(`${r.client_id}|${r.grant_id}`);
@@ -266,6 +313,53 @@ function Home() {
     URL.revokeObjectURL(url);
   }
 
+  // Reports owed and renewal windows sit in the same urgency groups as the
+  // applications. They carry no owner, so an owner filter hides them; an
+  // overdue report is still owed, so it stays on the list, while a lapsed
+  // application cannot be sent any more, which is why it has its own section.
+  const obligations: Array<Exclude<DueItem, { type: "application" }>> = [
+    ...reports.map((report) => ({ type: "report" as const, date: report.due_on, report })),
+    ...awards
+      .filter((award) => inRenewalWindow(award.end_on, today))
+      .map((award) => ({ type: "renewal" as const, date: award.end_on!, award })),
+  ];
+  const shownObligations = obligations.filter((item) => {
+    const ref = item.type === "report" ? item.report.proposals : item.award.proposals;
+    return !owner && (!clientFilter || ref?.client_id === clientFilter);
+  });
+  const groupedItems: Record<Exclude<DueGroup, "closed">, DueItem[]> = {
+    overdue: grouped.overdue.map((row) => ({ type: "application" as const, date: soonest(row), row })),
+    this_week: grouped.this_week.map((row) => ({
+      type: "application" as const,
+      date: soonest(row),
+      row,
+    })),
+    later: grouped.later.map((row) => ({ type: "application" as const, date: soonest(row), row })),
+  };
+  for (const item of shownObligations) {
+    const group = dueGroup(null, item.date, today);
+    groupedItems[group === "closed" ? "overdue" : group].push(item);
+  }
+  for (const key of Object.keys(groupedItems) as Array<Exclude<DueGroup, "closed">>) {
+    groupedItems[key].sort((a, b) => (a.date ?? "9999-12-31").localeCompare(b.date ?? "9999-12-31"));
+  }
+  const items = [...groupedItems.overdue, ...groupedItems.this_week, ...groupedItems.later];
+
+  async function markReportSubmitted(report: ReportRow) {
+    setMarking(report.id);
+    setError(null);
+    const { error: updateError } = await supabase()
+      .from("award_reports")
+      .update({ submitted_on: new Date().toISOString().slice(0, 10) })
+      .eq("id", report.id);
+    setMarking(null);
+    if (updateError) {
+      setError(errorMessage(updateError));
+      return;
+    }
+    setReports((current) => current.filter((r) => r.id !== report.id));
+  }
+
   // One route, two audiences. A visitor gets the case for the product; a
   // signed-in consultant gets the first of the five questions in docs/SPEC.md.
   // Splitting them into two routes would add a screen to the budget in
@@ -338,7 +432,7 @@ function Home() {
         </p>
       )}
 
-      {active.length > 0 && (
+      {(active.length > 0 || obligations.length > 0) && (
         <div
           className="mt-6 flex flex-wrap items-center gap-3 text-sm"
           role="group"
@@ -387,7 +481,11 @@ function Home() {
         </div>
       )}
 
-      {signedIn && rows !== null && active.length === 0 && sent.length === 0 && (
+      {signedIn &&
+        rows !== null &&
+        active.length === 0 &&
+        obligations.length === 0 &&
+        sent.length === 0 && (
         <p className="mt-8 text-sm text-[var(--color-ink-soft)]">
           Nothing in progress yet.{" "}
           <Link to="/clients" className="text-[var(--color-accent)]">
@@ -397,23 +495,36 @@ function Home() {
         </p>
       )}
 
-      {active.length > 0 && open.length === 0 && lapsed.length === 0 && (
+      {(active.length > 0 || obligations.length > 0) &&
+        items.length === 0 &&
+        lapsed.length === 0 && (
         <p className="mt-6 text-sm text-[var(--color-ink-soft)]">
           Nothing in progress matches these filters.
         </p>
       )}
 
-      {open.length > 0 && (
+      {items.length > 0 && (
         <div data-testid="due-list" className="mt-6 flex flex-col gap-6">
-          {GROUPS.filter(([key]) => grouped[key].length > 0).map(([key, title]) => (
+          {GROUPS.filter(([key]) => groupedItems[key].length > 0).map(([key, title]) => (
             <section key={key} data-testid={`due-${key}`}>
               <h2
                 className={`text-sm font-semibold ${key === "overdue" ? "text-[var(--color-ineligible)]" : ""}`}
               >
-                {title} ({grouped[key].length})
+                {title} ({groupedItems[key].length})
               </h2>
               <ul className="mt-2 flex flex-col gap-px overflow-hidden rounded-md border border-[var(--color-rule)] bg-[var(--color-rule)]">
-                {grouped[key].map((row) => {
+                {groupedItems[key].map((item) => {
+                  if (item.type !== "application") {
+                    return (
+                      <ObligationItem
+                        key={`${item.type}-${item.type === "report" ? item.report.id : item.award.proposal_id}`}
+                        item={item}
+                        busy={marking !== null}
+                        onSubmitted={markReportSubmitted}
+                      />
+                    );
+                  }
+                  const row = item.row;
                   const next = nextAssignment(row.assignments, owner);
                   return (
                     <li key={row.id} className="bg-[var(--color-surface)] px-4 py-3">
@@ -652,6 +763,74 @@ function CalendarSubscription() {
         </p>
       )}
     </section>
+  );
+}
+
+function ObligationItem({
+  item,
+  busy,
+  onSubmitted,
+}: {
+  item: Exclude<DueItem, { type: "application" }>;
+  busy: boolean;
+  onSubmitted: (report: ReportRow) => void;
+}) {
+  const ref = item.type === "report" ? item.report.proposals : item.award.proposals;
+  const days = daysUntilDeadline(item.date, new Date());
+  const name = item.type === "report" ? item.report.label : (ref?.grants?.title ?? "Award");
+  return (
+    <li data-testid={`due-${item.type}`} className="bg-[var(--color-surface)] px-4 py-3">
+      <div className="flex items-baseline justify-between gap-3">
+        <span>
+          <span className="mr-2 text-xs font-semibold uppercase tracking-wide text-[var(--color-needs-input)]">
+            {item.type === "report" ? "Report due" : "Renewal window"}
+          </span>
+          {ref ? (
+            <Link
+              to="/clients/$clientId/proposals/$grantId"
+              params={{ clientId: ref.client_id, grantId: ref.grant_id }}
+              className="font-medium text-[var(--color-accent)]"
+            >
+              {name}
+            </Link>
+          ) : (
+            <span className="font-medium">{name}</span>
+          )}
+        </span>
+        <span
+          className={`shrink-0 text-xs font-medium tabular-nums ${
+            days < 0 ? "text-[var(--color-ineligible)]" : "text-[var(--color-ink-soft)]"
+          }`}
+        >
+          {item.type === "renewal"
+            ? `agreement ends in ${days} days`
+            : days < 0
+              ? `overdue since ${item.date}`
+              : days === 0
+                ? "due today"
+                : `${days} days left`}
+        </span>
+      </div>
+      <p className="mt-1 flex flex-wrap items-baseline gap-x-3 text-xs text-[var(--color-ink-soft)]">
+        <span>
+          {ref?.clients?.name}
+          {item.type === "report"
+            ? ` · ${REPORT_KIND_LABEL[item.report.kind]} · ${ref?.grants?.title ?? ""}`
+            : ` · ends ${item.date}; time to raise the renewal with the funder`}
+        </span>
+        {item.type === "report" && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => onSubmitted(item.report)}
+            data-testid="mark-report-submitted"
+            className="text-[var(--color-accent)] disabled:opacity-50"
+          >
+            Mark as submitted
+          </button>
+        )}
+      </p>
+    </li>
   );
 }
 
