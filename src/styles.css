@@ -112,3 +112,14 @@ body {
     "Segoe UI",
     sans-serif;
 }
+
+/* Opportunity Brief print: html[data-print="brief"] is set only for the
+   duration of that print, so the proposal export keeps printing as before. */
+@media print {
+  html[data-print="brief"] body > :not(.print-brief) {
+    display: none !important;
+  }
+  html[data-print="brief"] body > .print-brief {
+    display: block !important;
+  }
+}

@@ -1081,6 +1081,17 @@ function ProposalPage() {
           <OpportunityBrief
             clientId={clientId}
             grantId={grantId}
+            call={{
+              title: grant.title,
+              funder: grant.funders?.name ?? null,
+              country: grant.country,
+              deadline: grant.deadline,
+              amountMin: grant.amount_min,
+              amountMax: grant.amount_max,
+              currency: grant.currency,
+              url: grant.url,
+              opportunityNumber: grant.opportunity_number,
+            }}
             onGate={setGate}
             locked={!!submission}
             // The pre-fill reads the call's requirements; showing the form

@@ -64,21 +64,6 @@ export function dueGroup(deadline: string | null, nextDueOn: string | null, toda
   return "later";
 }
 
-/**
- * A spreadsheet cell. A value starting with "=", "+", "-", "@" or a control
- * character would run as a formula when the file is opened in Excel; a
- * leading apostrophe keeps it text.
- */
-export function csvCell(value: unknown): string {
-  const text = String(value ?? "");
-  const safe = /^[=+\-@\t\r]/.test(text) ? `'${text}` : text;
-  return `"${safe.replace(/"/g, '""')}"`;
-}
-
-export function toCsv(rows: unknown[][]): string {
-  return rows.map((row) => row.map(csvCell).join(",")).join("\n");
-}
-
 /** Checks recorded with a date but nobody's name against them. */
 export function unsignedChecks(
   checks: Record<string, [by: string | null, on: string | null]>,

@@ -1,11 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   assignmentSuffix,
-  csvCell,
   dueGroup,
   memberName,
   nextAssignment,
-  toCsv,
   unsignedChecks,
   type Assignment,
 } from "./assignments";
@@ -70,17 +68,6 @@ describe("memberName", () => {
   it("prefers a display name and falls back to the email", () => {
     expect(memberName({ email: "m@x.ca", displayName: "Maria" })).toBe("Maria");
     expect(memberName({ email: "m@x.ca", displayName: "  " })).toBe("m@x.ca");
-  });
-});
-
-describe("csv", () => {
-  it("neutralises formula injection", () => {
-    expect(csvCell("=HYPERLINK(1)")).toBe(`"'=HYPERLINK(1)"`);
-    expect(csvCell("-2+3")).toBe(`"'-2+3"`);
-    expect(csvCell("@SUM")).toBe(`"'@SUM"`);
-  });
-  it("quotes and escapes", () => {
-    expect(toCsv([["a", 'say "hi"', null]])).toBe(`"a","say ""hi""",""`);
   });
 });
 

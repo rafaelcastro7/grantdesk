@@ -1,7 +1,7 @@
 import { Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
-import { toCsv } from "@/lib/assignments";
+import { downloadText, toCsv } from "@/lib/csv";
 
 type Decision = "pending" | "go" | "no_go" | "go_conditional";
 
@@ -187,13 +187,7 @@ export function PipelineLog({ clientId }: { clientId: string }) {
         e.outcome,
       ]),
     ]);
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "pipeline-log.csv";
-    a.click();
-    URL.revokeObjectURL(url);
+    downloadText("pipeline-log.csv", csv, "text/csv;charset=utf-8");
   }
 
   const counts = {

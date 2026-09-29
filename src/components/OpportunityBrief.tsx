@@ -1,5 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { supabase } from "@/lib/supabase";
+import {
+  briefDocument,
+  briefFilename,
+  briefMarkdown,
+  type BriefCall,
+  type BriefDocument,
+} from "@/lib/brief-export";
+import { downloadText } from "@/lib/csv";
 import { errorMessage } from "@/lib/error-message";
 import { draftingGate, fromRow, type Decision, type DraftingGate } from "@/lib/go-decision";
 import { parseMoney } from "@/lib/parse-money";
@@ -111,11 +120,14 @@ export function OpportunityBrief({
   grantId,
   onGate,
   prefill,
+  call,
   locked = false,
   ready = true,
 }: {
   clientId: string;
   grantId: string;
+  /** The call's published facts, for the printed and downloaded brief. */
+  call: BriefCall;
   onGate: (gate: DraftingGate) => void;
   /** What the catalog and the rules already know, used when no brief exists yet. */
   prefill: BriefPrefill;
@@ -368,19 +380,58 @@ export function OpportunityBrief({
     );
   }
 
+  // Exports describe what is saved (or the pre-fill), never unsaved typing.
+  const doc = briefDocument(call, { ...r, recorderEmail: r.recorder?.email ?? null }, !!row);
+
+  function printBrief() {
+    const root = document.documentElement;
+    root.dataset.print = "brief";
+    const done = () => {
+      delete root.dataset.print;
+      window.removeEventListener("afterprint", done);
+    };
+    window.addEventListener("afterprint", done);
+    window.print();
+  }
+
   return (
     <section className="mt-10" data-testid="opportunity-brief">
-      <div className="flex items-baseline justify-between gap-3">
+      <div className="flex flex-wrap items-baseline justify-between gap-3">
         <h2 className="text-sm font-semibold">Opportunity Brief and go / no-go</h2>
-        <span
-          data-testid="go-decision"
-          className={`text-xs font-semibold uppercase tracking-wide ${
-            gate.allowed ? "text-[var(--color-eligible)]" : "text-[var(--color-needs-input)]"
-          }`}
-        >
-          {DECISION_LABEL[r?.decision ?? "pending"]}
-        </span>
+        <div className="flex flex-wrap items-baseline gap-2">
+          <button
+            type="button"
+            onClick={printBrief}
+            data-testid="print-brief"
+            className="rounded-md border border-[var(--color-rule)] px-3 py-1 text-xs font-medium"
+          >
+            Print brief
+          </button>
+          <button
+            type="button"
+            onClick={() =>
+              downloadText(
+                briefFilename(call.title),
+                briefMarkdown(doc),
+                "text/markdown;charset=utf-8",
+              )
+            }
+            data-testid="download-brief"
+            className="rounded-md border border-[var(--color-rule)] px-3 py-1 text-xs font-medium"
+          >
+            Download brief (.md)
+          </button>
+          <span
+            data-testid="go-decision"
+            className={`text-xs font-semibold uppercase tracking-wide ${
+              gate.allowed ? "text-[var(--color-eligible)]" : "text-[var(--color-needs-input)]"
+            }`}
+          >
+            {DECISION_LABEL[r?.decision ?? "pending"]}
+          </span>
+        </div>
       </div>
+      {typeof document !== "undefined" && createPortal(<PrintedBrief doc={doc} />, document.body)}
       <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
         {required
           ? "One page for leadership. This client's policy: nothing is drafted until a decision is recorded here."
@@ -575,6 +626,33 @@ export function OpportunityBrief({
         </p>
       )}
     </section>
+  );
+}
+
+/**
+ * Paper only. Portalled to <body> because the proposal screen's own print
+ * export hides its whole <main>; `html[data-print="brief"]` (styles.css) then
+ * prints this alone and nothing else.
+ */
+function PrintedBrief({ doc }: { doc: BriefDocument }) {
+  return (
+    <div aria-hidden="true" className="print-brief hidden text-sm text-black">
+      <h1 className="text-lg font-semibold">Opportunity Brief — {doc.title}</h1>
+      {!doc.saved && <p className="mt-1 italic">Draft: pre-filled from the call, not yet saved.</p>}
+      {doc.sections.map((section) => (
+        <section key={section.heading} className="mt-3 break-inside-avoid">
+          <h2 className="border-b border-black pb-0.5 text-sm font-semibold">{section.heading}</h2>
+          <dl className="mt-1 grid grid-cols-[11rem_1fr] gap-x-3 gap-y-0.5 text-xs">
+            {section.rows.map(([label, value]) => (
+              <div key={label} className="contents">
+                <dt className="font-medium">{label}</dt>
+                <dd className="whitespace-pre-wrap break-words">{value}</dd>
+              </div>
+            ))}
+          </dl>
+        </section>
+      ))}
+    </div>
   );
 }
 

@@ -15,10 +15,10 @@ import {
   dueGroup,
   memberName,
   nextAssignment,
-  toCsv,
   type Assignment,
   type DueGroup,
 } from "@/lib/assignments";
+import { downloadText, toCsv } from "@/lib/csv";
 import { errorMessage } from "@/lib/error-message";
 import { inRenewalWindow, REPORT_KIND_LABEL, type ReportKind } from "@/lib/post-award";
 
@@ -305,12 +305,7 @@ function Home() {
         ];
       }),
     ]);
-    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "grantdesk-applications.csv";
-    a.click();
-    URL.revokeObjectURL(url);
+    downloadText("grantdesk-applications.csv", csv, "text/csv;charset=utf-8");
   }
 
   // Reports owed and renewal windows sit in the same urgency groups as the

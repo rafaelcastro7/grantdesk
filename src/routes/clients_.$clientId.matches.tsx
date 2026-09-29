@@ -18,9 +18,10 @@ import {
   type MatchFilters,
 } from "@/lib/match-filters";
 
-export const Route = createFileRoute("/clients_/$clientId/matches")({ component: MatchesPage });
+import { downloadText } from "@/lib/csv";
+import { groupOf, verdictsCsv, type GroupKey, type Verdict } from "@/lib/verdict-export";
 
-type Verdict = "eligible" | "needs_input" | "ineligible";
+export const Route = createFileRoute("/clients_/$clientId/matches")({ component: MatchesPage });
 
 type MatchRow = {
   id: string;
@@ -60,23 +61,6 @@ type MatchRow = {
  * disappears is indistinguishable from one we never found, and the difference
  * is the entire claim this product makes.
  */
-/**
- * "Eligible" splits in two on screen. When the funder publishes who may apply
- * and this client is on the list, that is a verified yes. When it publishes no
- * list, location and dates pass but nobody has checked the applicant rules —
- * showing both under one "Can apply" claimed verification that never happened.
- */
-type GroupKey = Verdict | "unverified";
-
-function groupOf(row: {
-  verdict: Verdict;
-  eligibility_checks: Array<{ rule_key: string; status: string }>;
-}): GroupKey {
-  if (row.verdict !== "eligible") return row.verdict;
-  const applicant = row.eligibility_checks.find((c) => c.rule_key === "applicant_type");
-  return applicant?.status === "pass" ? "eligible" : "unverified";
-}
-
 const GROUPS: Array<{ verdict: GroupKey; heading: string; blurb: string }> = [
   {
     verdict: "eligible",
@@ -285,6 +269,23 @@ function MatchesPage() {
             className="rounded-md border border-[var(--color-rule)] px-4 py-2 text-sm font-medium disabled:opacity-50"
           >
             Search deeper (300 calls)
+          </button>
+        )}
+        {matches && matches.length > 0 && (
+          <button
+            type="button"
+            onClick={() =>
+              downloadText(
+                `verdicts-${(clientName || "client").toLowerCase().replace(/[^a-z0-9]+/g, "-")}.csv`,
+                verdictsCsv(matches),
+                "text/csv;charset=utf-8",
+              )
+            }
+            data-testid="export-verdicts"
+            title="Every match with its group and each rule's result — ruled-out calls included"
+            className="rounded-md border border-[var(--color-rule)] px-4 py-2 text-sm font-medium"
+          >
+            Export verdicts (CSV)
           </button>
         )}
         {note && (
