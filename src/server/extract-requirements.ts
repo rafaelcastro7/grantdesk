@@ -76,9 +76,10 @@ export function normalizeWordLimit(value: unknown): number | null {
   if (typeof value === "number")
     return Number.isFinite(value) && value > 0 ? Math.round(value) : null;
   if (typeof value !== "string") return null;
-  const match = /(\d[\d,]*)\s*(?:-|\s)?\s*words?/i.exec(value);
+  // "mots": French calls state limits as "500 mots" or "1 000 mots".
+  const match = /(\d(?:[\d,]|\s(?=\d{3}))*)\s*(?:-|\s)?\s*(?:words?|mots)\b/i.exec(value);
   if (!match?.[1]) return null;
-  const parsed = Number(match[1].replace(/,/g, ""));
+  const parsed = Number(match[1].replace(/[,\s]/g, ""));
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
@@ -128,7 +129,7 @@ export function parseRequirements(raw: string): ExtractedRequirement[] {
   return out;
 }
 
-const SYSTEM = `You read a funding call and list exactly what an applicant must provide.
+export const REQUIREMENTS_SYSTEM_PROMPT = `You read a funding call and list exactly what an applicant must provide.
 
 You may be given more than one page — a funder's notice frequently states the
 offer and links elsewhere for "How to Apply" or the eligibility rules, and
@@ -166,6 +167,12 @@ Merge conditions that restate one rule. A call that says an applicant must be a
 501(c)(3) nonprofit is one eligibility requirement, not three — listing
 "Applicant Status", "Nonprofit Status" and "501(c)(3) Status" separately gives a
 consultant a list they cannot act on. Prefer the funder's own heading.
+
+Keep the call's own language. For a call written in French, label, detail,
+evaluationNote and sourceQuote stay in French, and label is the funder's French
+heading verbatim (e.g. "Description du projet", not "Project Description").
+Never translate: the consultant answers the form in the language it asks in,
+and a translated heading matches nothing on the funder's form.
 
 If the page is not a funding call, or lists no requirements, return an empty array.
 
@@ -219,7 +226,7 @@ async function extractFromPages(pages: Page[]): Promise<RequirementExtraction> {
     temperature: 0.1,
     maxTokens: 4000,
     messages: [
-      { role: "system", content: SYSTEM },
+      { role: "system", content: REQUIREMENTS_SYSTEM_PROMPT },
       {
         role: "user",
         content: pages
@@ -516,7 +523,7 @@ export async function extractRequirementsFromText(
     temperature: 0.1,
     maxTokens: 4000,
     messages: [
-      { role: "system", content: SYSTEM },
+      { role: "system", content: REQUIREMENTS_SYSTEM_PROMPT },
       {
         role: "user",
         content: [

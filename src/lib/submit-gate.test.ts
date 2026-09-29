@@ -229,6 +229,11 @@ describe("countGaps", () => {
     expect(countGaps("We need nothing.")).toBe(0);
     expect(countGaps(null)).toBe(0);
   });
+
+  it("counts a gap a French draft localised to [BESOIN : ...]", () => {
+    expect(countGaps("Dirigé par [BESOIN : nom du responsable] et [NEED: date].")).toBe(2);
+    expect(countGaps("Le besoin est réel : 400 élèves.")).toBe(0);
+  });
 });
 
 describe("documents linked from the register", () => {

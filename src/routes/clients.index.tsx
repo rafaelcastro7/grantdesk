@@ -3,6 +3,7 @@ import { useAction } from "@/lib/use-action";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useDocumentTitle } from "@/lib/use-document-title";
+import { useI18n } from "@/lib/i18n";
 
 export const Route = createFileRoute("/clients/")({ component: ClientsPage });
 
@@ -15,10 +16,10 @@ type ClientRow = {
 };
 
 /** Where the profile says they operate — not the column default every client gets. */
-function operatesIn(row: ClientRow): string {
+function operatesIn(row: ClientRow, notFilled: string): string {
   const profile = Array.isArray(row.client_profiles) ? row.client_profiles[0] : row.client_profiles;
   const places = profile?.jurisdictions ?? [];
-  return places.length ? places.join(", ") : "profile not filled";
+  return places.length ? places.join(", ") : notFilled;
 }
 
 /**
@@ -27,7 +28,8 @@ function operatesIn(row: ClientRow): string {
  * they are working for.
  */
 function ClientsPage() {
-  useDocumentTitle("Clients");
+  const { t } = useI18n();
+  useDocumentTitle(t("clients.title"));
   const navigate = useNavigate();
   const [clients, setClients] = useState<ClientRow[] | null>(null);
   const [name, setName] = useState("");
@@ -63,7 +65,7 @@ function ClientsPage() {
     await run("add", async () => {
       const { data: userData } = await supabase().auth.getUser();
       const consultantId = userData.user?.id;
-      if (!consultantId) throw new Error("Your session expired. Sign in again.");
+      if (!consultantId) throw new Error(t("clients.sessionExpired"));
 
       const { data, error: insertError } = await supabase()
         .from("clients")
@@ -78,18 +80,15 @@ function ClientsPage() {
 
   return (
     <main className="mx-auto max-w-3xl px-6 py-12">
-      <h1 className="text-2xl font-semibold tracking-tight">Clients</h1>
-      <p className="mt-2 text-sm text-[var(--color-ink-soft)]">
-        Every organization you represent. Matching quality follows profile quality, so a thin
-        profile is worth two minutes before it is worth a search.
-      </p>
+      <h1 className="text-2xl font-semibold tracking-tight">{t("clients.title")}</h1>
+      <p className="mt-2 text-sm text-[var(--color-ink-soft)]">{t("clients.intro")}</p>
 
       <form
         onSubmit={addClient}
         className="mt-8 flex flex-wrap items-end gap-3 rounded-md border border-[var(--color-rule)] bg-[var(--color-surface)] p-4"
       >
         <label className="flex min-w-48 flex-1 flex-col gap-1.5 text-sm">
-          Organization name
+          {t("clients.orgName")}
           <input
             name="clientName"
             required
@@ -99,8 +98,8 @@ function ClientsPage() {
           />
         </label>
         <label className="flex min-w-56 flex-1 flex-col gap-1.5 text-sm">
-          Website{" "}
-          <span className="text-[var(--color-ink-soft)]">(we read it to fill the profile)</span>
+          {t("clients.website")}{" "}
+          <span className="text-[var(--color-ink-soft)]">{t("clients.websiteHint")}</span>
           <input
             name="clientWebsite"
             type="url"
@@ -115,7 +114,7 @@ function ClientsPage() {
           disabled={busy !== null}
           className="rounded-md bg-[var(--color-accent-strong)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
         >
-          {busy ? "Adding…" : "Add client"}
+          {busy ? t("clients.adding") : t("clients.add")}
         </button>
       </form>
 
@@ -127,11 +126,11 @@ function ClientsPage() {
 
       <section className="mt-8">
         {clients === null ? (
-          <p className="text-sm text-[var(--color-ink-soft)]">{error ? "" : "Loading…"}</p>
-        ) : clients.length === 0 ? (
           <p className="text-sm text-[var(--color-ink-soft)]">
-            No clients yet. Add the first one above.
+            {error ? "" : t("clients.loading")}
           </p>
+        ) : clients.length === 0 ? (
+          <p className="text-sm text-[var(--color-ink-soft)]">{t("clients.empty")}</p>
         ) : (
           <ul className="flex flex-col gap-px overflow-hidden rounded-md border border-[var(--color-rule)] bg-[var(--color-rule)]">
             {clients.map((client) => (
@@ -143,7 +142,7 @@ function ClientsPage() {
                 >
                   <span className="font-medium">{client.name}</span>
                   <span className="font-mono text-xs text-[var(--color-ink-soft)]">
-                    {operatesIn(client)}
+                    {operatesIn(client, t("clients.profileNotFilled"))}
                   </span>
                 </Link>
               </li>
