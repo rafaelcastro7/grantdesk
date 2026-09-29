@@ -1,6 +1,7 @@
 import { Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import { toCsv } from "@/lib/assignments";
 
 type Decision = "pending" | "go" | "no_go" | "go_conditional";
 
@@ -170,14 +171,7 @@ export function PipelineLog({ clientId }: { clientId: string }) {
       "Submitted",
       "Outcome",
     ];
-    // A funder title starting with "=" or "+" would run as a formula when the
-    // log is opened in Excel; a leading apostrophe keeps it text.
-    const cell = (v: unknown) => {
-      const text = String(v ?? "");
-      const safe = /^[=+\-@\t\r]/.test(text) ? `'${text}` : text;
-      return `"${safe.replace(/"/g, '""')}"`;
-    };
-    const lines = [
+    const csv = toCsv([
       header,
       ...shown.map((e) => [
         e.title,
@@ -192,8 +186,8 @@ export function PipelineLog({ clientId }: { clientId: string }) {
         e.submittedAt?.slice(0, 10),
         e.outcome,
       ]),
-    ].map((row) => row.map(cell).join(","));
-    const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+    ]);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;

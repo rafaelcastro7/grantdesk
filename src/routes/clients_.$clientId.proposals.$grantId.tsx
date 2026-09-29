@@ -22,6 +22,7 @@ import type { Blocker } from "@/lib/submit-gate";
 import { DOCUMENT_COLUMNS, type ClientDocument } from "@/components/DocumentRegister";
 import { KIND_LABEL, documentStatus } from "@/lib/client-documents";
 import type { PastAwardsResult } from "@/server/past-awards";
+import { memberName, type Assignment, type TeamMember } from "@/lib/assignments";
 
 const OUTCOME_LABEL: Record<string, string> = {
   awaiting: "Awaiting a decision",
@@ -45,6 +46,8 @@ type Requirement = {
   is_critical: boolean;
   sort_order: number;
 };
+
+type AssignmentPatch = Partial<Pick<Assignment, "ownerId" | "dueOn" | "doneAt">>;
 
 type Section = {
   id: string;
@@ -101,6 +104,8 @@ function ProposalPage() {
   const [concerns, setConcerns] = useState<string[]>([]);
   const [assessments, setAssessments] = useState<Record<string, string>>({});
   const [gate, setGate] = useState<DraftingGate>({ allowed: true });
+  const [assignments, setAssignments] = useState<Record<string, Assignment>>({});
+  const [team, setTeam] = useState<TeamMember[]>([]);
   const assessing = useRef(new Set<string>());
   const assessFailed = useRef(new Set<string>());
   const { busy, error, note, run, setError } = useAction();
@@ -150,7 +155,7 @@ function ProposalPage() {
 
     // Shared extracted requirements plus the headings typed for this client
     // only — never another client's, even one this consultant also serves.
-    const [reqResult, secResult, ackResult, assessResult, sentResult, docResult] =
+    const [reqResult, secResult, ackResult, assessResult, sentResult, docResult, assignResult, teamResult] =
       await Promise.all([
         supabase()
           .from("requirements")
@@ -182,12 +187,24 @@ function ProposalPage() {
           .limit(1)
           .maybeSingle(),
         supabase().from("client_documents").select(DOCUMENT_COLUMNS).eq("client_id", clientId),
+        supabase()
+          .from("requirement_assignments")
+          .select("requirement_id, owner_id, due_on, done_at")
+          .eq("proposal_id", id),
+        supabase().rpc("client_team_roster", { target: clientId }),
       ]);
     // A failed read must say so: an empty list here reads as "the call asks
     // for nothing" or "nothing is drafted", both of which are false.
-    const failed = [reqResult, secResult, ackResult, assessResult, sentResult, docResult].find(
-      (r) => r.error,
-    );
+    const failed = [
+      reqResult,
+      secResult,
+      ackResult,
+      assessResult,
+      sentResult,
+      assignResult,
+      docResult,
+      teamResult,
+    ].find((r) => r.error);
     if (failed?.error) {
       setError(failed.error.message);
       return;
@@ -227,6 +244,43 @@ function ProposalPage() {
       ),
     );
     setSubmission(sentResult.data as typeof submission);
+    setAssignments(
+      Object.fromEntries(
+        (
+          (assignResult.data ?? []) as Array<{
+            requirement_id: string;
+            owner_id: string | null;
+            due_on: string | null;
+            done_at: string | null;
+          }>
+        ).map((a) => [
+          a.requirement_id,
+          {
+            requirementId: a.requirement_id,
+            ownerId: a.owner_id,
+            dueOn: a.due_on,
+            doneAt: a.done_at,
+          },
+        ]),
+      ),
+    );
+    setTeam(
+      (
+        (teamResult.data ?? []) as Array<{
+          client_id: string;
+          user_id: string;
+          email: string;
+          display_name: string | null;
+          is_owner: boolean;
+        }>
+      ).map((m) => ({
+        clientId: m.client_id,
+        userId: m.user_id,
+        email: m.email,
+        displayName: m.display_name,
+        isOwner: m.is_owner,
+      })),
+    );
   }, [clientId, grantId]);
 
   useEffect(() => {
@@ -547,6 +601,48 @@ function ProposalPage() {
         return reverted;
       });
       setError(errorMessage(caught));
+    }
+  }
+
+  /**
+   * Owner, internal due date or done, one field at a time. Optimistic and
+   * functional like acknowledgements: several quick changes must all land,
+   * and a failure puts back only the fields that failed.
+   */
+  async function assign(requirement: Requirement, patch: AssignmentPatch) {
+    if (!proposalId) return;
+    setError(null);
+    const empty: Assignment = {
+      requirementId: requirement.id,
+      ownerId: null,
+      dueOn: null,
+      doneAt: null,
+    };
+    const previous = { ...empty, ...assignments[requirement.id] };
+    const keys = Object.keys(patch) as Array<keyof AssignmentPatch>;
+    setAssignments((current) => ({
+      ...current,
+      [requirement.id]: { ...empty, ...current[requirement.id], ...patch },
+    }));
+    setBlockers(null);
+
+    const columns: Record<string, string | null> = {};
+    if ("ownerId" in patch) columns.owner_id = patch.ownerId ?? null;
+    if ("dueOn" in patch) columns.due_on = patch.dueOn ?? null;
+    if ("doneAt" in patch) columns.done_at = patch.doneAt ?? null;
+    const { error: assignError } = await supabase()
+      .from("requirement_assignments")
+      .upsert(
+        { proposal_id: proposalId, requirement_id: requirement.id, ...columns },
+        { onConflict: "proposal_id, requirement_id" },
+      );
+    if (assignError) {
+      setAssignments((current) => {
+        const reverted: Assignment = { ...empty, ...current[requirement.id] };
+        for (const key of keys) reverted[key] = previous[key];
+        return { ...current, [requirement.id]: reverted };
+      });
+      setError(`Could not save who has "${requirement.label}": ${errorMessage(assignError)}`);
     }
   }
 
@@ -895,6 +991,13 @@ function ProposalPage() {
                       {requirement.detail}
                     </p>
                   )}
+                  <AssignmentControls
+                    label={requirement.label}
+                    assignment={assignments[requirement.id]}
+                    team={team}
+                    locked={!!submission}
+                    onChange={(patch) => assign(requirement, patch)}
+                  />
                   {/* Read against this client's own profile, automatically — the
                     manual re-check this replaces. Still only a reading aid:
                     it names what matches and what the profile does not say,
@@ -1038,6 +1141,9 @@ function ProposalPage() {
                   busy={busy === requirement.id}
                   disabled={busy !== null || !gate.allowed || !!submission}
                   locked={!!submission}
+                  assignment={assignments[requirement.id]}
+                  team={team}
+                  onAssign={(patch) => assign(requirement, patch)}
                   onDraft={() => draft(requirement)}
                   onSave={(content) => saveEdit(requirement, content)}
                   onKeep={(content) => keepAnswer(requirement, content)}
@@ -1262,8 +1368,14 @@ function SectionCard({
   onSave,
   onKeep,
   locked = false,
+  assignment,
+  team,
+  onAssign,
 }: {
   proposalId: string;
+  assignment: Assignment | undefined;
+  team: TeamMember[];
+  onAssign: (patch: AssignmentPatch) => void;
   requirement: Requirement;
   section: Section | undefined;
   busy: boolean;
@@ -1332,6 +1444,13 @@ function SectionCard({
         </span>
       </div>
 
+      <AssignmentControls
+        label={requirement.label}
+        assignment={assignment}
+        team={team}
+        locked={locked}
+        onChange={onAssign}
+      />
       {requirement.detail && (
         <p className="mt-1 text-sm text-[var(--color-ink-soft)]">{requirement.detail}</p>
       )}
@@ -1513,5 +1632,71 @@ function SectionCard({
         </div>
       )}
     </li>
+  );
+}
+
+/** Who on the client's team has this requirement, and the firm's own date for it. */
+function AssignmentControls({
+  label,
+  assignment,
+  team,
+  locked,
+  onChange,
+}: {
+  label: string;
+  assignment: Assignment | undefined;
+  team: TeamMember[];
+  locked: boolean;
+  onChange: (patch: AssignmentPatch) => void;
+}) {
+  const ownerId = assignment?.ownerId ?? "";
+  // An owner who has since left the team still shows, named as such, rather
+  // than the select silently reading "Unassigned" over a stored owner.
+  const departed = ownerId !== "" && !team.some((m) => m.userId === ownerId);
+  return (
+    <div
+      data-testid="assignment"
+      className="mt-2 flex flex-wrap items-center gap-2 text-xs text-[var(--color-ink-soft)]"
+    >
+      <select
+        aria-label={`Owner of "${label}"`}
+        value={ownerId}
+        disabled={locked}
+        onChange={(event) => onChange({ ownerId: event.target.value || null })}
+        className="rounded-md border border-[var(--color-rule)] bg-[var(--color-paper)] px-2 py-1"
+      >
+        <option value="">Unassigned</option>
+        {departed && <option value={ownerId}>No longer on the team</option>}
+        {team.map((m) => (
+          <option key={m.userId} value={m.userId}>
+            {memberName(m)}
+            {m.isOwner ? " (client owner)" : ""}
+          </option>
+        ))}
+      </select>
+      <label className="flex items-center gap-1">
+        Due
+        <input
+          type="date"
+          aria-label={`Internal due date for "${label}"`}
+          value={assignment?.dueOn ?? ""}
+          disabled={locked}
+          onChange={(event) => onChange({ dueOn: event.target.value || null })}
+          className="rounded-md border border-[var(--color-rule)] bg-[var(--color-paper)] px-2 py-1"
+        />
+      </label>
+      <label className="flex items-center gap-1">
+        <input
+          type="checkbox"
+          aria-label={`"${label}" is done`}
+          checked={!!assignment?.doneAt}
+          disabled={locked}
+          onChange={(event) =>
+            onChange({ doneAt: event.target.checked ? new Date().toISOString() : null })
+          }
+        />
+        Done
+      </label>
+    </div>
   );
 }

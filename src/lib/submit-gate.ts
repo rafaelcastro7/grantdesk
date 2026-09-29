@@ -1,3 +1,4 @@
+import { assignmentSuffix } from "./assignments";
 import { deadlineEnd } from "./deadline";
 
 /**
@@ -48,8 +49,17 @@ export type SubmitCandidate = {
     wordCount: number | null;
     /** `provider/model`, or null once a person has edited it. */
     draftedBy?: string | null;
+    /** Who on the team has it, and the firm's own date for it. */
+    owner?: string | null;
+    dueOn?: string | null;
   }>;
-  conditions: Array<{ label: string; isCritical: boolean; acknowledged: boolean }>;
+  conditions: Array<{
+    label: string;
+    isCritical: boolean;
+    acknowledged: boolean;
+    owner?: string | null;
+    dueOn?: string | null;
+  }>;
   /**
    * Register documents linked to a condition, with their effective expiry
    * (typed, or derived from the kind's default validity).
@@ -60,6 +70,9 @@ export type SubmitCandidate = {
   alreadySubmitted: boolean;
   today: Date;
 };
+
+const who = (item: { owner?: string | null; dueOn?: string | null }) =>
+  assignmentSuffix(item.owner ?? null, item.dueOn ?? null);
 
 const GAP_MARKER = /\[NEED:[^\]]*\]/g;
 
@@ -144,8 +157,8 @@ export function assessSubmission(candidate: SubmitCandidate): {
       key: "empty_sections",
       detail:
         empty.length === 1
-          ? `"${empty[0]!.label}" has not been written yet.`
-          : `${empty.length} sections have not been written yet, starting with "${empty[0]!.label}".`,
+          ? `"${empty[0]!.label}"${who(empty[0]!)} has not been written yet.`
+          : `${empty.length} sections have not been written yet, starting with "${empty[0]!.label}"${who(empty[0]!)}.`,
       isHard: true,
     });
   }
@@ -204,7 +217,7 @@ export function assessSubmission(candidate: SubmitCandidate): {
   if (unmet.length > 0) {
     blockers.push({
       key: "unmet_conditions",
-      detail: `The call rejects applications without "${unmet[0]!.label}"${
+      detail: `The call rejects applications without "${unmet[0]!.label}"${who(unmet[0]!)}${
         unmet.length > 1
           ? ` and ${unmet.length - 1} other requirement${unmet.length > 2 ? "s" : ""}`
           : ""

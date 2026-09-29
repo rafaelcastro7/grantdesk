@@ -256,3 +256,55 @@ describe("documents linked from the register", () => {
     expect(keys(candidate({ linkedDocuments: [doc("2027-01-01"), doc(null)] }))).toEqual([]);
   });
 });
+
+describe("blockers name who has the work", () => {
+  it("names the owner and internal due date of an empty section", () => {
+    const result = assessSubmission(
+      candidate({
+        sections: [
+          {
+            label: "Budget Narrative",
+            content: "",
+            wordLimit: null,
+            wordCount: 0,
+            owner: "Maria Lopez",
+            dueOn: "2026-10-03",
+          },
+        ],
+      }),
+    );
+    const empty = result.blockers.find((b) => b.key === "empty_sections")!;
+    expect(empty.detail).toBe(
+      `"Budget Narrative" (owner Maria Lopez, due 2026-10-03) has not been written yet.`,
+    );
+  });
+
+  it("names the owner of an unacknowledged condition", () => {
+    const result = assessSubmission(
+      candidate({
+        conditions: [
+          {
+            label: "Audited statements",
+            isCritical: true,
+            acknowledged: false,
+            owner: "Sam",
+            dueOn: null,
+          },
+        ],
+      }),
+    );
+    const unmet = result.blockers.find((b) => b.key === "unmet_conditions")!;
+    expect(unmet.detail).toContain(`"Audited statements" (owner Sam, no internal due date)`);
+  });
+
+  it("says nothing extra when nothing is assigned", () => {
+    const result = assessSubmission(
+      candidate({
+        sections: [{ label: "Impact", content: null, wordLimit: null, wordCount: 0 }],
+      }),
+    );
+    expect(result.blockers.find((b) => b.key === "empty_sections")!.detail).toBe(
+      `"Impact" has not been written yet.`,
+    );
+  });
+});

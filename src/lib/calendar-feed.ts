@@ -3,18 +3,21 @@ import type { CalendarDeadline } from "@/lib/ics";
 /**
  * Shared by "What is due" and the subscribable feed, so a calendar never shows
  * a different set of applications than the screen it was subscribed from.
- * In progress means real work exists (a section or a brief); a no-go is not
+ * In progress means real work exists (a section, a brief or an owner); a no-go is not
  * due, and a submitted application is no longer pending.
  */
 export function isInProgress(row: {
   submissions: readonly unknown[];
   proposal_sections: readonly unknown[];
   decision?: string | null;
+  assignments?: readonly unknown[];
 }): boolean {
   return (
     row.submissions.length === 0 &&
     row.decision !== "no_go" &&
-    (row.proposal_sections.length > 0 || row.decision != null)
+    (row.proposal_sections.length > 0 ||
+      row.decision != null ||
+      (row.assignments?.length ?? 0) > 0)
   );
 }
 
