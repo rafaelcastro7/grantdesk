@@ -3,6 +3,8 @@ import { createRootRoute, HeadContent, Outlet, Scripts } from "@tanstack/react-r
 import { useEffect, type ReactNode } from "react";
 import styles from "../styles.css?url";
 import { Nav } from "@/components/Nav";
+import { I18nProvider, useI18n } from "@/lib/i18n";
+import { loadLanguagePreference, saveLanguagePreference } from "@/lib/language-preference";
 
 export const Route = createRootRoute({
   head: () => ({
@@ -30,10 +32,19 @@ export const Route = createRootRoute({
 
 function RootComponent() {
   return (
+    <I18nProvider loadPreference={loadLanguagePreference} persist={saveLanguagePreference}>
+      <RootShell />
+    </I18nProvider>
+  );
+}
+
+function RootShell() {
+  const { t } = useI18n();
+  return (
     <RootDocument>
       {/* First focusable element: skips the navigation (WCAG 2.4.1). */}
       <a href="#main" className="skip-link">
-        Skip to content
+        {t("shell.skip")}
       </a>
       <Nav />
       <div id="main" tabIndex={-1} className="outline-none">
@@ -53,9 +64,10 @@ function RootDocument({ children }: { children: ReactNode }) {
   useEffect(() => {
     document.documentElement.dataset.hydrated = "true";
   }, []);
+  const { language } = useI18n();
 
   return (
-    <html lang="en">
+    <html lang={language}>
       <head>
         <HeadContent />
       </head>

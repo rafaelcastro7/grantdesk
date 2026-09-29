@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { normalizeWordLimit, parseRequirements } from "./extract-requirements";
+import {
+  normalizeWordLimit,
+  parseRequirements,
+  REQUIREMENTS_SYSTEM_PROMPT,
+} from "./extract-requirements";
 
 describe("normalizeWordLimit", () => {
   it("reads the ways a call actually states a limit", () => {
@@ -7,6 +11,29 @@ describe("normalizeWordLimit", () => {
     expect(normalizeWordLimit("maximum 1,000 words")).toBe(1000);
     expect(normalizeWordLimit("250-word limit")).toBe(250);
     expect(normalizeWordLimit(750)).toBe(750);
+  });
+
+  it("reads French limits, including space-grouped thousands", () => {
+    expect(normalizeWordLimit("500 mots")).toBe(500);
+    expect(normalizeWordLimit("maximum de 1 000 mots")).toBe(1000);
+    expect(normalizeWordLimit("2 pages maximum")).toBeNull();
+  });
+});
+
+describe("requirement prompt", () => {
+  it("keeps a French call's headings in French, verbatim", () => {
+    // A translated heading matches nothing on the funder's own form.
+    expect(REQUIREMENTS_SYSTEM_PROMPT).toMatch(/Never translate/);
+    expect(REQUIREMENTS_SYSTEM_PROMPT).toContain("Description du projet");
+  });
+
+  it("keeps French labels as given", () => {
+    const [requirement] = parseRequirements(
+      JSON.stringify({
+        requirements: [{ label: "Description du projet", kind: "section", wordLimit: "750 mots" }],
+      }),
+    );
+    expect(requirement).toMatchObject({ label: "Description du projet", wordLimit: 750 });
   });
 
   it("leaves a page count unset rather than converting it by an invented ratio", () => {

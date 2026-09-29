@@ -25,6 +25,11 @@ export type Blocker = {
    * entitled to make against our advice.
    */
   isHard: boolean;
+  /**
+   * The values inside `detail`, so the interface can phrase it in the
+   * consultant's language from `key` rather than show this English sentence.
+   */
+  params?: Record<string, string | number>;
 };
 
 export type SubmitCandidate = {
@@ -74,7 +79,19 @@ export type SubmitCandidate = {
 const who = (item: { owner?: string | null; dueOn?: string | null }) =>
   assignmentSuffix(item.owner ?? null, item.dueOn ?? null);
 
-const GAP_MARKER = /\[NEED:[^\]]*\]/g;
+/** The assignment as params, so the interface can phrase the suffix itself. */
+const whoParams = (item: { owner?: string | null; dueOn?: string | null }) => ({
+  owner: item.owner ?? "",
+  dueOn: item.dueOn ?? "",
+});
+
+/**
+ * A gap the writer marked instead of inventing. "[NEED: ...]" is the canonical
+ * token in both languages (the French prompt asks for it verbatim), but a model
+ * writing French sometimes localises it to "[BESOIN : ...]"; that is still a
+ * gap and must still block submission, never pass as prose.
+ */
+export const GAP_MARKER = /\[(?:NEED|BESOIN)\s*:[^\]]*\]/gi;
 
 export function countGaps(content: string | null): number {
   if (!content) return 0;
@@ -146,6 +163,7 @@ export function assessSubmission(candidate: SubmitCandidate): {
       blockers.push({
         key: "closed",
         detail: `This call closed on ${candidate.deadline}.`,
+        params: { deadline: candidate.deadline },
         isHard: true,
       });
     }
@@ -155,6 +173,7 @@ export function assessSubmission(candidate: SubmitCandidate): {
   if (empty.length > 0) {
     blockers.push({
       key: "empty_sections",
+      params: { count: empty.length, label: empty[0]!.label, ...whoParams(empty[0]!) },
       detail:
         empty.length === 1
           ? `"${empty[0]!.label}"${who(empty[0]!)} has not been written yet.`
@@ -171,6 +190,7 @@ export function assessSubmission(candidate: SubmitCandidate): {
     const total = withGaps.reduce((sum, s) => sum + countGaps(s.content), 0);
     blockers.push({
       key: "unfilled_gaps",
+      params: { count: total, label: withGaps[0]!.label },
       detail: `${total} marked gap${total === 1 ? "" : "s"} still need${total === 1 ? "s" : ""} a real fact, in "${withGaps[0]!.label}".`,
       isHard: true,
     });
@@ -184,6 +204,12 @@ export function assessSubmission(candidate: SubmitCandidate): {
     const overBy = `${(first.wordCount ?? 0) - first.wordLimit!} words over the funder's limit of ${first.wordLimit}`;
     blockers.push({
       key: "over_limit",
+      params: {
+        count: over.length,
+        label: first.label,
+        over: (first.wordCount ?? 0) - first.wordLimit!,
+        limit: first.wordLimit!,
+      },
       // Named like empty_sections and unfilled_gaps below: a count, not just
       // the first offender, so fixing the one named here does not surface a
       // second one for the first time on the next check.
@@ -208,6 +234,7 @@ export function assessSubmission(candidate: SubmitCandidate): {
   if (fallback.length > 0) {
     blockers.push({
       key: "fallback_model",
+      params: { count: fallback.length, label: fallback[0]!.label },
       detail: `${fallback.length === 1 ? `"${fallback[0]!.label}" was` : `${fallback.length} sections were`} written by the local fallback model, because the usual ones were unreachable. Read them closely, or draft again now that the chain is back.`,
       isHard: false,
     });
@@ -217,6 +244,7 @@ export function assessSubmission(candidate: SubmitCandidate): {
   if (unmet.length > 0) {
     blockers.push({
       key: "unmet_conditions",
+      params: { count: unmet.length - 1, label: unmet[0]!.label, ...whoParams(unmet[0]!) },
       detail: `The call rejects applications without "${unmet[0]!.label}"${who(unmet[0]!)}${
         unmet.length > 1
           ? ` and ${unmet.length - 1} other requirement${unmet.length > 2 ? "s" : ""}`
@@ -234,12 +262,19 @@ export function assessSubmission(candidate: SubmitCandidate): {
     if (doc.expiresOn < today) {
       blockers.push({
         key: "expired_document",
+        params: { title: doc.title, requirement: doc.requirement, expiresOn: doc.expiresOn },
         detail: `"${doc.title}", attached for "${doc.requirement}", expired on ${doc.expiresOn}. Replace it in the client's document register.`,
         isHard: false,
       });
     } else if (candidate.deadline && doc.expiresOn < candidate.deadline) {
       blockers.push({
         key: "document_expires_before_deadline",
+        params: {
+          title: doc.title,
+          requirement: doc.requirement,
+          expiresOn: doc.expiresOn,
+          deadline: candidate.deadline,
+        },
         detail: `"${doc.title}", attached for "${doc.requirement}", expires on ${doc.expiresOn}, before this call closes on ${candidate.deadline}.`,
         isHard: false,
       });

@@ -19,18 +19,67 @@ import {
   saveToAnswerLibrary,
 } from "@/server/proposal.functions";
 import { checkReadiness, getPastAwards, submitProposal } from "@/server/submit.functions";
-import type { Blocker } from "@/lib/submit-gate";
+import { countGaps, type Blocker } from "@/lib/submit-gate";
 import { DOCUMENT_COLUMNS, type ClientDocument } from "@/components/DocumentRegister";
 import { KIND_LABEL, documentStatus } from "@/lib/client-documents";
 import type { PastAwardsResult } from "@/server/past-awards";
 import { memberName, type Assignment, type TeamMember } from "@/lib/assignments";
 
-const OUTCOME_LABEL: Record<string, string> = {
-  awaiting: "Awaiting a decision",
-  awarded: "Awarded",
-  declined: "Declined",
-  withdrawn: "Withdrawn",
+import { useI18n, type MessageKey } from "@/lib/i18n";
+
+const OUTCOME_LABEL: Record<string, MessageKey> = {
+  awaiting: "proposal.outcome.awaiting",
+  awarded: "proposal.outcome.awarded",
+  declined: "proposal.outcome.declined",
+  withdrawn: "proposal.outcome.withdrawn",
 };
+
+const CONDITION_KIND: Record<string, MessageKey> = {
+  eligibility: "proposal.kind.eligibility",
+  attachment: "proposal.kind.attachment",
+  criterion: "proposal.kind.criterion",
+};
+
+const PLURAL_BLOCKERS = new Set([
+  "empty_sections",
+  "unfilled_gaps",
+  "over_limit",
+  "fallback_model",
+  "unmet_conditions",
+]);
+
+/**
+ * English keeps the gate's own sentence verbatim; French is rebuilt from the
+ * blocker's key and params, falling back to the English sentence for a key
+ * this screen does not know yet.
+ */
+function blockerText(
+  blocker: Blocker,
+  language: string,
+  t: (key: MessageKey, vars?: Record<string, string | number>) => string,
+): string {
+  if (language === "en") return blocker.detail;
+  const params: Record<string, string | number> = { ...blocker.params };
+  const owner = String(params.owner ?? "");
+  const dueOn = String(params.dueOn ?? "");
+  params.who =
+    owner || dueOn
+      ? t("proposal.blocker.who", {
+          owner: owner
+            ? t("proposal.blocker.whoOwner", { owner })
+            : t("proposal.blocker.whoNoOwner"),
+          due: dueOn ? t("proposal.blocker.whoDue", { dueOn }) : t("proposal.blocker.whoNoDue"),
+        })
+      : "";
+  let key = `proposal.blocker.${blocker.key}`;
+  if (PLURAL_BLOCKERS.has(blocker.key)) {
+    const count = Number(params.count ?? 0);
+    key +=
+      blocker.key === "unmet_conditions" && count === 0 ? "Zero" : count === 1 ? "One" : "Other";
+  }
+  const text = t(key as MessageKey, params);
+  return text === key ? blocker.detail : text;
+}
 
 export const Route = createFileRoute("/clients_/$clientId/proposals/$grantId")({
   component: ProposalPage,
@@ -77,6 +126,9 @@ type Section = {
  */
 function ProposalPage() {
   useRequireSession();
+  const { t, language, locale } = useI18n();
+  // English keeps the browser default it always used; French uses fr-CA.
+  const dateLocale = language === "en" ? undefined : locale;
   const { clientId, grantId } = Route.useParams();
   const runRead = useServerFn(readRequirements);
   const runDraft = useServerFn(draftProposalSection);
@@ -129,7 +181,7 @@ function ProposalPage() {
       return;
     }
     if (!grantRow) {
-      setError("This call is not in the catalog, or you do not have access to it.");
+      setError(t("proposal.error.notInCatalog"));
       return;
     }
     setGrant(grantRow as unknown as NonNullable<typeof grant>);
@@ -396,14 +448,14 @@ function ProposalPage() {
         // Real text was read; nothing structured came out of it. Shown in
         // place of a dead end that used to just point back at the source —
         // this is what was actually looked at, in the app.
-        return (
-          `Read ${result.provenance.source}, but could not tell its requirements from its ` +
-          `prose. What was read is shown below — add the headings its form asks for.`
-        );
+        return t("proposal.note.readNoStructure", { source: result.provenance.source });
       }
 
       await load();
-      return `Read ${result.count} requirements from ${result.provenance.source}.`;
+      return t("proposal.note.readCount", {
+        count: result.count,
+        source: result.provenance.source,
+      });
     });
 
   /**
@@ -488,7 +540,12 @@ function ProposalPage() {
     // is not is how an attachment goes missing on submission day.
     if (locationError) {
       setLocations((current) => ({ ...current, [requirement.id]: before ?? "" }));
-      setError(`Could not save where "${requirement.label}" is: ${locationError.message}`);
+      setError(
+        t("proposal.error.location", {
+          label: requirement.label,
+          message: locationError.message,
+        }),
+      );
     }
   }
 
@@ -678,8 +735,13 @@ function ProposalPage() {
       }
       await load();
       return result.overrode > 0
-        ? `Recorded as submitted, over ${result.overrode} stated warning${result.overrode === 1 ? "" : "s"}. What you were told is stored with it.`
-        : "Recorded as submitted.";
+        ? t(
+            result.overrode === 1
+              ? "proposal.note.submittedOverOne"
+              : "proposal.note.submittedOverOther",
+            { count: result.overrode },
+          )
+        : t("proposal.note.submitted");
     });
 
   /**
@@ -706,7 +768,7 @@ function ProposalPage() {
         .eq("proposal_id", proposalId);
       if (updateError) throw updateError;
       await load();
-      return "Outcome saved.";
+      return t("proposal.note.outcomeSaved");
     });
   }
 
@@ -731,8 +793,13 @@ function ProposalPage() {
       if (!result.ok) throw new Error(result.error);
       await load();
       return result.reused.length > 0
-        ? `Drafted ${result.wordCount} words, reusing ${result.reused.map((r) => `"${r.label}"`).join(", ")}.`
-        : `Drafted ${result.wordCount} words. Nothing in the answer library matched yet.`;
+        ? t("proposal.note.draftedReusing", {
+            words: result.wordCount,
+            labels: result.reused
+              .map((r) => (language === "fr" ? `« ${r.label} »` : `"${r.label}"`))
+              .join(", "),
+          })
+        : t("proposal.note.draftedNoReuse", { words: result.wordCount });
     });
 
   const keepAnswer = (requirement: Requirement, content: string) =>
@@ -741,7 +808,7 @@ function ProposalPage() {
         data: { clientId, label: requirement.label, content, accessToken: await accessToken() },
       });
       if (!result.ok) throw new Error(result.error);
-      return `Kept "${requirement.label}" — the next call that asks this will reuse it.`;
+      return t("proposal.note.kept", { label: requirement.label });
     });
 
   async function saveEdit(requirement: Requirement, content: string): Promise<boolean> {
@@ -766,7 +833,7 @@ function ProposalPage() {
     if (saveError) {
       setError(
         /changed by someone else/.test(saveError.message)
-          ? "Not saved — someone else saved this section since you opened it. Copy your text, reload the page, and merge."
+          ? t("proposal.error.conflict")
           : errorMessage(saveError),
       );
       return false;
@@ -775,7 +842,7 @@ function ProposalPage() {
     return true;
   }
 
-  useDocumentTitle(grant?.title, "Application");
+  useDocumentTitle(grant?.title, t("proposal.title"));
   const writable = (requirements ?? []).filter((r) => r.kind === "section");
   const conditions = (requirements ?? []).filter(
     (r) => r.kind !== "section" && r.kind !== "process",
@@ -794,20 +861,20 @@ function ProposalPage() {
           params={{ clientId }}
           className="text-sm text-[var(--color-accent)]"
         >
-          ← Matches
+          {t("proposal.back")}
         </Link>
         <h1 className="mt-3 text-2xl font-semibold tracking-tight">
-          {grant?.title ?? "Application"}
+          {grant?.title ?? t("proposal.title")}
         </h1>
         <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
-          {grant?.deadline ? `Closes ${grant.deadline}. ` : ""}
+          {grant?.deadline ? t("proposal.closes", { deadline: grant.deadline }) : ""}
           <a
             href={grant?.url}
             target="_blank"
             rel="noreferrer"
             className="text-[var(--color-accent)]"
           >
-            The call itself
+            {t("proposal.callLink")}
           </a>
         </p>
 
@@ -827,8 +894,9 @@ function ProposalPage() {
             data-testid="submitted-lock"
             className="mt-4 rounded-md border border-[var(--color-rule)] bg-[var(--color-accent-soft)] p-3 text-sm"
           >
-            Submitted on {new Date(submission.submitted_at).toLocaleDateString()}. The application
-            is locked so the record matches what the funder received.
+            {t("proposal.submittedLock", {
+              date: new Date(submission.submitted_at).toLocaleDateString(dateLocale),
+            })}
           </p>
         )}
 
@@ -841,10 +909,10 @@ function ProposalPage() {
             className="rounded-md bg-[var(--color-accent-strong)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
           >
             {busy === "read"
-              ? "Reading the call…"
+              ? t("proposal.reading")
               : requirements?.length
-                ? "Re-read the call"
-                : "Read what this call requires"}
+                ? t("proposal.reread")
+                : t("proposal.read")}
           </button>
           <button
             type="button"
@@ -853,11 +921,11 @@ function ProposalPage() {
             data-testid="past-awards"
             className="rounded-md border border-[var(--color-rule)] px-4 py-2 text-sm font-medium disabled:opacity-50"
           >
-            {busy === "awards" ? "Looking up…" : "Who has won this before"}
+            {busy === "awards" ? t("proposal.lookingUp") : t("proposal.pastAwards")}
           </button>
           {writable.length > 0 && (
             <span data-testid="draft-progress" className="text-sm text-[var(--color-ink-soft)]">
-              {drafted} of {writable.length} sections drafted
+              {t("proposal.progress", { drafted, total: writable.length })}
             </span>
           )}
         </div>
@@ -872,7 +940,7 @@ function ProposalPage() {
         {concerns.length > 0 && (
           <section className="mt-6" data-testid="extraction-concerns">
             <h2 className="text-sm font-semibold text-[var(--color-needs-input)]">
-              Worth double-checking
+              {t("proposal.concerns")}
             </h2>
             <ul className="mt-2 flex flex-col gap-1 text-sm text-[var(--color-ink-soft)]">
               {concerns.map((concern, index) => (
@@ -890,7 +958,7 @@ function ProposalPage() {
               awards.awards.length > 0 ? (
                 <>
                   <p className="text-sm text-[var(--color-ink-soft)]">
-                    Largest recent awards under assistance listing {awards.listing}:
+                    {t("proposal.awards.largest", { listing: awards.listing })}
                   </p>
                   <ul className="mt-2 flex flex-col gap-px overflow-hidden rounded-md border border-[var(--color-rule)] bg-[var(--color-rule)]">
                     {awards.awards.slice(0, 8).map((award) => (
@@ -918,7 +986,7 @@ function ProposalPage() {
                 </>
               ) : (
                 <p className="text-sm text-[var(--color-ink-soft)]">
-                  No awards are published under listing {awards.listing} yet.
+                  {t("proposal.awards.none", { listing: awards.listing })}
                 </p>
               )
             ) : (
@@ -948,11 +1016,11 @@ function ProposalPage() {
           even though the raw text was already sitting in readText. */}
         {readText && writable.length === 0 && (
           <section className="mt-8" data-testid="read-text">
-            <h2 className="text-sm font-semibold">What we read from their page</h2>
+            <h2 className="text-sm font-semibold">{t("proposal.readText.heading")}</h2>
             <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
               {requirements !== null && requirements.length > 0
-                ? "No section list came out of this automatically — read it here and add the headings below."
-                : "No structure came out of this automatically — read it here and add the headings below."}
+                ? t("proposal.readText.noSections")
+                : t("proposal.readText.noStructure")}
             </p>
             <pre className="mt-3 max-h-96 overflow-y-auto whitespace-pre-wrap rounded-md border border-[var(--color-rule)] bg-[var(--color-paper)] p-4 text-sm">
               {readText}
@@ -967,7 +1035,7 @@ function ProposalPage() {
           couldn't already read here in ten seconds. */}
         {process.length > 0 && (
           <section className="mt-10" data-testid="process-steps">
-            <h2 className="text-sm font-semibold">How this call is submitted</h2>
+            <h2 className="text-sm font-semibold">{t("proposal.process.heading")}</h2>
             <ul className="mt-3 flex flex-col gap-px overflow-hidden rounded-md border border-[var(--color-rule)] bg-[var(--color-rule)]">
               {process.map((requirement) => (
                 <li key={requirement.id} className="bg-[var(--color-surface)] px-4 py-3">
@@ -981,10 +1049,9 @@ function ProposalPage() {
 
         {conditions.length > 0 && (
           <section className="mt-10" data-testid="conditions">
-            <h2 className="text-sm font-semibold">Before you write</h2>
+            <h2 className="text-sm font-semibold">{t("proposal.conditions.heading")}</h2>
             <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
-              Conditions and attachments the call names. Nothing here is drafted — these are things
-              only you can produce.
+              {t("proposal.conditions.intro")}
             </p>
             <ul className="mt-3 flex flex-col gap-px overflow-hidden rounded-md border border-[var(--color-rule)] bg-[var(--color-rule)]">
               {conditions.map((requirement) => (
@@ -992,7 +1059,11 @@ function ProposalPage() {
                   <div className="flex items-baseline justify-between gap-3">
                     <span className="text-sm font-medium">{requirement.label}</span>
                     <span className="shrink-0 text-xs uppercase tracking-wide text-[var(--color-ink-soft)]">
-                      {requirement.is_critical ? "required" : requirement.kind}
+                      {requirement.is_critical
+                        ? t("proposal.conditions.required")
+                        : CONDITION_KIND[requirement.kind]
+                          ? t(CONDITION_KIND[requirement.kind]!)
+                          : requirement.kind}
                     </span>
                   </div>
                   {requirement.detail && (
@@ -1031,7 +1102,7 @@ function ProposalPage() {
                           onChange={(event) => acknowledge(requirement, event.target.checked)}
                           disabled={!!submission}
                         />
-                        I have this
+                        {t("proposal.conditions.have")}
                       </label>
                       {requirement.kind === "attachment" &&
                         acknowledged.has(requirement.id) &&
@@ -1062,8 +1133,10 @@ function ProposalPage() {
                           defaultValue={locations[requirement.id] ?? ""}
                           onBlur={(event) => saveLocation(requirement, event.target.value)}
                           disabled={!!submission}
-                          placeholder="Where is it? A Drive link, a folder, who has it…"
-                          aria-label={`Where to find "${requirement.label}"`}
+                          placeholder={t("proposal.conditions.locationPlaceholder")}
+                          aria-label={t("proposal.conditions.locationLabel", {
+                            label: requirement.label,
+                          })}
                           className="mt-2 w-full rounded-md border border-[var(--color-rule)] bg-[var(--color-paper)] px-2 py-1 text-sm"
                         />
                       )}
@@ -1118,12 +1191,10 @@ function ProposalPage() {
                 .map((r) => `• ${r.label}${r.source_quote ? ` — "${r.source_quote}"` : ""}`)
                 .join("\n"),
               risks: [
-                grant.amount_max ? null : "The funder publishes no award amount.",
-                grant.deadline ? null : "No closing date published — confirm intake timing.",
-                grant.eligibility_note ? null : "No eligibility text published — read the guide.",
-                (grant.documents ?? []).length
-                  ? null
-                  : "No application guide linked by the source.",
+                grant.amount_max ? null : t("proposal.risk.noAmount"),
+                grant.deadline ? null : t("proposal.risk.noDeadline"),
+                grant.eligibility_note ? null : t("proposal.risk.noEligibility"),
+                (grant.documents ?? []).length ? null : t("proposal.risk.noGuide"),
               ]
                 .filter(Boolean)
                 .join("\n"),
@@ -1134,7 +1205,7 @@ function ProposalPage() {
         {requirements !== null && (
           <section className="mt-10">
             <div className="flex items-center justify-between gap-3">
-              <h2 className="text-sm font-semibold">What they asked you to write</h2>
+              <h2 className="text-sm font-semibold">{t("proposal.write.heading")}</h2>
               {drafted > 0 && (
                 <button
                   type="button"
@@ -1142,7 +1213,7 @@ function ProposalPage() {
                   data-testid="export-print"
                   className="rounded-md border border-[var(--color-rule)] px-3 py-1.5 text-xs font-medium"
                 >
-                  Export as document
+                  {t("proposal.export")}
                 </button>
               )}
             </div>
@@ -1150,8 +1221,8 @@ function ProposalPage() {
             {writable.length === 0 && (
               <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
                 {conditions.length > 0
-                  ? "This call publishes its conditions but not its section list — most funders keep that in the application form or a PDF. Add the headings from the form and we will draft against them."
-                  : "We could not read requirements from this call's own page — read it yourself below, then add the headings its form asks for and we will draft against them."}
+                  ? t("proposal.write.conditionsOnly")
+                  : t("proposal.write.nothing")}
               </p>
             )}
 
@@ -1185,21 +1256,21 @@ function ProposalPage() {
                   htmlFor="new-section"
                   className="text-xs uppercase tracking-wide text-[var(--color-ink-soft)]"
                 >
-                  Add a section from their form
+                  {t("proposal.add.label")}
                 </label>
                 <input
                   id="new-section"
                   name="label"
                   required
-                  placeholder="Project Description"
+                  placeholder={t("proposal.add.placeholder")}
                   className="mt-1 w-full rounded-md border border-[var(--color-rule)] bg-[var(--color-paper)] px-3 py-2 text-sm"
                 />
               </div>
               <input
                 name="wordLimit"
                 inputMode="numeric"
-                placeholder="Word limit"
-                aria-label="Word limit"
+                placeholder={t("proposal.add.wordLimit")}
+                aria-label={t("proposal.add.wordLimit")}
                 className="w-32 rounded-md border border-[var(--color-rule)] bg-[var(--color-paper)] px-3 py-2 text-sm"
               />
               <button
@@ -1208,7 +1279,7 @@ function ProposalPage() {
                 data-testid="add-section"
                 className="rounded-md border border-[var(--color-rule)] px-3 py-2 text-sm font-medium disabled:opacity-50"
               >
-                Add section
+                {t("proposal.add.button")}
               </button>
             </form>
           </section>
@@ -1216,15 +1287,20 @@ function ProposalPage() {
 
         {requirements !== null && requirements.length > 0 && (
           <section className="mt-12 border-t border-[var(--color-rule)] pt-8" data-testid="send">
-            <h2 className="text-sm font-semibold">Ready to send?</h2>
+            <h2 className="text-sm font-semibold">{t("proposal.send.heading")}</h2>
 
             {submission ? (
               <>
                 <p data-testid="submitted" className="mt-2 text-sm">
-                  <span className="font-medium text-[var(--color-eligible)]">Submitted</span>{" "}
-                  {new Date(submission.submitted_at).toLocaleDateString()} ·{" "}
-                  {OUTCOME_LABEL[submission.outcome ?? "awaiting"] ?? submission.outcome}
-                  {submission.confirmation_number && ` · ref ${submission.confirmation_number}`}
+                  <span className="font-medium text-[var(--color-eligible)]">
+                    {t("proposal.send.submitted")}
+                  </span>{" "}
+                  {new Date(submission.submitted_at).toLocaleDateString(dateLocale)} ·{" "}
+                  {OUTCOME_LABEL[submission.outcome ?? "awaiting"]
+                    ? t(OUTCOME_LABEL[submission.outcome ?? "awaiting"]!)
+                    : submission.outcome}
+                  {submission.confirmation_number &&
+                    t("proposal.send.ref", { ref: submission.confirmation_number })}
                 </p>
 
                 {/* The other half of "submit and track". Without this, outcome had
@@ -1242,7 +1318,7 @@ function ProposalPage() {
                       htmlFor="outcome"
                       className="text-xs uppercase tracking-wide text-[var(--color-ink-soft)]"
                     >
-                      What happened
+                      {t("proposal.send.whatHappened")}
                     </label>
                     <select
                       id="outcome"
@@ -1251,10 +1327,10 @@ function ProposalPage() {
                       defaultValue={submission.outcome ?? "awaiting"}
                       className="mt-1 block rounded-md border border-[var(--color-rule)] bg-[var(--color-paper)] px-3 py-2 text-sm"
                     >
-                      <option value="awaiting">Awaiting a decision</option>
-                      <option value="awarded">Awarded</option>
-                      <option value="declined">Declined</option>
-                      <option value="withdrawn">Withdrawn</option>
+                      <option value="awaiting">{t("proposal.outcome.awaiting")}</option>
+                      <option value="awarded">{t("proposal.outcome.awarded")}</option>
+                      <option value="declined">{t("proposal.outcome.declined")}</option>
+                      <option value="withdrawn">{t("proposal.outcome.withdrawn")}</option>
                     </select>
                   </div>
                   <div className="min-w-48 flex-1">
@@ -1262,14 +1338,14 @@ function ProposalPage() {
                       htmlFor="confirmation"
                       className="text-xs uppercase tracking-wide text-[var(--color-ink-soft)]"
                     >
-                      Their reference number
+                      {t("proposal.send.reference")}
                     </label>
                     <input
                       id="confirmation"
                       name="confirmationNumber"
                       key={submission.confirmation_number ?? ""}
                       defaultValue={submission.confirmation_number ?? ""}
-                      placeholder="From their acknowledgement email"
+                      placeholder={t("proposal.send.referencePlaceholder")}
                       className="mt-1 w-full rounded-md border border-[var(--color-rule)] bg-[var(--color-paper)] px-3 py-2 text-sm"
                     />
                   </div>
@@ -1279,7 +1355,7 @@ function ProposalPage() {
                     data-testid="save-outcome"
                     className="rounded-md border border-[var(--color-rule)] px-3 py-2 text-sm font-medium disabled:opacity-50"
                   >
-                    {busy === "outcome" ? "Saving…" : "Save"}
+                    {busy === "outcome" ? t("proposal.saving") : t("proposal.save")}
                   </button>
                 </form>
                 {submission.outcome === "awarded" && proposalId && (
@@ -1289,8 +1365,7 @@ function ProposalPage() {
             ) : (
               <>
                 <p className="mt-1 max-w-prose text-sm text-[var(--color-ink-soft)]">
-                  Every check below is decided from what is in the application, not from an opinion
-                  about it. The last one is you.
+                  {t("proposal.send.intro")}
                 </p>
 
                 <div className="mt-4 flex flex-wrap items-center gap-3">
@@ -1301,7 +1376,7 @@ function ProposalPage() {
                     data-testid="check-readiness"
                     className="rounded-md border border-[var(--color-rule)] px-4 py-2 text-sm font-medium disabled:opacity-50"
                   >
-                    {busy === "readiness" ? "Checking…" : "Check what is left"}
+                    {busy === "readiness" ? t("proposal.checking") : t("proposal.checkLeft")}
                   </button>
 
                   {blockers !== null && (
@@ -1315,10 +1390,10 @@ function ProposalPage() {
                       className="rounded-md bg-[var(--color-accent-strong)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
                     >
                       {busy === "submit"
-                        ? "Recording…"
+                        ? t("proposal.recording")
                         : blockers.some((b) => b.key !== "not_reviewed")
-                          ? "I have read it — submit anyway"
-                          : "I have read it — record as submitted"}
+                          ? t("proposal.submitAnyway")
+                          : t("proposal.recordSubmitted")}
                     </button>
                   )}
                 </div>
@@ -1327,7 +1402,7 @@ function ProposalPage() {
                   <ul data-testid="blockers" className="mt-4 flex flex-col gap-2">
                     {blockers.length === 0 && (
                       <li className="text-sm text-[var(--color-eligible)]">
-                        Nothing is outstanding. Confirming above records the submission.
+                        {t("proposal.nothingOutstanding")}
                       </li>
                     )}
                     {blockers.map((blocker) => (
@@ -1341,7 +1416,7 @@ function ProposalPage() {
                         >
                           {blocker.isHard ? "✗" : "!"}
                         </span>
-                        <span>{blocker.detail}</span>
+                        <span>{blockerText(blocker, language, t)}</span>
                       </li>
                     ))}
                   </ul>
@@ -1360,8 +1435,10 @@ function ProposalPage() {
       {/* Hidden from assistive tech: on screen it would be a second H1 and a
           second copy of every section; it exists only for paper. */}
       <div aria-hidden="true" className="hidden print:block print:px-0 print:py-0">
-        <h1 className="text-xl font-semibold">{grant?.title ?? "Application"}</h1>
-        <p className="mt-1 text-sm">{grant?.deadline ? `Closes ${grant.deadline}` : ""}</p>
+        <h1 className="text-xl font-semibold">{grant?.title ?? t("proposal.title")}</h1>
+        <p className="mt-1 text-sm">
+          {grant?.deadline ? t("proposal.closesPrint", { deadline: grant.deadline }) : ""}
+        </p>
         {writable.map((requirement) => {
           const section = sections[requirement.id];
           if (!section?.content?.trim()) return null;
@@ -1413,6 +1490,9 @@ function SectionCard({
   onSave: (content: string) => Promise<boolean>;
   onKeep: (content: string) => void;
 }) {
+  const { t, language, locale } = useI18n();
+  // English keeps the browser default it always used; French uses fr-CA.
+  const dateLocale = language === "en" ? undefined : locale;
   const [text, setText] = useState(section?.content ?? "");
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -1451,7 +1531,7 @@ function SectionCard({
   const overLimit = requirement.word_limit !== null && words > requirement.word_limit;
   // A gap the model marked rather than invented. Surfaced deliberately: it is
   // the fastest thing on the page to fix and the most damaging to miss.
-  const gaps = (text.match(/\[NEED:[^\]]*\]/g) ?? []).length;
+  const gaps = countGaps(text);
 
   return (
     <li
@@ -1463,10 +1543,10 @@ function SectionCard({
         <span className="shrink-0 font-mono text-xs tabular-nums text-[var(--color-ink-soft)]">
           {requirement.word_limit ? (
             <span className={overLimit ? "text-[var(--color-ineligible)]" : undefined}>
-              {words}/{requirement.word_limit} words
+              {t("proposal.words", { words, limit: requirement.word_limit })}
             </span>
           ) : words > 0 ? (
-            `${words} words`
+            t("proposal.wordsPlain", { words })
           ) : null}
         </span>
       </div>
@@ -1483,14 +1563,14 @@ function SectionCard({
       )}
       {requirement.evaluation_note && (
         <p className="mt-1 text-sm">
-          <span className="text-[var(--color-ink-soft)]">Scored on: </span>
+          <span className="text-[var(--color-ink-soft)]">{t("proposal.scoredOn")}</span>
           {requirement.evaluation_note}
         </p>
       )}
       {requirement.source_quote && (
         <details className="mt-1">
           <summary className="cursor-pointer text-xs text-[var(--color-ink-soft)]">
-            What the call says
+            {t("proposal.callSays")}
           </summary>
           <blockquote className="mt-1 border-l-2 border-[var(--color-rule)] pl-3 text-xs italic">
             {requirement.source_quote}
@@ -1506,15 +1586,15 @@ function SectionCard({
           setDirty(true);
         }}
         rows={text ? 10 : 3}
-        placeholder="Draft it, or write it yourself."
+        placeholder={t("proposal.textPlaceholder")}
         aria-label={requirement.label}
         className="mt-3 w-full rounded-md border border-[var(--color-rule)] bg-[var(--color-paper)] p-3 text-sm"
       />
 
       {gaps > 0 && (
         <p className="mt-1 text-sm text-[var(--color-needs-input)]">
-          {gaps} gap{gaps === 1 ? "" : "s"} marked <code>[NEED: …]</code> — facts we did not have
-          and would not invent.
+          {t(gaps === 1 ? "proposal.gapsOne" : "proposal.gapsOther", { count: gaps })}{" "}
+          <code>[NEED: …]</code> {t("proposal.gapsTail")}
         </p>
       )}
 
@@ -1524,14 +1604,18 @@ function SectionCard({
           onClick={() => {
             // A new draft replaces the text box; unsaved hand edits would
             // otherwise stay on screen over it and then be saved on top of it.
-            if (dirty && !window.confirm("Replace your unsaved edits with a new draft?")) return;
+            if (dirty && !window.confirm(t("proposal.confirmReplace"))) return;
             setDirty(false);
             onDraft();
           }}
           disabled={disabled || saving}
           className="rounded-md border border-[var(--color-rule)] px-3 py-1.5 text-sm font-medium disabled:opacity-50"
         >
-          {busy ? "Writing…" : section?.content ? "Draft again" : "Draft this"}
+          {busy
+            ? t("proposal.writing")
+            : section?.content
+              ? t("proposal.draftAgain")
+              : t("proposal.draftThis")}
         </button>
         {dirty && (
           <button
@@ -1547,7 +1631,7 @@ function SectionCard({
             disabled={disabled || saving}
             className="rounded-md bg-[var(--color-accent-strong)] px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
           >
-            {saving ? "Saving…" : "Save"}
+            {saving ? t("proposal.saving") : t("proposal.save")}
           </button>
         )}
         {text.length > 40 && (
@@ -1557,7 +1641,7 @@ function SectionCard({
             disabled={disabled}
             className="rounded-md border border-[var(--color-rule)] px-3 py-1.5 text-sm disabled:opacity-50"
           >
-            Keep for next time
+            {t("proposal.keep")}
           </button>
         )}
         {section?.content && (
@@ -1566,16 +1650,19 @@ function SectionCard({
             onClick={toggleHistory}
             className="rounded-md border border-[var(--color-rule)] px-3 py-1.5 text-xs"
           >
-            {showHistory ? "Hide history" : "History"}
+            {showHistory ? t("proposal.hideHistory") : t("proposal.history")}
           </button>
         )}
         {section?.drafted_by && (
           <span className="text-xs text-[var(--color-ink-soft)]">
-            Drafted by {section.drafted_by}
+            {t("proposal.draftedBy", { model: section.drafted_by })}
             {section.reused_answer_ids.length > 0 &&
-              `, reusing ${section.reused_answer_ids.length} saved answer${
-                section.reused_answer_ids.length === 1 ? "" : "s"
-              }`}
+              t(
+                section.reused_answer_ids.length === 1
+                  ? "proposal.reusingOne"
+                  : "proposal.reusingOther",
+                { count: section.reused_answer_ids.length },
+              )}
           </span>
         )}
       </div>
@@ -1586,8 +1673,7 @@ function SectionCard({
           model did not. */}
       {section?.drafted_by?.startsWith("ollama") && (
         <p data-testid="fallback-warning" className="mt-2 text-sm text-[var(--color-needs-input)]">
-          The usual models were unreachable, so this was written by the small local one. Read it
-          closely before it goes anywhere, or draft it again now.
+          {t("proposal.fallback")}
         </p>
       )}
 
@@ -1603,12 +1689,16 @@ function SectionCard({
           className="mt-2 rounded-md border border-[var(--color-needs-input)] bg-[var(--color-needs-input)]/10 p-3 text-sm"
         >
           <p className="font-medium text-[var(--color-needs-input)]">
-            Double-check before sending — this draft says things nobody gave it:
+            {t("proposal.fabrication.heading")}
           </p>
           <ul className="mt-1 list-disc pl-5">
             {section.fabrication_concerns.map((f, index) => (
               <li key={index}>
-                {f.kind === "person" ? `Names someone unverified: "${f.text}"` : `"${f.text}"`}
+                {f.kind === "person"
+                  ? t("proposal.fabrication.person", { text: f.text })
+                  : language === "fr"
+                    ? `« ${f.text} »`
+                    : `"${f.text}"`}
               </li>
             ))}
           </ul>
@@ -1621,13 +1711,9 @@ function SectionCard({
           className="mt-3 rounded-md border border-[var(--color-rule)] p-3"
         >
           {revisions === null ? (
-            <p className="text-sm text-[var(--color-ineligible)]">
-              Could not load earlier versions. Close and open History to try again.
-            </p>
+            <p className="text-sm text-[var(--color-ineligible)]">{t("proposal.history.failed")}</p>
           ) : revisions.length === 0 ? (
-            <p className="text-sm text-[var(--color-ink-soft)]">
-              No earlier version — this is the only one.
-            </p>
+            <p className="text-sm text-[var(--color-ink-soft)]">{t("proposal.history.empty")}</p>
           ) : (
             <ul className="flex flex-col gap-2">
               {revisions.map((revision) => (
@@ -1637,9 +1723,13 @@ function SectionCard({
                 >
                   <div className="min-w-0">
                     <p className="text-xs text-[var(--color-ink-soft)]">
-                      {new Date(revision.created_at).toLocaleString()}
-                      {revision.word_count ? ` · ${revision.word_count} words` : ""}
-                      {revision.drafted_by ? ` · ${revision.drafted_by}` : " · edited by hand"}
+                      {new Date(revision.created_at).toLocaleString(dateLocale)}
+                      {revision.word_count
+                        ? t("proposal.history.words", { count: revision.word_count })
+                        : ""}
+                      {revision.drafted_by
+                        ? ` · ${revision.drafted_by}`
+                        : t("proposal.history.byHand")}
                     </p>
                     <p className="mt-1 truncate text-sm text-[var(--color-ink-soft)]">
                       {revision.content}
@@ -1650,7 +1740,7 @@ function SectionCard({
                     onClick={() => restore(revision)}
                     className="shrink-0 rounded-md border border-[var(--color-rule)] px-2 py-1 text-xs"
                   >
-                    Restore
+                    {t("proposal.restore")}
                   </button>
                 </li>
               ))}

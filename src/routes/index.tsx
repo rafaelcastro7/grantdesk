@@ -21,6 +21,7 @@ import {
 import { downloadText, toCsv } from "@/lib/csv";
 import { errorMessage } from "@/lib/error-message";
 import { inRenewalWindow, REPORT_KIND_LABEL, type ReportKind } from "@/lib/post-award";
+import { useI18n, type MessageKey } from "@/lib/i18n";
 
 export const Route = createFileRoute("/")({ component: Home });
 
@@ -65,25 +66,25 @@ type DueItem =
 
 const REF = "client_id, grant_id, clients(name), grants(title)";
 
-const DECISION_LABEL: Record<string, string> = {
-  pending: "awaiting go / no-go",
-  go: "GO",
-  go_conditional: "GO-CONDITIONAL",
-  no_go: "NO-GO",
+const DECISION_LABEL: Record<string, MessageKey> = {
+  pending: "decision.pending",
+  go: "decision.go",
+  go_conditional: "decision.go_conditional",
+  no_go: "decision.no_go",
 };
 
 /** The same words the submission form uses, not the stored codes. */
-const OUTCOME_LABEL: Record<string, string> = {
-  awaiting: "Awaiting a decision",
-  awarded: "Awarded",
-  declined: "Declined",
-  withdrawn: "Withdrawn",
+const OUTCOME_LABEL: Record<string, MessageKey> = {
+  awaiting: "outcome.awaiting",
+  awarded: "outcome.awarded",
+  declined: "outcome.declined",
+  withdrawn: "outcome.withdrawn",
 };
 
-const GROUPS: ReadonlyArray<readonly [Exclude<DueGroup, "closed">, string]> = [
-  ["overdue", "Overdue"],
-  ["this_week", "This week"],
-  ["later", "Later"],
+const GROUPS: ReadonlyArray<readonly [Exclude<DueGroup, "closed">, MessageKey]> = [
+  ["overdue", "home.group.overdue"],
+  ["this_week", "home.group.this_week"],
+  ["later", "home.group.later"],
 ];
 
 /**
@@ -101,7 +102,12 @@ const GROUPS: ReadonlyArray<readonly [Exclude<DueGroup, "closed">, string]> = [
  * than it should have to be.
  */
 function Home() {
-  useDocumentTitle("What is due");
+  const { t, locale, language } = useI18n();
+  useDocumentTitle(t("home.title"));
+  const decisionLabel = (d: string) => {
+    const key = DECISION_LABEL[d];
+    return key ? t(key) : d;
+  };
   const [rows, setRows] = useState<Row[] | null>(null);
   const [names, setNames] = useState<Map<string, string>>(new Map());
   const [myId, setMyId] = useState<string | null>(null);
@@ -271,7 +277,10 @@ function Home() {
       const group = dueGroup(r.grants?.deadline ?? null, next?.dueOn ?? null, today);
       return group === "closed"
         ? "Closed before sent"
-        : (GROUPS.find(([k]) => k === group)?.[1] ?? group);
+        : (() => {
+            const key = GROUPS.find(([k]) => k === group)?.[1];
+            return key ? t(key) : group;
+          })();
     };
     // Every application this consultant can see, whatever is filtered on
     // screen: the export is the firm's record, not the current view.
@@ -379,11 +388,8 @@ function Home() {
 
   return (
     <main className="mx-auto max-w-3xl px-6 py-12">
-      <h1 className="text-2xl font-semibold tracking-tight">What is due</h1>
-      <p className="mt-2 max-w-prose text-sm text-[var(--color-ink-soft)]">
-        Every application in progress, across every client, by what needs doing soonest — the
-        funder's deadline or your team's own due date, whichever comes first.
-      </p>
+      <h1 className="text-2xl font-semibold tracking-tight">{t("home.title")}</h1>
+      <p className="mt-2 max-w-prose text-sm text-[var(--color-ink-soft)]">{t("home.intro")}</p>
       <div className="mt-3 flex flex-wrap gap-2">
         {open.some((r) => r.grants?.deadline) && (
           <button
@@ -394,12 +400,12 @@ function Home() {
                   .filter((r) => r.grants?.deadline)
                   .map((r) => ({
                     uid: r.id,
-                    title: r.grants?.title ?? "Application",
-                    client: r.clients?.name ?? "Client",
+                    title: r.grants?.title ?? t("home.application"),
+                    client: r.clients?.name ?? t("home.client"),
                     deadline: r.grants!.deadline!,
                     url: `${window.location.origin}/clients/${r.client_id}/proposals/${r.grant_id}`,
                     note: r.decision
-                      ? `Decision: ${DECISION_LABEL[r.decision] ?? r.decision}`
+                      ? t("home.icsDecision", { decision: decisionLabel(r.decision) })
                       : null,
                   })),
               );
@@ -412,7 +418,7 @@ function Home() {
             }}
             className="rounded-md border border-[var(--color-rule)] px-3 py-1.5 text-sm font-medium"
           >
-            Add these deadlines to my calendar (.ics)
+            {t("home.ics")}
           </button>
         )}
         {(rows ?? []).length > 0 && (
@@ -422,7 +428,7 @@ function Home() {
             data-testid="export-applications"
             className="rounded-md border border-[var(--color-rule)] px-3 py-1.5 text-sm font-medium"
           >
-            Export all applications (CSV)
+            {t("home.exportCsv")}
           </button>
         )}
       </div>
@@ -489,20 +495,18 @@ function Home() {
         obligations.length === 0 &&
         sent.length === 0 && (
           <p className="mt-8 text-sm text-[var(--color-ink-soft)]">
-            Nothing in progress yet.{" "}
+            {t("home.emptyBefore")}{" "}
             <Link to="/clients" className="text-[var(--color-accent)]">
-              Add a client
+              {t("home.emptyLink")}
             </Link>{" "}
-            and find what they can apply for.
+            {t("home.emptyAfter")}
           </p>
         )}
 
       {(active.length > 0 || obligations.length > 0) &&
         items.length === 0 &&
         lapsed.length === 0 && (
-          <p className="mt-6 text-sm text-[var(--color-ink-soft)]">
-            Nothing in progress matches these filters.
-          </p>
+          <p className="mt-6 text-sm text-[var(--color-ink-soft)]">{t("home.noFilterMatch")}</p>
         )}
 
       {items.length > 0 && (
@@ -512,7 +516,7 @@ function Home() {
               <h2
                 className={`text-sm font-semibold ${key === "overdue" ? "text-[var(--color-ineligible)]" : ""}`}
               >
-                {title} ({groupedItems[key].length})
+                {t(title)} ({groupedItems[key].length})
               </h2>
               <ul className="mt-2 flex flex-col gap-px overflow-hidden rounded-md border border-[var(--color-rule)] bg-[var(--color-rule)]">
                 {groupedItems[key].map((item) => {
@@ -536,19 +540,27 @@ function Home() {
                           params={{ clientId: row.client_id, grantId: row.grant_id }}
                           className="font-medium text-[var(--color-accent)]"
                         >
-                          {row.grants?.title ?? "Application"}
+                          {row.grants?.title ?? t("home.application")}
                         </Link>
                         <Deadline date={row.grants?.deadline ?? null} />
                       </div>
                       <p className="mt-1 text-xs text-[var(--color-ink-soft)]">
                         {row.clients?.name}
-                        {row.decision ? ` · ${DECISION_LABEL[row.decision] ?? row.decision}` : ""}
-                        {` · ${row.proposal_sections.length} section${row.proposal_sections.length === 1 ? "" : "s"} started`}
+                        {row.decision ? ` · ${decisionLabel(row.decision)}` : ""}
+                        {` · ${t(
+                          row.proposal_sections.length === 1
+                            ? "home.sectionsOne"
+                            : "home.sectionsOther",
+                          { count: row.proposal_sections.length },
+                        )}`}
                       </p>
                       <p data-testid="next-due" className="mt-1 text-xs">
                         {next
-                          ? `Next internal due ${next.dueOn} · ${nameOf(next.ownerId) ?? "no owner"}`
-                          : "No internal due date set"}
+                          ? t("home.nextDue", {
+                              date: next.dueOn ?? "",
+                              owner: nameOf(next.ownerId) ?? t("home.noOwner"),
+                            })
+                          : t("home.noNextDue")}
                       </p>
                     </li>
                   );
@@ -561,10 +573,10 @@ function Home() {
 
       {lapsed.length > 0 && (
         <section className="mt-10" data-testid="lapsed-list">
-          <h2 className="text-sm font-semibold">Closed before it was sent ({lapsed.length})</h2>
-          <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
-            Work exists but the deadline has passed. Kept so the effort is not lost if it reopens.
-          </p>
+          <h2 className="text-sm font-semibold">
+            {t("home.lapsedTitle")} ({lapsed.length})
+          </h2>
+          <p className="mt-1 text-sm text-[var(--color-ink-soft)]">{t("home.lapsedIntro")}</p>
           <ul className="mt-3 flex flex-col gap-px overflow-hidden rounded-md border border-[var(--color-rule)] bg-[var(--color-rule)]">
             {lapsed.map((row) => (
               <li key={row.id} className="bg-[var(--color-surface)] px-4 py-3 text-sm">
@@ -573,11 +585,11 @@ function Home() {
                   params={{ clientId: row.client_id, grantId: row.grant_id }}
                   className="text-[var(--color-accent)]"
                 >
-                  {row.grants?.title ?? "Application"}
+                  {row.grants?.title ?? t("home.application")}
                 </Link>
                 <span className="text-[var(--color-ink-soft)]">
                   {" "}
-                  · {row.clients?.name} · closed {row.grants?.deadline}
+                  · {row.clients?.name} · {t("home.closedOn", { date: row.grants?.deadline ?? "" })}
                 </span>
               </li>
             ))}
@@ -587,7 +599,7 @@ function Home() {
 
       {sent.length > 0 && (
         <section className="mt-10" data-testid="sent-list">
-          <h2 className="text-sm font-semibold">Sent</h2>
+          <h2 className="text-sm font-semibold">{t("home.sentTitle")}</h2>
           {/* A win rate over "everything ever sent" answers a different
               question than a consultant actually asks — "awaiting" is not
               yet a result, and folding it in permanently understates a
@@ -603,9 +615,12 @@ function Home() {
             if (decided.length === 0) return null;
             return (
               <p data-testid="win-rate" className="mt-1 text-sm text-[var(--color-ink-soft)]">
-                {awarded} of {decided.length} decided applications awarded (
-                {Math.round((awarded / decided.length) * 100)}%)
-                {awaiting > 0 ? ` · ${awaiting} still awaiting` : ""}.
+                {t("home.winRate", {
+                  awarded,
+                  decided: decided.length,
+                  percent: Math.round((awarded / decided.length) * 100),
+                })}
+                {awaiting > 0 ? t("home.stillAwaiting", { count: awaiting }) : ""}.
               </p>
             );
           })()}
@@ -622,14 +637,20 @@ function Home() {
                     params={{ clientId: row.client_id, grantId: row.grant_id }}
                     className="text-[var(--color-accent)]"
                   >
-                    {row.grants?.title ?? "Application"}
+                    {row.grants?.title ?? t("home.application")}
                   </Link>
                   <span className="text-[var(--color-ink-soft)]"> · {row.clients?.name}</span>
                 </span>
                 <span className="shrink-0 text-xs text-[var(--color-ink-soft)]">
-                  {OUTCOME_LABEL[row.submissions[0]?.outcome ?? "awaiting"] ??
-                    row.submissions[0]?.outcome}{" "}
-                  · {new Date(row.submissions[0]!.submitted_at).toLocaleDateString()}
+                  {(() => {
+                    const outcome = row.submissions[0]?.outcome ?? "awaiting";
+                    const key = OUTCOME_LABEL[outcome];
+                    return key ? t(key) : outcome;
+                  })()}{" "}
+                  ·{" "}
+                  {new Date(row.submissions[0]!.submitted_at).toLocaleDateString(
+                    language === "en" ? undefined : locale,
+                  )}
                 </span>
               </li>
             ))}
@@ -841,8 +862,11 @@ function ObligationItem({
  * days left" is the thing they were going to work out anyway.
  */
 function Deadline({ date }: { date: string | null }) {
+  const { t } = useI18n();
   if (!date) {
-    return <span className="shrink-0 text-xs text-[var(--color-ink-soft)]">no closing date</span>;
+    return (
+      <span className="shrink-0 text-xs text-[var(--color-ink-soft)]">{t("home.noDate")}</span>
+    );
   }
   const days = daysUntilDeadline(date, new Date());
   const tone =
@@ -853,7 +877,11 @@ function Deadline({ date }: { date: string | null }) {
         : "text-[var(--color-ink-soft)]";
   return (
     <span className={`shrink-0 text-xs font-medium tabular-nums ${tone}`}>
-      {days < 0 ? `closed ${date}` : days === 0 ? "closes today" : `${days} days left`}
+      {days < 0
+        ? t("home.closedOn", { date })
+        : days === 0
+          ? t("home.closesToday")
+          : t("home.daysLeft", { count: days })}
     </span>
   );
 }

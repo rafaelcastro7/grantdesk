@@ -2,11 +2,12 @@ import { Link, useRouterState } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { getTenantBranding, resolveTenantSlug } from "@/lib/tenant";
 import { supabase } from "@/lib/supabase";
+import { useI18n, type MessageKey } from "@/lib/i18n";
 
-const LINKS: Array<{ to: string; label: string }> = [
-  { to: "/", label: "What is due" },
-  { to: "/clients", label: "Clients" },
-  { to: "/catalog", label: "Funder Coverage" },
+const LINKS: Array<{ to: string; label: MessageKey }> = [
+  { to: "/", label: "nav.due" },
+  { to: "/clients", label: "nav.clients" },
+  { to: "/catalog", label: "nav.coverage" },
 ];
 
 /**
@@ -20,6 +21,7 @@ export function Nav() {
   const [signedIn, setSignedIn] = useState(false);
   // Only decides whether the link shows; the page and database enforce the role.
   const [isAdmin, setIsAdmin] = useState(false);
+  const { t, language, setLanguage } = useI18n();
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -53,13 +55,28 @@ export function Nav() {
     };
   }, [pathname]);
 
-  if (pathname.startsWith("/auth")) return null;
+  const toggle = (
+    <button
+      type="button"
+      data-testid="language-toggle"
+      lang={language === "en" ? "fr" : "en"}
+      aria-label={t("nav.switchToAria")}
+      onClick={() => setLanguage(language === "en" ? "fr" : "en")}
+      className="px-2 py-1 rounded-md text-xs font-medium border border-[var(--color-rule)] text-[var(--color-ink-soft)] hover:text-[var(--color-ink)]"
+    >
+      {language === "en" ? "FR" : "EN"}
+    </button>
+  );
+
+  // The sign-in screen has no nav, but must still offer the language switch.
+  if (pathname.startsWith("/auth"))
+    return <div className="fixed right-4 top-3 z-40 print:hidden">{toggle}</div>;
   const branding = getTenantBranding(tenantSlug ?? "iial");
 
   return (
     <nav
       data-testid="nav"
-      aria-label="Main"
+      aria-label={t("nav.aria")}
       className="border-b border-[var(--color-rule)] bg-[var(--color-surface)] shadow-xs print:hidden sticky top-0 z-40 backdrop-blur-md bg-opacity-95"
     >
       <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-3">
@@ -89,7 +106,7 @@ export function Nav() {
                 GrantDesk
               </span>
               <span className="text-[11px] text-[var(--color-ink-soft)] tracking-wider uppercase font-medium">
-                {branding.shortName} Workspace
+                {t("nav.workspace", { name: branding.shortName })}
               </span>
             </div>
           </Link>
@@ -99,7 +116,7 @@ export function Nav() {
               data-testid="tenant-badge"
               className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium border border-[var(--color-rule)] text-[var(--color-ink-soft)]"
             >
-              Workspace: <strong>{branding.shortName}</strong>
+              {t("nav.workspaceBadge")} <strong>{branding.shortName}</strong>
             </div>
           )}
         </div>
@@ -122,7 +139,7 @@ export function Nav() {
                       : "px-3 py-1.5 rounded-md text-sm font-medium text-[var(--color-ink-soft)] hover:text-[var(--color-ink)] hover:bg-[var(--color-surface-hover)] transition-colors"
                   }
                 >
-                  {link.label}
+                  {t(link.label)}
                 </Link>
               );
             })}
@@ -136,9 +153,10 @@ export function Nav() {
               }}
               className="px-3 py-1.5 rounded-md text-sm text-[var(--color-ink-soft)] hover:text-[var(--color-ink)]"
             >
-              Sign out
+              {t("nav.signOut")}
             </button>
           )}
+          {toggle}
         </div>
       </div>
     </nav>

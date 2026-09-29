@@ -57,7 +57,11 @@ export type DraftClient = {
   annualBudget: number | null;
   capabilities: string | null;
   beneficiaries: string | null;
+  /** The language this client's proposals are written in. */
+  draftLanguage?: DraftLanguage;
 };
+
+export type DraftLanguage = "en" | "fr";
 
 export type ReusedAnswer = { id: string; label: string; content: string; similarity: number };
 
@@ -190,7 +194,19 @@ Absolute rules:
 
 ${UNTRUSTED_RULE}`;
 
-function buildPrompt(
+/**
+ * Appended rather than a second prompt, so the factual rules above are the same
+ * text in both languages. The gap marker stays "[NEED: ...]" in English: it is
+ * a machine token the fabrication checker and the editor look for, not prose.
+ */
+export function languageInstruction(language: DraftLanguage): string {
+  if (language === "fr") {
+    return `Write the section in Canadian French (français canadien), as a Quebec or federal funder expects: formal register, Canadian spelling and typography (« guillemets », a space before : ; ? !), amounts written as "450 000 $". Keep the funder's French headings and terms verbatim. Every rule above still applies. Keep gap markers exactly as [NEED: ...], with the description in French.`;
+  }
+  return "Write the section in English.";
+}
+
+export function buildPrompt(
   requirement: DraftRequirement,
   client: DraftClient,
   reused: ReusedAnswer[],
@@ -251,6 +267,7 @@ function buildPrompt(
     }
   }
 
+  lines.push("", languageInstruction(client.draftLanguage ?? "en"));
   lines.push("", `Write the section now. Nothing else.`);
   return lines.join("\n");
 }
@@ -265,7 +282,10 @@ export function cleanDraft(raw: string): string {
     .trim()
     .replace(/^```(?:\w+)?\s*/i, "")
     .replace(/\s*```$/, "")
-    .replace(/^(?:here(?:'s| is)[^\n]*|sure[^\n]*|certainly[^\n]*)\n+/i, "")
+    .replace(
+      /^(?:here(?:'s| is)[^\n]*|sure[^\n]*|certainly[^\n]*|voici (?:la|le|votre) (?:section|texte|ébauche|réponse)[^\n]*|bien sûr[^\n]*)\n+/i,
+      "",
+    )
     .trim();
 }
 
@@ -277,7 +297,7 @@ export async function draftSection(
   const { data: clientRow, error: clientError } = await supabase
     .from("clients")
     .select(
-      "id, name, client_profiles(sectors, jurisdictions, stage, annual_budget, capabilities, beneficiaries)",
+      "id, name, client_profiles(sectors, jurisdictions, stage, annual_budget, capabilities, beneficiaries, draft_language)",
     )
     .eq("id", clientId)
     .maybeSingle();
@@ -294,6 +314,7 @@ export async function draftSection(
       annual_budget: number | null;
       capabilities: string | null;
       beneficiaries: string | null;
+      draft_language: string | null;
     } | null;
   };
   const profile = row.client_profiles;
@@ -312,6 +333,7 @@ export async function draftSection(
     annualBudget: profile.annual_budget,
     capabilities: profile.capabilities,
     beneficiaries: profile.beneficiaries,
+    draftLanguage: profile.draft_language === "fr" ? "fr" : "en",
   };
 
   const reused = await findReusableAnswers(supabase, clientId, requirement);
@@ -358,14 +380,17 @@ export async function draftSection(
     ...reused.map((answer) => answer.content),
     client.annualBudget?.toString(),
     client.annualBudget?.toLocaleString("en-US"),
+    client.annualBudget?.toLocaleString("fr-CA"),
     requirement.wordLimit?.toString(),
     requirement.grant?.title,
     requirement.grant?.funder,
     requirement.grant?.deadline,
     requirement.grant?.amountMin?.toString(),
     requirement.grant?.amountMin?.toLocaleString("en-US"),
+    requirement.grant?.amountMin?.toLocaleString("fr-CA"),
     requirement.grant?.amountMax?.toString(),
     requirement.grant?.amountMax?.toLocaleString("en-US"),
+    requirement.grant?.amountMax?.toLocaleString("fr-CA"),
   ].filter((fact): fact is string => typeof fact === "string" && fact.length > 0);
 
   return {
