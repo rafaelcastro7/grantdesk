@@ -3,6 +3,7 @@ import { getTenantBranding } from "@/lib/tenant";
 import { decideEligibility } from "@/lib/eligibility";
 import { daysUntilDeadline } from "@/lib/deadline";
 import { formatMoney } from "@/lib/money";
+import { isReminderDay, REPORT_KIND_LABEL, type ReportKind } from "@/lib/post-award";
 
 /** Funder text goes into HTML email; it must never be able to become markup. */
 export function escapeHtml(text: string): string {
@@ -146,6 +147,43 @@ export function formatDeadlineEmail({
 </html>
 `;
 
+  return { subject, html };
+}
+
+/** A reporting obligation on an award, not an application deadline. */
+export function formatReportDueEmail({
+  grantTitle,
+  clientName,
+  reportLabel,
+  kind,
+  daysLeft,
+  dueOn,
+  tenantSlug = "iial",
+}: {
+  grantTitle: string;
+  clientName: string;
+  reportLabel: string;
+  kind: ReportKind;
+  daysLeft: number;
+  dueOn: string;
+  tenantSlug?: string;
+}): { subject: string; html: string } {
+  const branding = getTenantBranding(tenantSlug);
+  const subject = `[${branding.shortName}] Report due in ${daysLeft}d for ${clientName} - ${reportLabel} (${grantTitle})`;
+  const html = `
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"></head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #1e293b; padding: 24px; background: #f8fafc;">
+  <div style="max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 8px; border: 1px solid #e2e8f0; padding: 28px;">
+    <div style="margin-bottom: 12px; font-size: 12px; font-weight: 600; color: ${branding.primaryColor};">${escapeHtml(branding.name)}</div>
+    <div style="font-size: 13px; font-weight: 700; text-transform: uppercase;">Report due in ${daysLeft} day${daysLeft === 1 ? "" : "s"}</div>
+    <div style="font-size: 18px; font-weight: 700; margin: 8px 0;">${escapeHtml(reportLabel)}</div>
+    <p>${escapeHtml(REPORT_KIND_LABEL[kind])} owed to the funder of <strong>${escapeHtml(grantTitle)}</strong> for <strong>${escapeHtml(clientName)}</strong>, due <strong>${escapeHtml(dueOn)}</strong>.</p>
+  </div>
+</body>
+</html>
+`;
   return { subject, html };
 }
 
@@ -349,7 +387,6 @@ export async function scanAndAlertDeadlines({
   if (error) throw new Error(`reminder scan could not read proposals: ${error.message}`);
   if (decisionError)
     throw new Error(`reminder scan could not read decisions: ${decisionError.message}`);
-  if (!proposals) return { queued: 0 };
   const decisionOf = new Map(
     ((decisions ?? []) as Array<{ client_id: string; grant_id: string; decision: string }>).map(
       (d) => [`${d.client_id}|${d.grant_id}`, d.decision],
@@ -367,7 +404,7 @@ export async function scanAndAlertDeadlines({
 
   let queued = 0;
 
-  for (const row of proposals as unknown as Array<{
+  for (const row of (proposals ?? []) as unknown as Array<{
     client_id: string;
     grant_id: string;
     grant: unknown;
@@ -426,5 +463,91 @@ export async function scanAndAlertDeadlines({
       throw new Error(`could not queue reminder: ${insertErr.message}`);
   }
 
+  queued += await queueReportReminders({ supabase, today, todayStr, horizonStr, emailMap });
+
   return { queued };
+}
+
+async function queueReportReminders({
+  supabase,
+  today,
+  todayStr,
+  horizonStr,
+  emailMap,
+}: {
+  supabase: SupabaseClient;
+  today: Date;
+  todayStr: string;
+  horizonStr: string;
+  emailMap: Map<string, string>;
+}): Promise<number> {
+  const { data: reports, error } = await supabase
+    .from("award_reports")
+    .select(
+      "id, label, kind, due_on, proposal:proposals!inner(grant:grants!inner(id, title), " +
+        "client:clients!inner(id, name, consultant_id, tenant_id, archived_at, tenant:tenants(slug)))",
+    )
+    .is("submitted_on", null)
+    .gte("due_on", todayStr)
+    .lte("due_on", horizonStr);
+  if (error) throw new Error(`reminder scan could not read award reports: ${error.message}`);
+
+  const one = <T>(value: T | T[] | null | undefined): T | null =>
+    Array.isArray(value) ? (value[0] ?? null) : (value ?? null);
+  let queued = 0;
+  for (const report of (reports ?? []) as unknown as Array<{
+    id: string;
+    label: string;
+    kind: ReportKind;
+    due_on: string;
+    proposal: unknown;
+  }>) {
+    const proposal = one(
+      report.proposal as
+        { grant: unknown; client: unknown } | Array<{ grant: unknown; client: unknown }>,
+    );
+    const grant = one(proposal?.grant as { id: string; title: string } | null);
+    const client = one(
+      proposal?.client as {
+        id: string;
+        name: string;
+        consultant_id: string;
+        tenant_id: string | null;
+        archived_at: string | null;
+        tenant: { slug: string } | Array<{ slug: string }> | null;
+      } | null,
+    );
+    if (!grant || !client?.tenant_id || client.archived_at) continue;
+    const tenantSlug = one(client.tenant)?.slug;
+    if (!tenantSlug) continue;
+    const daysLeft = isReminderDay(report.due_on, today);
+    if (daysLeft === null) continue;
+    const recipientEmail = emailMap.get(client.consultant_id);
+    if (!recipientEmail) continue;
+
+    const { subject, html } = formatReportDueEmail({
+      grantTitle: grant.title,
+      clientName: client.name,
+      reportLabel: report.label,
+      kind: report.kind,
+      daysLeft,
+      dueOn: report.due_on,
+      tenantSlug,
+    });
+    const { error: insertErr } = await supabase.from("email_outbox").insert({
+      tenant_id: client.tenant_id,
+      recipient_email: recipientEmail,
+      subject,
+      body_html: html,
+      kind: "award_report_due",
+      grant_id: grant.id,
+      client_id: client.id,
+      award_report_id: report.id,
+      status: "pending",
+    });
+    if (!insertErr) queued++;
+    else if (insertErr.code !== "23505")
+      throw new Error(`could not queue report reminder: ${insertErr.message}`);
+  }
+  return queued;
 }

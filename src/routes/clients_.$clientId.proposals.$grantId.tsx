@@ -1,5 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { OpportunityBrief } from "@/components/OpportunityBrief";
+import { AwardPanel } from "@/components/AwardPanel";
 import type { DraftingGate } from "@/lib/go-decision";
 import { CallSnapshot, type CallSnapshotGrant } from "@/components/CallSnapshot";
 import { formatMoney } from "@/lib/money";
@@ -906,7 +907,11 @@ function ProposalPage() {
             prefill={{
               deadline: grant.deadline,
               amountMax: grant.amount_max,
+              amountMin: grant.amount_min,
               currency: grant.currency,
+              // The same text the cost_share rule reads, so the budget and the
+              // verdict agree about what the call requires.
+              costShareText: [grant.eligibility_note, grant.summary].filter(Boolean).join(" "),
               mandatoryComponents: (requirements ?? [])
                 .filter((r) => r.is_critical || r.kind === "attachment")
                 .map((r) => `• ${r.label}${r.source_quote ? ` — "${r.source_quote}"` : ""}`)
@@ -1073,6 +1078,9 @@ function ProposalPage() {
                     {busy === "outcome" ? "Saving…" : "Save"}
                   </button>
                 </form>
+                {submission.outcome === "awarded" && proposalId && (
+                  <AwardPanel proposalId={proposalId} grantCurrency={grant?.currency ?? null} />
+                )}
               </>
             ) : (
               <>

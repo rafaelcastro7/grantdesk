@@ -5,6 +5,8 @@ import { Landing } from "@/components/Landing";
 import { daysUntilDeadline } from "@/lib/deadline";
 import { buildIcs } from "@/lib/ics";
 import { useDocumentTitle } from "@/lib/use-document-title";
+import { errorMessage } from "@/lib/error-message";
+import { inRenewalWindow, REPORT_KIND_LABEL, type ReportKind } from "@/lib/post-award";
 
 export const Route = createFileRoute("/")({ component: Home });
 
@@ -19,6 +21,31 @@ type Row = {
   /** Joined in code from opportunity_decisions. */
   decision?: string | null;
 };
+
+type ProposalRef = {
+  client_id: string;
+  grant_id: string;
+  clients: { name: string } | null;
+  grants: { title: string } | null;
+};
+
+type ReportRow = {
+  id: string;
+  label: string;
+  kind: ReportKind;
+  due_on: string;
+  proposals: ProposalRef | null;
+};
+
+type AwardRow = { proposal_id: string; end_on: string | null; proposals: ProposalRef | null };
+
+/** One line on the list: an application, a report owed, or a renewal window. */
+type DueItem =
+  | { type: "application"; date: string | null; row: Row }
+  | { type: "report"; date: string; report: ReportRow }
+  | { type: "renewal"; date: string; award: AwardRow };
+
+const REF = "client_id, grant_id, clients(name), grants(title)";
 
 const DECISION_LABEL: Record<string, string> = {
   pending: "awaiting go / no-go",
@@ -52,6 +79,9 @@ function Home() {
   const [rows, setRows] = useState<Row[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [signedIn, setSignedIn] = useState<boolean | null>(null);
+  const [reports, setReports] = useState<ReportRow[]>([]);
+  const [awards, setAwards] = useState<AwardRow[]>([]);
+  const [marking, setMarking] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const { data: session } = await supabase().auth.getSession();
@@ -61,7 +91,7 @@ function Home() {
     }
     setSignedIn(true);
 
-    const [proposals, decisions] = await Promise.all([
+    const [proposals, decisions, reportResult, awardResult] = await Promise.all([
       supabase()
         .from("proposals")
         .select(
@@ -70,8 +100,17 @@ function Home() {
         )
         .order("submitted_at", { referencedTable: "submissions", ascending: false }),
       supabase().from("opportunity_decisions").select("client_id, grant_id, decision"),
+      supabase()
+        .from("award_reports")
+        .select(`id, label, kind, due_on, proposals(${REF})`)
+        .is("submitted_on", null)
+        .order("due_on"),
+      supabase()
+        .from("award_details")
+        .select(`proposal_id, end_on, proposals(${REF})`)
+        .not("end_on", "is", null),
     ]);
-    const readError = proposals.error ?? decisions.error;
+    const readError = proposals.error ?? decisions.error ?? reportResult.error ?? awardResult.error;
     if (readError) {
       setError(readError.message);
       return;
@@ -81,6 +120,8 @@ function Home() {
         (decisions.data ?? []) as Array<{ client_id: string; grant_id: string; decision: string }>
       ).map((d) => [`${d.client_id}|${d.grant_id}`, d.decision]),
     );
+    setReports((reportResult.data ?? []) as unknown as ReportRow[]);
+    setAwards((awardResult.data ?? []) as unknown as AwardRow[]);
     setRows(
       ((proposals.data ?? []) as unknown as Row[]).map((r) => ({
         ...r,
@@ -114,6 +155,36 @@ function Home() {
       return left.localeCompare(right);
     });
   const sent = (rows ?? []).filter((r) => r.submissions.length > 0);
+
+  const now = new Date();
+  // An overdue report is still owed, so it stays on the list; a lapsed
+  // application cannot be sent any more, which is why it has its own section.
+  const items: DueItem[] = [
+    ...open.map((row) => ({
+      type: "application" as const,
+      date: row.grants?.deadline ?? null,
+      row,
+    })),
+    ...reports.map((report) => ({ type: "report" as const, date: report.due_on, report })),
+    ...awards
+      .filter((award) => inRenewalWindow(award.end_on, now))
+      .map((award) => ({ type: "renewal" as const, date: award.end_on!, award })),
+  ].sort((a, b) => (a.date ?? "9999-12-31").localeCompare(b.date ?? "9999-12-31"));
+
+  async function markReportSubmitted(report: ReportRow) {
+    setMarking(report.id);
+    setError(null);
+    const { error: updateError } = await supabase()
+      .from("award_reports")
+      .update({ submitted_on: new Date().toISOString().slice(0, 10) })
+      .eq("id", report.id);
+    setMarking(null);
+    if (updateError) {
+      setError(errorMessage(updateError));
+      return;
+    }
+    setReports((current) => current.filter((r) => r.id !== report.id));
+  }
 
   // One route, two audiences. A visitor gets the case for the product; a
   // signed-in consultant gets the first of the five questions in docs/SPEC.md.
@@ -170,7 +241,7 @@ function Home() {
 
       {signedIn &&
         rows !== null &&
-        open.length === 0 &&
+        items.length === 0 &&
         sent.length === 0 &&
         lapsed.length === 0 && (
           <p className="mt-8 text-sm text-[var(--color-ink-soft)]">
@@ -182,30 +253,41 @@ function Home() {
           </p>
         )}
 
-      {open.length > 0 && (
+      {items.length > 0 && (
         <ul
           data-testid="due-list"
           className="mt-6 flex flex-col gap-px overflow-hidden rounded-md border border-[var(--color-rule)] bg-[var(--color-rule)]"
         >
-          {open.map((row) => (
-            <li key={row.id} className="bg-[var(--color-surface)] px-4 py-3">
-              <div className="flex items-baseline justify-between gap-3">
-                <Link
-                  to="/clients/$clientId/proposals/$grantId"
-                  params={{ clientId: row.client_id, grantId: row.grant_id }}
-                  className="font-medium text-[var(--color-accent)]"
-                >
-                  {row.grants?.title ?? "Application"}
-                </Link>
-                <Deadline date={row.grants?.deadline ?? null} />
-              </div>
-              <p className="mt-1 text-xs text-[var(--color-ink-soft)]">
-                {row.clients?.name}
-                {row.decision ? ` · ${DECISION_LABEL[row.decision] ?? row.decision}` : ""}
-                {` · ${row.proposal_sections.length} section${row.proposal_sections.length === 1 ? "" : "s"} started`}
-              </p>
-            </li>
-          ))}
+          {items.map((item) =>
+            item.type === "application" ? (
+              <li key={item.row.id} className="bg-[var(--color-surface)] px-4 py-3">
+                <div className="flex items-baseline justify-between gap-3">
+                  <Link
+                    to="/clients/$clientId/proposals/$grantId"
+                    params={{ clientId: item.row.client_id, grantId: item.row.grant_id }}
+                    className="font-medium text-[var(--color-accent)]"
+                  >
+                    {item.row.grants?.title ?? "Application"}
+                  </Link>
+                  <Deadline date={item.row.grants?.deadline ?? null} />
+                </div>
+                <p className="mt-1 text-xs text-[var(--color-ink-soft)]">
+                  {item.row.clients?.name}
+                  {item.row.decision
+                    ? ` · ${DECISION_LABEL[item.row.decision] ?? item.row.decision}`
+                    : ""}
+                  {` · ${item.row.proposal_sections.length} section${item.row.proposal_sections.length === 1 ? "" : "s"} started`}
+                </p>
+              </li>
+            ) : (
+              <ObligationItem
+                key={`${item.type}-${item.type === "report" ? item.report.id : item.award.proposal_id}`}
+                item={item}
+                busy={marking !== null}
+                onSubmitted={markReportSubmitted}
+              />
+            ),
+          )}
         </ul>
       )}
 
@@ -287,6 +369,74 @@ function Home() {
         </section>
       )}
     </main>
+  );
+}
+
+function ObligationItem({
+  item,
+  busy,
+  onSubmitted,
+}: {
+  item: Exclude<DueItem, { type: "application" }>;
+  busy: boolean;
+  onSubmitted: (report: ReportRow) => void;
+}) {
+  const ref = item.type === "report" ? item.report.proposals : item.award.proposals;
+  const days = daysUntilDeadline(item.date, new Date());
+  const name = item.type === "report" ? item.report.label : (ref?.grants?.title ?? "Award");
+  return (
+    <li data-testid={`due-${item.type}`} className="bg-[var(--color-surface)] px-4 py-3">
+      <div className="flex items-baseline justify-between gap-3">
+        <span>
+          <span className="mr-2 text-xs font-semibold uppercase tracking-wide text-[var(--color-needs-input)]">
+            {item.type === "report" ? "Report due" : "Renewal window"}
+          </span>
+          {ref ? (
+            <Link
+              to="/clients/$clientId/proposals/$grantId"
+              params={{ clientId: ref.client_id, grantId: ref.grant_id }}
+              className="font-medium text-[var(--color-accent)]"
+            >
+              {name}
+            </Link>
+          ) : (
+            <span className="font-medium">{name}</span>
+          )}
+        </span>
+        <span
+          className={`shrink-0 text-xs font-medium tabular-nums ${
+            days < 0 ? "text-[var(--color-ineligible)]" : "text-[var(--color-ink-soft)]"
+          }`}
+        >
+          {item.type === "renewal"
+            ? `agreement ends in ${days} days`
+            : days < 0
+              ? `overdue since ${item.date}`
+              : days === 0
+                ? "due today"
+                : `${days} days left`}
+        </span>
+      </div>
+      <p className="mt-1 flex flex-wrap items-baseline gap-x-3 text-xs text-[var(--color-ink-soft)]">
+        <span>
+          {ref?.clients?.name}
+          {item.type === "report"
+            ? ` · ${REPORT_KIND_LABEL[item.report.kind]} · ${ref?.grants?.title ?? ""}`
+            : ` · ends ${item.date}; time to raise the renewal with the funder`}
+        </span>
+        {item.type === "report" && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => onSubmitted(item.report)}
+            data-testid="mark-report-submitted"
+            className="text-[var(--color-accent)] disabled:opacity-50"
+          >
+            Mark as submitted
+          </button>
+        )}
+      </p>
+    </li>
   );
 }
 
