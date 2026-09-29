@@ -28,6 +28,7 @@ describe("isInProgress", () => {
     expect(isInProgress({ ...base, proposal_sections: [], decision: "pending" })).toBe(true);
     expect(isInProgress({ ...base, decision: "no_go" })).toBe(false);
     expect(isInProgress({ ...base, submissions: [{}] })).toBe(false);
+    expect(isInProgress({ ...base, proposal_sections: [], assignments: [{}] })).toBe(true);
   });
 });
 

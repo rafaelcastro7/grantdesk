@@ -15,9 +15,7 @@ export function isInProgress(row: {
   return (
     row.submissions.length === 0 &&
     row.decision !== "no_go" &&
-    (row.proposal_sections.length > 0 ||
-      row.decision != null ||
-      (row.assignments?.length ?? 0) > 0)
+    (row.proposal_sections.length > 0 || row.decision != null || (row.assignments?.length ?? 0) > 0)
   );
 }
 

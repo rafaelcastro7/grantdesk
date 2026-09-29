@@ -122,33 +122,34 @@ function Home() {
     setSignedIn(true);
     setMyId(session.session.user.id);
 
-    const [proposals, decisions, assignments, roster, reportResult, awardResult] = await Promise.all([
-      supabase()
-        .from("proposals")
-        .select(
-          "id, client_id, grant_id, clients(name), grants(title, deadline), " +
-            "submissions(submitted_at, outcome), proposal_sections(id)",
-        )
-        .order("submitted_at", { referencedTable: "submissions", ascending: false }),
-      supabase()
-        .from("opportunity_decisions")
-        .select(
-          "client_id, grant_id, decision, decided_by, decision_reason, recommendation_reason",
-        ),
-      supabase()
-        .from("requirement_assignments")
-        .select("proposal_id, requirement_id, owner_id, due_on, done_at"),
-      supabase().rpc("client_team_roster", { target: null }),
-      supabase()
-        .from("award_reports")
-        .select(`id, label, kind, due_on, proposals(${REF})`)
-        .is("submitted_on", null)
-        .order("due_on"),
-      supabase()
-        .from("award_details")
-        .select(`proposal_id, end_on, proposals(${REF})`)
-        .not("end_on", "is", null),
-    ]);
+    const [proposals, decisions, assignments, roster, reportResult, awardResult] =
+      await Promise.all([
+        supabase()
+          .from("proposals")
+          .select(
+            "id, client_id, grant_id, clients(name), grants(title, deadline), " +
+              "submissions(submitted_at, outcome), proposal_sections(id)",
+          )
+          .order("submitted_at", { referencedTable: "submissions", ascending: false }),
+        supabase()
+          .from("opportunity_decisions")
+          .select(
+            "client_id, grant_id, decision, decided_by, decision_reason, recommendation_reason",
+          ),
+        supabase()
+          .from("requirement_assignments")
+          .select("proposal_id, requirement_id, owner_id, due_on, done_at"),
+        supabase().rpc("client_team_roster", { target: null }),
+        supabase()
+          .from("award_reports")
+          .select(`id, label, kind, due_on, proposals(${REF})`)
+          .is("submitted_on", null)
+          .order("due_on"),
+        supabase()
+          .from("award_details")
+          .select(`proposal_id, end_on, proposals(${REF})`)
+          .not("end_on", "is", null),
+      ]);
     // An owner filter over a failed assignment read would show "nothing due"
     // for someone with a full week; say it failed instead.
     const readError =
@@ -323,7 +324,11 @@ function Home() {
     return !owner && (!clientFilter || ref?.client_id === clientFilter);
   });
   const groupedItems: Record<Exclude<DueGroup, "closed">, DueItem[]> = {
-    overdue: grouped.overdue.map((row) => ({ type: "application" as const, date: soonest(row), row })),
+    overdue: grouped.overdue.map((row) => ({
+      type: "application" as const,
+      date: soonest(row),
+      row,
+    })),
     this_week: grouped.this_week.map((row) => ({
       type: "application" as const,
       date: soonest(row),
@@ -336,7 +341,9 @@ function Home() {
     groupedItems[group === "closed" ? "overdue" : group].push(item);
   }
   for (const key of Object.keys(groupedItems) as Array<Exclude<DueGroup, "closed">>) {
-    groupedItems[key].sort((a, b) => (a.date ?? "9999-12-31").localeCompare(b.date ?? "9999-12-31"));
+    groupedItems[key].sort((a, b) =>
+      (a.date ?? "9999-12-31").localeCompare(b.date ?? "9999-12-31"),
+    );
   }
   const items = [...groupedItems.overdue, ...groupedItems.this_week, ...groupedItems.later];
 
@@ -481,22 +488,22 @@ function Home() {
         active.length === 0 &&
         obligations.length === 0 &&
         sent.length === 0 && (
-        <p className="mt-8 text-sm text-[var(--color-ink-soft)]">
-          Nothing in progress yet.{" "}
-          <Link to="/clients" className="text-[var(--color-accent)]">
-            Add a client
-          </Link>{" "}
-          and find what they can apply for.
-        </p>
-      )}
+          <p className="mt-8 text-sm text-[var(--color-ink-soft)]">
+            Nothing in progress yet.{" "}
+            <Link to="/clients" className="text-[var(--color-accent)]">
+              Add a client
+            </Link>{" "}
+            and find what they can apply for.
+          </p>
+        )}
 
       {(active.length > 0 || obligations.length > 0) &&
         items.length === 0 &&
         lapsed.length === 0 && (
-        <p className="mt-6 text-sm text-[var(--color-ink-soft)]">
-          Nothing in progress matches these filters.
-        </p>
-      )}
+          <p className="mt-6 text-sm text-[var(--color-ink-soft)]">
+            Nothing in progress matches these filters.
+          </p>
+        )}
 
       {items.length > 0 && (
         <div data-testid="due-list" className="mt-6 flex flex-col gap-6">

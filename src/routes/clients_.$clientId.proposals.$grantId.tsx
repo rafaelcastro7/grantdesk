@@ -156,44 +156,52 @@ function ProposalPage() {
 
     // Shared extracted requirements plus the headings typed for this client
     // only — never another client's, even one this consultant also serves.
-    const [reqResult, secResult, ackResult, assessResult, sentResult, docResult, assignResult, teamResult] =
-      await Promise.all([
-        supabase()
-          .from("requirements")
-          .select(
-            "id, label, detail, kind, word_limit, evaluation_note, source_quote, is_critical, sort_order",
-          )
-          .eq("grant_id", grantId)
-          .or(`client_id.is.null,client_id.eq.${clientId}`)
-          .order("sort_order"),
-        supabase()
-          .from("proposal_sections")
-          .select(
-            "id, requirement_id, heading, content, word_count, drafted_by, reused_answer_ids, fabrication_concerns, updated_at",
-          )
-          .eq("proposal_id", id),
-        supabase()
-          .from("requirement_acknowledgements")
-          .select("requirement_id, location, document_id")
-          .eq("proposal_id", id),
-        supabase()
-          .from("requirement_assessments")
-          .select("requirement_id, assessment")
-          .eq("proposal_id", id),
-        supabase()
-          .from("submissions")
-          .select("submitted_at, outcome, confirmation_number")
-          .eq("proposal_id", id)
-          .order("submitted_at", { ascending: false })
-          .limit(1)
-          .maybeSingle(),
-        supabase().from("client_documents").select(DOCUMENT_COLUMNS).eq("client_id", clientId),
-        supabase()
-          .from("requirement_assignments")
-          .select("requirement_id, owner_id, due_on, done_at")
-          .eq("proposal_id", id),
-        supabase().rpc("client_team_roster", { target: clientId }),
-      ]);
+    const [
+      reqResult,
+      secResult,
+      ackResult,
+      assessResult,
+      sentResult,
+      docResult,
+      assignResult,
+      teamResult,
+    ] = await Promise.all([
+      supabase()
+        .from("requirements")
+        .select(
+          "id, label, detail, kind, word_limit, evaluation_note, source_quote, is_critical, sort_order",
+        )
+        .eq("grant_id", grantId)
+        .or(`client_id.is.null,client_id.eq.${clientId}`)
+        .order("sort_order"),
+      supabase()
+        .from("proposal_sections")
+        .select(
+          "id, requirement_id, heading, content, word_count, drafted_by, reused_answer_ids, fabrication_concerns, updated_at",
+        )
+        .eq("proposal_id", id),
+      supabase()
+        .from("requirement_acknowledgements")
+        .select("requirement_id, location, document_id")
+        .eq("proposal_id", id),
+      supabase()
+        .from("requirement_assessments")
+        .select("requirement_id, assessment")
+        .eq("proposal_id", id),
+      supabase()
+        .from("submissions")
+        .select("submitted_at, outcome, confirmation_number")
+        .eq("proposal_id", id)
+        .order("submitted_at", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+      supabase().from("client_documents").select(DOCUMENT_COLUMNS).eq("client_id", clientId),
+      supabase()
+        .from("requirement_assignments")
+        .select("requirement_id, owner_id, due_on, done_at")
+        .eq("proposal_id", id),
+      supabase().rpc("client_team_roster", { target: clientId }),
+    ]);
     // A failed read must say so: an empty list here reads as "the call asks
     // for nothing" or "nothing is drafted", both of which are false.
     const failed = [
