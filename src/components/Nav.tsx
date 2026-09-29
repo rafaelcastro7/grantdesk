@@ -125,7 +125,9 @@ export function Nav() {
           <div className="flex items-center gap-1 sm:gap-2">
             {[
               ...LINKS,
-              ...(signedIn && isAdmin ? [{ to: "/settings/email", label: "Email settings" }] : []),
+              ...(signedIn && isAdmin
+                ? [{ to: "/settings/email", label: "nav.emailSettings" as const }]
+                : []),
             ].map((link) => {
               const current = link.to === "/" ? pathname === "/" : pathname.startsWith(link.to);
               return (
