@@ -10,6 +10,7 @@ import { useDocumentTitle } from "@/lib/use-document-title";
 import { extractProfile } from "@/server/profile.functions";
 import { assessProfile, nextGap, type ProfileFields } from "@/lib/profile-completeness";
 import { PipelineLog } from "@/components/PipelineLog";
+import { DocumentRegister } from "@/components/DocumentRegister";
 
 export const Route = createFileRoute("/clients/$clientId")({ component: ClientDetail });
 
@@ -735,6 +736,8 @@ function ClientDetail() {
           </ul>
         </section>
       )}
+
+      <DocumentRegister clientId={clientId} />
 
       <PipelineLog clientId={clientId} />
     </main>
