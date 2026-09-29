@@ -230,3 +230,29 @@ describe("countGaps", () => {
     expect(countGaps(null)).toBe(0);
   });
 });
+
+describe("documents linked from the register", () => {
+  const doc = (expiresOn: string | null) => ({
+    requirement: "Proof of insurance",
+    title: "CGL certificate 2025",
+    expiresOn,
+  });
+
+  it("warns, naming the document, when a linked document has expired", () => {
+    const result = assessSubmission(candidate({ linkedDocuments: [doc("2026-08-01")] }));
+    const blocker = result.blockers.find((b) => b.key === "expired_document");
+    expect(blocker?.isHard).toBe(false);
+    expect(blocker?.detail).toContain("CGL certificate 2025");
+    expect(result.canOverride).toBe(true);
+  });
+
+  it("warns when it expires before the call closes", () => {
+    expect(keys(candidate({ linkedDocuments: [doc("2026-10-01")] }))).toEqual([
+      "document_expires_before_deadline",
+    ]);
+  });
+
+  it("says nothing when it outlasts the deadline or carries no date", () => {
+    expect(keys(candidate({ linkedDocuments: [doc("2027-01-01"), doc(null)] }))).toEqual([]);
+  });
+});

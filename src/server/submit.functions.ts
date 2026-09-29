@@ -3,6 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import { ACCESS_TOKEN_MESSAGE, callerClient } from "./caller";
 import { assessSubmission, type Blocker, type SubmitCandidate } from "@/lib/submit-gate";
+import { effectiveExpiry, type DatedDocument } from "@/lib/client-documents";
 import { loadPastAwards } from "./past-awards";
 import { draftingGate, fromRow, type DecisionRow, type DraftingGate } from "@/lib/go-decision";
 
@@ -60,7 +61,7 @@ async function buildCandidate(
       .maybeSingle(),
     supabase
       .from("requirement_acknowledgements")
-      .select("requirement_id")
+      .select("requirement_id, client_documents(title, kind, issued_on, expires_on)")
       .eq("proposal_id", proposalId),
     supabase
       .from("submissions")
@@ -114,9 +115,12 @@ async function buildCandidate(
       }>
     ).map((s) => [s.requirement_id ?? "", s]),
   );
-  const acknowledged = new Set(
-    ((acks ?? []) as Array<{ requirement_id: string }>).map((a) => a.requirement_id),
-  );
+  const ackRows = (acks ?? []) as unknown as Array<{
+    requirement_id: string;
+    client_documents: (DatedDocument & { title: string }) | null;
+  }>;
+  const acknowledged = new Set(ackRows.map((a) => a.requirement_id));
+  const labelOf = new Map(reqs.map((r) => [r.id, r.label]));
 
   return {
     clientId: row.client_id,
@@ -142,6 +146,13 @@ async function buildCandidate(
           label: r.label,
           isCritical: r.is_critical,
           acknowledged: acknowledged.has(r.id),
+        })),
+      linkedDocuments: ackRows
+        .filter((a) => a.client_documents && labelOf.has(a.requirement_id))
+        .map((a) => ({
+          requirement: labelOf.get(a.requirement_id)!,
+          title: a.client_documents!.title,
+          expiresOn: effectiveExpiry(a.client_documents!),
         })),
       humanReviewed,
       alreadySubmitted: (count ?? 0) > 0,

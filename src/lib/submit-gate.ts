@@ -50,6 +50,11 @@ export type SubmitCandidate = {
     draftedBy?: string | null;
   }>;
   conditions: Array<{ label: string; isCritical: boolean; acknowledged: boolean }>;
+  /**
+   * Register documents linked to a condition, with their effective expiry
+   * (typed, or derived from the kind's default validity).
+   */
+  linkedDocuments?: Array<{ requirement: string; title: string; expiresOn: string | null }>;
   /** Set only when a person has actually confirmed they read it. */
   humanReviewed: boolean;
   alreadySubmitted: boolean;
@@ -206,6 +211,26 @@ export function assessSubmission(candidate: SubmitCandidate): {
       }. Confirm you have it.`,
       isHard: true,
     });
+  }
+
+  // Soft: a funder may accept a certificate renewed after submission, and the
+  // consultant may already hold the renewal. But they must know which one.
+  const today = candidate.today.toISOString().slice(0, 10);
+  for (const doc of candidate.linkedDocuments ?? []) {
+    if (!doc.expiresOn) continue;
+    if (doc.expiresOn < today) {
+      blockers.push({
+        key: "expired_document",
+        detail: `"${doc.title}", attached for "${doc.requirement}", expired on ${doc.expiresOn}. Replace it in the client's document register.`,
+        isHard: false,
+      });
+    } else if (candidate.deadline && doc.expiresOn < candidate.deadline) {
+      blockers.push({
+        key: "document_expires_before_deadline",
+        detail: `"${doc.title}", attached for "${doc.requirement}", expires on ${doc.expiresOn}, before this call closes on ${candidate.deadline}.`,
+        isHard: false,
+      });
+    }
   }
 
   // Last, and never automatic. Everything above this line is the machine's

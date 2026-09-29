@@ -19,6 +19,8 @@ import {
 } from "@/server/proposal.functions";
 import { checkReadiness, getPastAwards, submitProposal } from "@/server/submit.functions";
 import type { Blocker } from "@/lib/submit-gate";
+import { DOCUMENT_COLUMNS, type ClientDocument } from "@/components/DocumentRegister";
+import { KIND_LABEL, documentStatus } from "@/lib/client-documents";
 import type { PastAwardsResult } from "@/server/past-awards";
 
 const OUTCOME_LABEL: Record<string, string> = {
@@ -86,6 +88,8 @@ function ProposalPage() {
   const [sections, setSections] = useState<Record<string, Section>>({});
   const [acknowledged, setAcknowledged] = useState<Set<string>>(new Set());
   const [locations, setLocations] = useState<Record<string, string>>({});
+  const [linked, setLinked] = useState<Record<string, string>>({});
+  const [registerDocs, setRegisterDocs] = useState<ClientDocument[]>([]);
   const [submission, setSubmission] = useState<{
     submitted_at: string;
     outcome: string | null;
@@ -146,40 +150,44 @@ function ProposalPage() {
 
     // Shared extracted requirements plus the headings typed for this client
     // only — never another client's, even one this consultant also serves.
-    const [reqResult, secResult, ackResult, assessResult, sentResult] = await Promise.all([
-      supabase()
-        .from("requirements")
-        .select(
-          "id, label, detail, kind, word_limit, evaluation_note, source_quote, is_critical, sort_order",
-        )
-        .eq("grant_id", grantId)
-        .or(`client_id.is.null,client_id.eq.${clientId}`)
-        .order("sort_order"),
-      supabase()
-        .from("proposal_sections")
-        .select(
-          "id, requirement_id, heading, content, word_count, drafted_by, reused_answer_ids, fabrication_concerns, updated_at",
-        )
-        .eq("proposal_id", id),
-      supabase()
-        .from("requirement_acknowledgements")
-        .select("requirement_id, location")
-        .eq("proposal_id", id),
-      supabase()
-        .from("requirement_assessments")
-        .select("requirement_id, assessment")
-        .eq("proposal_id", id),
-      supabase()
-        .from("submissions")
-        .select("submitted_at, outcome, confirmation_number")
-        .eq("proposal_id", id)
-        .order("submitted_at", { ascending: false })
-        .limit(1)
-        .maybeSingle(),
-    ]);
+    const [reqResult, secResult, ackResult, assessResult, sentResult, docResult] =
+      await Promise.all([
+        supabase()
+          .from("requirements")
+          .select(
+            "id, label, detail, kind, word_limit, evaluation_note, source_quote, is_critical, sort_order",
+          )
+          .eq("grant_id", grantId)
+          .or(`client_id.is.null,client_id.eq.${clientId}`)
+          .order("sort_order"),
+        supabase()
+          .from("proposal_sections")
+          .select(
+            "id, requirement_id, heading, content, word_count, drafted_by, reused_answer_ids, fabrication_concerns, updated_at",
+          )
+          .eq("proposal_id", id),
+        supabase()
+          .from("requirement_acknowledgements")
+          .select("requirement_id, location, document_id")
+          .eq("proposal_id", id),
+        supabase()
+          .from("requirement_assessments")
+          .select("requirement_id, assessment")
+          .eq("proposal_id", id),
+        supabase()
+          .from("submissions")
+          .select("submitted_at, outcome, confirmation_number")
+          .eq("proposal_id", id)
+          .order("submitted_at", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+        supabase().from("client_documents").select(DOCUMENT_COLUMNS).eq("client_id", clientId),
+      ]);
     // A failed read must say so: an empty list here reads as "the call asks
     // for nothing" or "nothing is drafted", both of which are false.
-    const failed = [reqResult, secResult, ackResult, assessResult, sentResult].find((r) => r.error);
+    const failed = [reqResult, secResult, ackResult, assessResult, sentResult, docResult].find(
+      (r) => r.error,
+    );
     if (failed?.error) {
       setError(failed.error.message);
       return;
@@ -196,7 +204,14 @@ function ProposalPage() {
     const ackRows = (ackResult.data ?? []) as Array<{
       requirement_id: string;
       location: string | null;
+      document_id: string | null;
     }>;
+    setRegisterDocs((docResult.data ?? []) as ClientDocument[]);
+    setLinked(
+      Object.fromEntries(
+        ackRows.filter((a) => a.document_id).map((a) => [a.requirement_id, a.document_id!]),
+      ),
+    );
     setAcknowledged(new Set(ackRows.map((a) => a.requirement_id)));
     setLocations(
       Object.fromEntries(
@@ -415,6 +430,42 @@ function ProposalPage() {
   }
 
   /**
+   * Link a document from the client's register and take its location, so the
+   * submit gate can check its expiry against the deadline.
+   */
+  async function linkFromRegister(requirement: Requirement, documentId: string) {
+    if (!proposalId || !acknowledged.has(requirement.id)) return;
+    const doc = registerDocs.find((d) => d.id === documentId);
+    const beforeLinked = linked[requirement.id];
+    const beforeLocation = locations[requirement.id];
+    setLinked((current) => {
+      const next = { ...current };
+      if (doc) next[requirement.id] = doc.id;
+      else delete next[requirement.id];
+      return next;
+    });
+    if (doc) setLocations((current) => ({ ...current, [requirement.id]: doc.location }));
+    setBlockers(null);
+    const { error: linkError } = await supabase()
+      .from("requirement_acknowledgements")
+      .update(doc ? { document_id: doc.id, location: doc.location } : { document_id: null })
+      .eq("proposal_id", proposalId)
+      .eq("requirement_id", requirement.id);
+    if (linkError) {
+      setLinked((current) => {
+        const next = { ...current };
+        if (beforeLinked) next[requirement.id] = beforeLinked;
+        else delete next[requirement.id];
+        return next;
+      });
+      setLocations((current) => ({ ...current, [requirement.id]: beforeLocation ?? "" }));
+      setError(`Could not link a document to "${requirement.label}": ${linkError.message}`);
+      return;
+    }
+    void refreshReadiness();
+  }
+
+  /**
    * The write itself, kept separate so the caller can hold onto its promise.
    *
    * The checkbox flips locally and the round-trip to Postgres finishes later,
@@ -464,6 +515,11 @@ function ProposalPage() {
           .eq("proposal_id", proposalId)
           .eq("requirement_id", requirement.id);
         if (deleteError) throw deleteError;
+        setLinked((current) => {
+          const next = { ...current };
+          delete next[requirement.id];
+          return next;
+        });
       }
       // Deliberately no reload on success. Reloading replaced the local set
       // with a snapshot taken before this write landed, so ticking several
@@ -865,8 +921,31 @@ function ProposalPage() {
                         />
                         I have this
                       </label>
+                      {requirement.kind === "attachment" &&
+                        acknowledged.has(requirement.id) &&
+                        registerDocs.length > 0 && (
+                          <select
+                            value={linked[requirement.id] ?? ""}
+                            onChange={(event) => linkFromRegister(requirement, event.target.value)}
+                            disabled={!!submission}
+                            aria-label={`Use a document from the register for "${requirement.label}"`}
+                            data-testid="use-from-register"
+                            className="mt-2 w-full rounded-md border border-[var(--color-rule)] bg-[var(--color-paper)] px-2 py-1 text-sm"
+                          >
+                            <option value="">Use from register…</option>
+                            {registerDocs.map((doc) => (
+                              <option key={doc.id} value={doc.id}>
+                                {doc.title} ({KIND_LABEL[doc.kind]},{" "}
+                                {documentStatus(doc, new Date())})
+                              </option>
+                            ))}
+                          </select>
+                        )}
                       {requirement.kind === "attachment" && acknowledged.has(requirement.id) && (
                         <input
+                          // Remounted when a register document is picked, so the
+                          // uncontrolled field shows the location it filled in.
+                          key={linked[requirement.id] ?? "typed"}
                           type="text"
                           defaultValue={locations[requirement.id] ?? ""}
                           onBlur={(event) => saveLocation(requirement, event.target.value)}
