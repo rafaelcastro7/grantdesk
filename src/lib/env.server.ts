@@ -12,8 +12,24 @@ const schema = z.object({
   SUPABASE_URL: z.string().url(),
   SUPABASE_ANON_KEY: z.string().min(20),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(20),
-  OLLAMA_BASE_URL: z.string().url().default("http://localhost:11434"),
+  /**
+   * Optional: the local floor. Unset on a hosted deployment (Lovable), where
+   * no Ollama exists — the LLM chain then ends at the last cloud provider
+   * and embeddings come from EMBED_API_URL instead.
+   */
+  OLLAMA_BASE_URL: z.string().url().optional(),
   OLLAMA_EMBED_MODEL: z.string().default("bge-m3"),
+  /**
+   * Hosted embeddings, OpenAI-compatible (/embeddings). Must serve the same
+   * models as the stored vectors — BAAI/bge-m3 (1024d) for the catalog and
+   * nomic-embed-text v1.5 (768d) for answers — or search compares vectors
+   * from different spaces and returns confident nonsense. DeepInfra serves
+   * both at https://api.deepinfra.com/v1/openai
+   */
+  EMBED_API_URL: z.string().url().optional(),
+  EMBED_API_KEY: z.string().optional(),
+  EMBED_API_MODEL_CATALOG: z.string().default("BAAI/bge-m3"),
+  EMBED_API_MODEL_ANSWERS: z.string().default("nomic-ai/nomic-embed-text-v1.5"),
   /**
    * The local floor. Configurable because which model is best here is a
    * measurement (`bun run benchmark:local`) rather than a constant, and it was
@@ -43,7 +59,18 @@ let cached: ServerEnv | null = null;
 
 export function serverEnv(): ServerEnv {
   if (cached) return cached;
-  const parsed = schema.safeParse(process.env);
+  // Lovable Cloud names the Supabase variables differently (VITE_… and
+  // *_PUBLISHABLE_KEY); accept either spelling rather than requiring renames.
+  const env = process.env;
+  const parsed = schema.safeParse({
+    ...env,
+    SUPABASE_URL: env.SUPABASE_URL ?? env.VITE_SUPABASE_URL,
+    SUPABASE_ANON_KEY:
+      env.SUPABASE_ANON_KEY ??
+      env.SUPABASE_PUBLISHABLE_KEY ??
+      env.VITE_SUPABASE_PUBLISHABLE_KEY ??
+      env.VITE_SUPABASE_ANON_KEY,
+  });
   if (!parsed.success) {
     const missing = parsed.error.issues.map((i) => i.path.join(".")).join(", ");
     throw new Error(

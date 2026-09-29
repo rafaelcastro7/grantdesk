@@ -266,6 +266,8 @@ async function callProvider(
 async function callOllama(request: LlmRequest, timeoutMs: number): Promise<LlmResponse> {
   const env = serverEnv();
   const started = Date.now();
+  // No floor on a hosted deployment; the chain reports every cloud attempt.
+  if (!env.OLLAMA_BASE_URL) throw new Error("ollama_not_configured");
   const response = await fetch(`${env.OLLAMA_BASE_URL}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

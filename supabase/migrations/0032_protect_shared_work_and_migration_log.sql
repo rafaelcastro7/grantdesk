@@ -28,8 +28,17 @@ grant execute on function public.replace_extracted_requirements(uuid) to service
 
 -- 2. The migration log was writable by any signed-in user through the API:
 --    deleting a row re-runs a migration, inserting one skips it.
-revoke all on public.schema_migrations from anon, authenticated;
-alter table public.schema_migrations enable row level security;
+-- Guarded (edited after it was applied locally, with the same effect there):
+-- the table is created by scripts/migrate.mjs and does not exist on a hosted
+-- Supabase project that applies migrations its own way, where the
+-- unguarded statements aborted the whole migration.
+do $$
+begin
+  if to_regclass('public.schema_migrations') is not null then
+    revoke all on public.schema_migrations from anon, authenticated;
+    alter table public.schema_migrations enable row level security;
+  end if;
+end $$;
 
 -- 3. A client's tenant is as fixed as its owner; a member of two tenants
 --    could otherwise move a client between them.

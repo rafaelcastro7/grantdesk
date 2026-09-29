@@ -120,6 +120,8 @@ for (const [model, width, purpose] of [
 // budget spent in `thinking`, which callLlm reads as a failed provider.
 try {
   const localEnv = serverEnv();
+  // A hosted deployment has no floor by design; say so instead of "broken".
+  if (!localEnv.OLLAMA_BASE_URL) throw new Error("__no_floor__");
   const response = await fetch(`${localEnv.OLLAMA_BASE_URL}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -163,11 +165,15 @@ try {
     );
   }
 } catch (error) {
-  record(
-    "local floor",
-    "broken",
-    `${error instanceof Error ? error.message : String(error)} — is Ollama running?`,
-  );
+  if (error instanceof Error && error.message === "__no_floor__") {
+    record("local floor", "degraded", "OLLAMA_BASE_URL unset (hosted): no local fallback");
+  } else {
+    record(
+      "local floor",
+      "broken",
+      `${error instanceof Error ? error.message : String(error)} — is Ollama running?`,
+    );
+  }
 }
 
 // ── The provider chain, per role ────────────────────────────────────────────

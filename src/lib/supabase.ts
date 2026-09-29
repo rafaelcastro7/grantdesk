@@ -10,7 +10,9 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
  */
 
 const url = import.meta.env.VITE_SUPABASE_URL as string | undefined;
-const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
+// Lovable Cloud provides the public key as VITE_SUPABASE_PUBLISHABLE_KEY.
+const anonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY ??
+  import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY) as string | undefined;
 
 let client: SupabaseClient | null = null;
 
@@ -18,7 +20,7 @@ export function supabase(): SupabaseClient {
   if (client) return client;
   if (!url || !anonKey) {
     throw new Error(
-      "VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are required. Copy .env.example to .env.",
+      "VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY (or VITE_SUPABASE_PUBLISHABLE_KEY) are required.",
     );
   }
   client = createClient(url, anonKey, {

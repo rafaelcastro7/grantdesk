@@ -80,19 +80,50 @@ export async function embed(
   // Sixteen at a time, with a generous ceiling: the first full run under
   // bge-m3 died on a 32-row batch of real text while the same code had been
   // fine under a smaller, faster model.
+  // Hosted (OpenAI-compatible) when configured — the only option on Lovable —
+  // otherwise the local Ollama. Same model weights either way, so vectors
+  // stored by one are comparable with queries embedded by the other.
+  const hosted = env.EMBED_API_URL ? env.EMBED_API_URL.replace(/\/+$/, "") : null;
+  if (!hosted && !env.OLLAMA_BASE_URL) {
+    throw new Error(
+      "No embedder configured: set EMBED_API_URL (+ EMBED_API_KEY) for a hosted one, or OLLAMA_BASE_URL for local.",
+    );
+  }
+  const hostedModel =
+    model === ANSWER_EMBED_MODEL ? env.EMBED_API_MODEL_ANSWERS : env.EMBED_API_MODEL_CATALOG;
+
   for (let i = 0; i < texts.length; i += EMBED_BATCH) {
     const chunk = texts.slice(i, i + EMBED_BATCH);
-    const response = await fetch(`${env.OLLAMA_BASE_URL}/api/embed`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model, input: chunk }),
-      signal: AbortSignal.timeout(timeoutMs),
-    });
+    const response = hosted
+      ? await fetch(`${hosted}/embeddings`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(env.EMBED_API_KEY ? { Authorization: `Bearer ${env.EMBED_API_KEY}` } : {}),
+          },
+          body: JSON.stringify({ model: hostedModel, input: chunk, encoding_format: "float" }),
+          signal: AbortSignal.timeout(timeoutMs),
+        })
+      : await fetch(`${env.OLLAMA_BASE_URL}/api/embed`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ model, input: chunk }),
+          signal: AbortSignal.timeout(timeoutMs),
+        });
     if (!response.ok) {
-      throw new Error(`embedding failed: HTTP ${response.status} from ${env.OLLAMA_BASE_URL}`);
+      throw new Error(
+        `embedding failed: HTTP ${response.status} from ${hosted ?? env.OLLAMA_BASE_URL}`,
+      );
     }
-    const body = (await response.json()) as { embeddings?: number[][] };
-    const vectors = body.embeddings ?? [];
+    const vectors = hosted
+      ? (
+          ((await response.json()) as { data?: Array<{ embedding: number[]; index?: number }> })
+            .data ?? []
+        )
+          .slice()
+          .sort((a, b) => (a.index ?? 0) - (b.index ?? 0))
+          .map((row) => row.embedding)
+      : (((await response.json()) as { embeddings?: number[][] }).embeddings ?? []);
     if (vectors.length !== chunk.length) {
       throw new Error(`embedder returned ${vectors.length} vectors for ${chunk.length} inputs`);
     }
