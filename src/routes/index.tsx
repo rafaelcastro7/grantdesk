@@ -5,6 +5,14 @@ import { Landing } from "@/components/Landing";
 import { daysUntilDeadline } from "@/lib/deadline";
 import { buildIcs } from "@/lib/ics";
 import { useDocumentTitle } from "@/lib/use-document-title";
+import {
+  dueGroup,
+  memberName,
+  nextAssignment,
+  toCsv,
+  type Assignment,
+  type DueGroup,
+} from "@/lib/assignments";
 
 export const Route = createFileRoute("/")({ component: Home });
 
@@ -18,12 +26,17 @@ type Row = {
   proposal_sections: Array<{ id: string }>;
   /** Joined in code from opportunity_decisions. */
   decision?: string | null;
+  approver?: string | null;
+  reason?: string | null;
+  /** Joined in code from requirement_assignments. */
+  assignments: Assignment[];
 };
 
 const DECISION_LABEL: Record<string, string> = {
   pending: "awaiting go / no-go",
   go: "GO",
   go_conditional: "GO-CONDITIONAL",
+  no_go: "NO-GO",
 };
 
 /** The same words the submission form uses, not the stored codes. */
@@ -34,6 +47,12 @@ const OUTCOME_LABEL: Record<string, string> = {
   withdrawn: "Withdrawn",
 };
 
+const GROUPS: ReadonlyArray<readonly [Exclude<DueGroup, "closed">, string]> = [
+  ["overdue", "Overdue"],
+  ["this_week", "This week"],
+  ["later", "Later"],
+];
+
 /**
  * The first of the five questions in docs/SPEC.md: what is due across all my
  * clients?
@@ -42,16 +61,21 @@ const OUTCOME_LABEL: Record<string, string> = {
  * eight clients does not think in clients — they think in "what has to go out
  * this week", and every incumbent makes them open eight dashboards to find out.
  *
- * Sorted by what closes soonest, because that is the only ordering that
- * survives a Monday morning. Submitted applications drop to their own list
- * rather than disappearing: "did we send that?" is asked far more often than
- * it should have to be.
+ * Grouped by urgency, where urgency counts the firm's own internal dates as
+ * well as the funder's: a section due to the partner yesterday is overdue
+ * whatever the call's deadline says. Submitted applications drop to their own
+ * list rather than disappearing: "did we send that?" is asked far more often
+ * than it should have to be.
  */
 function Home() {
   useDocumentTitle("What is due");
   const [rows, setRows] = useState<Row[] | null>(null);
+  const [names, setNames] = useState<Map<string, string>>(new Map());
+  const [myId, setMyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [signedIn, setSignedIn] = useState<boolean | null>(null);
+  const [clientFilter, setClientFilter] = useState("");
+  const [ownerFilter, setOwnerFilter] = useState("");
 
   const load = useCallback(async () => {
     const { data: session } = await supabase().auth.getSession();
@@ -60,8 +84,9 @@ function Home() {
       return;
     }
     setSignedIn(true);
+    setMyId(session.session.user.id);
 
-    const [proposals, decisions] = await Promise.all([
+    const [proposals, decisions, assignments, roster] = await Promise.all([
       supabase()
         .from("proposals")
         .select(
@@ -69,23 +94,74 @@ function Home() {
             "submissions(submitted_at, outcome), proposal_sections(id)",
         )
         .order("submitted_at", { referencedTable: "submissions", ascending: false }),
-      supabase().from("opportunity_decisions").select("client_id, grant_id, decision"),
+      supabase()
+        .from("opportunity_decisions")
+        .select(
+          "client_id, grant_id, decision, decided_by, decision_reason, recommendation_reason",
+        ),
+      supabase()
+        .from("requirement_assignments")
+        .select("proposal_id, requirement_id, owner_id, due_on, done_at"),
+      supabase().rpc("client_team_roster", { target: null }),
     ]);
-    const readError = proposals.error ?? decisions.error;
+    // An owner filter over a failed assignment read would show "nothing due"
+    // for someone with a full week; say it failed instead.
+    const readError = proposals.error ?? decisions.error ?? assignments.error ?? roster.error;
     if (readError) {
       setError(readError.message);
       return;
     }
     const decisionOf = new Map(
       (
-        (decisions.data ?? []) as Array<{ client_id: string; grant_id: string; decision: string }>
-      ).map((d) => [`${d.client_id}|${d.grant_id}`, d.decision]),
+        (decisions.data ?? []) as Array<{
+          client_id: string;
+          grant_id: string;
+          decision: string;
+          decided_by: string | null;
+          decision_reason: string | null;
+          recommendation_reason: string | null;
+        }>
+      ).map((d) => [`${d.client_id}|${d.grant_id}`, d]),
+    );
+    const assignmentsOf = new Map<string, Assignment[]>();
+    for (const a of (assignments.data ?? []) as Array<{
+      proposal_id: string;
+      requirement_id: string;
+      owner_id: string | null;
+      due_on: string | null;
+      done_at: string | null;
+    }>) {
+      const list = assignmentsOf.get(a.proposal_id) ?? [];
+      list.push({
+        requirementId: a.requirement_id,
+        ownerId: a.owner_id,
+        dueOn: a.due_on,
+        doneAt: a.done_at,
+      });
+      assignmentsOf.set(a.proposal_id, list);
+    }
+    setNames(
+      new Map(
+        (
+          (roster.data ?? []) as Array<{
+            user_id: string;
+            email: string;
+            display_name: string | null;
+          }>
+        ).map((m) => [m.user_id, memberName({ email: m.email, displayName: m.display_name })]),
+      ),
     );
     setRows(
-      ((proposals.data ?? []) as unknown as Row[]).map((r) => ({
-        ...r,
-        decision: decisionOf.get(`${r.client_id}|${r.grant_id}`) ?? null,
-      })),
+      ((proposals.data ?? []) as unknown as Row[]).map((r) => {
+        const d = decisionOf.get(`${r.client_id}|${r.grant_id}`);
+        return {
+          ...r,
+          decision: d?.decision ?? null,
+          approver: d?.decided_by ?? null,
+          reason: d?.decision_reason ?? d?.recommendation_reason ?? null,
+          assignments: assignmentsOf.get(r.id) ?? [],
+        };
+      }),
     );
   }, []);
 
@@ -93,27 +169,101 @@ function Home() {
     void load();
   }, [load]);
 
-  // In progress means real work exists — a section or a brief. Merely opening
-  // a call to look at it is not an application, and a no-go is not due.
+  const today = new Date();
+  const owner = ownerFilter || null;
+  const nameOf = (id: string | null) =>
+    id ? (names.get(id) ?? "someone no longer on the team") : null;
+
+  // In progress means real work exists — a section, a brief or an owner.
+  // Merely opening a call to look at it is not an application, and a no-go
+  // is not due.
   const active = (rows ?? []).filter(
     (r) =>
       r.submissions.length === 0 &&
       r.decision !== "no_go" &&
-      (r.proposal_sections.length > 0 || r.decision != null),
+      (r.proposal_sections.length > 0 || r.decision != null || r.assignments.length > 0),
   );
-  const isClosed = (r: Row) =>
-    !!r.grants?.deadline && daysUntilDeadline(r.grants.deadline, new Date()) < 0;
-  const lapsed = active.filter(isClosed);
-  const open = active
-    .filter((r) => !isClosed(r))
-    .sort((a, b) => {
-      // A call with no published closing date is genuinely less urgent than one
-      // that closes on Friday, so it sorts last rather than first.
-      const left = a.grants?.deadline ?? "9999-12-31";
-      const right = b.grants?.deadline ?? "9999-12-31";
-      return left.localeCompare(right);
-    });
-  const sent = (rows ?? []).filter((r) => r.submissions.length > 0);
+  const shown = active.filter(
+    (r) =>
+      (!clientFilter || r.client_id === clientFilter) &&
+      (!owner || r.assignments.some((a) => a.ownerId === owner && !a.doneAt)),
+  );
+  const grouped: Record<DueGroup, Row[]> = { overdue: [], this_week: [], later: [], closed: [] };
+  for (const r of shown) {
+    const next = nextAssignment(r.assignments, owner);
+    grouped[dueGroup(r.grants?.deadline ?? null, next?.dueOn ?? null, today)].push(r);
+  }
+  // A call with no published closing date is genuinely less urgent than one
+  // that closes on Friday, so it sorts last rather than first.
+  const soonest = (r: Row) => {
+    const next = nextAssignment(r.assignments, owner)?.dueOn ?? "9999-12-31";
+    const deadline = r.grants?.deadline ?? "9999-12-31";
+    return next < deadline ? next : deadline;
+  };
+  for (const key of Object.keys(grouped) as DueGroup[]) {
+    grouped[key].sort((a, b) => soonest(a).localeCompare(soonest(b)));
+  }
+  const open = [...grouped.overdue, ...grouped.this_week, ...grouped.later];
+  const lapsed = grouped.closed;
+  const sent = (rows ?? []).filter(
+    (r) => r.submissions.length > 0 && (!clientFilter || r.client_id === clientFilter),
+  );
+
+  const clients = [
+    ...new Map((rows ?? []).map((r) => [r.client_id, r.clients?.name ?? "Client"])).entries(),
+  ].sort((a, b) => a[1].localeCompare(b[1]));
+  const owners = [...names.entries()].sort((a, b) => a[1].localeCompare(b[1]));
+
+  function exportCsv() {
+    const status = (r: Row) => {
+      if (r.submissions.length > 0) return "Sent";
+      if (r.decision === "no_go") return "No-go";
+      const next = nextAssignment(r.assignments);
+      const group = dueGroup(r.grants?.deadline ?? null, next?.dueOn ?? null, today);
+      return group === "closed"
+        ? "Closed before sent"
+        : (GROUPS.find(([k]) => k === group)?.[1] ?? group);
+    };
+    // Every application this consultant can see, whatever is filtered on
+    // screen: the export is the firm's record, not the current view.
+    const csv = toCsv([
+      [
+        "Client",
+        "Call",
+        "Deadline",
+        "Status",
+        "Decision",
+        "Approved by",
+        "Reason",
+        "Next owner",
+        "Next internal due",
+        "Submitted",
+        "Outcome",
+      ],
+      ...(rows ?? []).map((r) => {
+        const next = nextAssignment(r.assignments);
+        return [
+          r.clients?.name,
+          r.grants?.title,
+          r.grants?.deadline,
+          status(r),
+          r.decision ? (DECISION_LABEL[r.decision] ?? r.decision) : "No brief yet",
+          r.approver,
+          r.reason,
+          nameOf(next?.ownerId ?? null),
+          next?.dueOn,
+          r.submissions[0]?.submitted_at.slice(0, 10),
+          r.submissions[0]?.outcome,
+        ];
+      }),
+    ]);
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "grantdesk-applications.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
 
   // One route, two audiences. A visitor gets the case for the product; a
   // signed-in consultant gets the first of the five questions in docs/SPEC.md.
@@ -127,40 +277,58 @@ function Home() {
   // is the first impression it exists to make.
   if (signedIn !== true) return <Landing />;
 
+  const selectClass =
+    "rounded-md border border-[var(--color-rule)] bg-[var(--color-paper)] px-2 py-1 text-sm";
+
   return (
     <main className="mx-auto max-w-3xl px-6 py-12">
       <h1 className="text-2xl font-semibold tracking-tight">What is due</h1>
       <p className="mt-2 max-w-prose text-sm text-[var(--color-ink-soft)]">
-        Every application in progress, across every client, soonest first.
+        Every application in progress, across every client, by what needs doing soonest — the
+        funder's deadline or your team's own due date, whichever comes first.
       </p>
-      {open.some((r) => r.grants?.deadline) && (
-        <button
-          type="button"
-          onClick={() => {
-            const ics = buildIcs(
-              open
-                .filter((r) => r.grants?.deadline)
-                .map((r) => ({
-                  uid: r.id,
-                  title: r.grants?.title ?? "Application",
-                  client: r.clients?.name ?? "Client",
-                  deadline: r.grants!.deadline!,
-                  url: `${window.location.origin}/clients/${r.client_id}/proposals/${r.grant_id}`,
-                  note: r.decision ? `Decision: ${DECISION_LABEL[r.decision] ?? r.decision}` : null,
-                })),
-            );
-            const url = URL.createObjectURL(new Blob([ics], { type: "text/calendar" }));
-            const a = document.createElement("a");
-            a.href = url;
-            a.download = "grantdesk-deadlines.ics";
-            a.click();
-            URL.revokeObjectURL(url);
-          }}
-          className="mt-3 rounded-md border border-[var(--color-rule)] px-3 py-1.5 text-sm font-medium"
-        >
-          Add these deadlines to my calendar (.ics)
-        </button>
-      )}
+      <div className="mt-3 flex flex-wrap gap-2">
+        {open.some((r) => r.grants?.deadline) && (
+          <button
+            type="button"
+            onClick={() => {
+              const ics = buildIcs(
+                open
+                  .filter((r) => r.grants?.deadline)
+                  .map((r) => ({
+                    uid: r.id,
+                    title: r.grants?.title ?? "Application",
+                    client: r.clients?.name ?? "Client",
+                    deadline: r.grants!.deadline!,
+                    url: `${window.location.origin}/clients/${r.client_id}/proposals/${r.grant_id}`,
+                    note: r.decision
+                      ? `Decision: ${DECISION_LABEL[r.decision] ?? r.decision}`
+                      : null,
+                  })),
+              );
+              const url = URL.createObjectURL(new Blob([ics], { type: "text/calendar" }));
+              const a = document.createElement("a");
+              a.href = url;
+              a.download = "grantdesk-deadlines.ics";
+              a.click();
+              URL.revokeObjectURL(url);
+            }}
+            className="rounded-md border border-[var(--color-rule)] px-3 py-1.5 text-sm font-medium"
+          >
+            Add these deadlines to my calendar (.ics)
+          </button>
+        )}
+        {(rows ?? []).length > 0 && (
+          <button
+            type="button"
+            onClick={exportCsv}
+            data-testid="export-applications"
+            className="rounded-md border border-[var(--color-rule)] px-3 py-1.5 text-sm font-medium"
+          >
+            Export all applications (CSV)
+          </button>
+        )}
+      </div>
 
       {error && (
         <p role="alert" className="mt-4 text-sm text-[var(--color-ineligible)]">
@@ -168,50 +336,117 @@ function Home() {
         </p>
       )}
 
-      {signedIn &&
-        rows !== null &&
-        open.length === 0 &&
-        sent.length === 0 &&
-        lapsed.length === 0 && (
-          <p className="mt-8 text-sm text-[var(--color-ink-soft)]">
-            Nothing in progress yet.{" "}
-            <Link to="/clients" className="text-[var(--color-accent)]">
-              Add a client
-            </Link>{" "}
-            and find what they can apply for.
-          </p>
-        )}
+      {active.length > 0 && (
+        <div
+          className="mt-6 flex flex-wrap items-center gap-3 text-sm"
+          role="group"
+          aria-label="Filter what is due"
+        >
+          <label className="flex items-center gap-2">
+            Client
+            <select
+              value={clientFilter}
+              onChange={(e) => setClientFilter(e.target.value)}
+              className={selectClass}
+            >
+              <option value="">All clients</option>
+              {clients.map(([id, name]) => (
+                <option key={id} value={id}>
+                  {name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex items-center gap-2">
+            Owner
+            <select
+              value={ownerFilter}
+              onChange={(e) => setOwnerFilter(e.target.value)}
+              className={selectClass}
+            >
+              <option value="">Anyone</option>
+              {owners.map(([id, name]) => (
+                <option key={id} value={id}>
+                  {name}
+                </option>
+              ))}
+            </select>
+          </label>
+          {myId && (
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={ownerFilter === myId}
+                onChange={(e) => setOwnerFilter(e.target.checked ? myId : "")}
+              />
+              Only mine
+            </label>
+          )}
+        </div>
+      )}
+
+      {signedIn && rows !== null && active.length === 0 && sent.length === 0 && (
+        <p className="mt-8 text-sm text-[var(--color-ink-soft)]">
+          Nothing in progress yet.{" "}
+          <Link to="/clients" className="text-[var(--color-accent)]">
+            Add a client
+          </Link>{" "}
+          and find what they can apply for.
+        </p>
+      )}
+
+      {active.length > 0 && open.length === 0 && lapsed.length === 0 && (
+        <p className="mt-6 text-sm text-[var(--color-ink-soft)]">
+          Nothing in progress matches these filters.
+        </p>
+      )}
 
       {open.length > 0 && (
-        <ul
-          data-testid="due-list"
-          className="mt-6 flex flex-col gap-px overflow-hidden rounded-md border border-[var(--color-rule)] bg-[var(--color-rule)]"
-        >
-          {open.map((row) => (
-            <li key={row.id} className="bg-[var(--color-surface)] px-4 py-3">
-              <div className="flex items-baseline justify-between gap-3">
-                <Link
-                  to="/clients/$clientId/proposals/$grantId"
-                  params={{ clientId: row.client_id, grantId: row.grant_id }}
-                  className="font-medium text-[var(--color-accent)]"
-                >
-                  {row.grants?.title ?? "Application"}
-                </Link>
-                <Deadline date={row.grants?.deadline ?? null} />
-              </div>
-              <p className="mt-1 text-xs text-[var(--color-ink-soft)]">
-                {row.clients?.name}
-                {row.decision ? ` · ${DECISION_LABEL[row.decision] ?? row.decision}` : ""}
-                {` · ${row.proposal_sections.length} section${row.proposal_sections.length === 1 ? "" : "s"} started`}
-              </p>
-            </li>
+        <div data-testid="due-list" className="mt-6 flex flex-col gap-6">
+          {GROUPS.filter(([key]) => grouped[key].length > 0).map(([key, title]) => (
+            <section key={key} data-testid={`due-${key}`}>
+              <h2
+                className={`text-sm font-semibold ${key === "overdue" ? "text-[var(--color-ineligible)]" : ""}`}
+              >
+                {title} ({grouped[key].length})
+              </h2>
+              <ul className="mt-2 flex flex-col gap-px overflow-hidden rounded-md border border-[var(--color-rule)] bg-[var(--color-rule)]">
+                {grouped[key].map((row) => {
+                  const next = nextAssignment(row.assignments, owner);
+                  return (
+                    <li key={row.id} className="bg-[var(--color-surface)] px-4 py-3">
+                      <div className="flex items-baseline justify-between gap-3">
+                        <Link
+                          to="/clients/$clientId/proposals/$grantId"
+                          params={{ clientId: row.client_id, grantId: row.grant_id }}
+                          className="font-medium text-[var(--color-accent)]"
+                        >
+                          {row.grants?.title ?? "Application"}
+                        </Link>
+                        <Deadline date={row.grants?.deadline ?? null} />
+                      </div>
+                      <p className="mt-1 text-xs text-[var(--color-ink-soft)]">
+                        {row.clients?.name}
+                        {row.decision ? ` · ${DECISION_LABEL[row.decision] ?? row.decision}` : ""}
+                        {` · ${row.proposal_sections.length} section${row.proposal_sections.length === 1 ? "" : "s"} started`}
+                      </p>
+                      <p data-testid="next-due" className="mt-1 text-xs">
+                        {next
+                          ? `Next internal due ${next.dueOn} · ${nameOf(next.ownerId) ?? "no owner"}`
+                          : "No internal due date set"}
+                      </p>
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
           ))}
-        </ul>
+        </div>
       )}
 
       {lapsed.length > 0 && (
         <section className="mt-10" data-testid="lapsed-list">
-          <h2 className="text-sm font-semibold">Closed before it was sent</h2>
+          <h2 className="text-sm font-semibold">Closed before it was sent ({lapsed.length})</h2>
           <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
             Work exists but the deadline has passed. Kept so the effort is not lost if it reopens.
           </p>

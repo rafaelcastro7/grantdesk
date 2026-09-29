@@ -3,6 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import { ACCESS_TOKEN_MESSAGE, callerClient } from "./caller";
 import { assessSubmission, type Blocker, type SubmitCandidate } from "@/lib/submit-gate";
+import { memberName } from "@/lib/assignments";
 import { loadPastAwards } from "./past-awards";
 import { draftingGate, fromRow, type DecisionRow, type DraftingGate } from "@/lib/go-decision";
 
@@ -77,6 +78,11 @@ async function buildCandidate(
       .eq("client_id", row.client_id)
       .eq("grant_id", row.grant_id)
       .maybeSingle(),
+    supabase
+      .from("requirement_assignments")
+      .select("requirement_id, owner_id, due_on")
+      .eq("proposal_id", proposalId),
+    supabase.rpc("client_team_roster", { target: row.client_id }),
   ]);
   // A failed read must stop the gate, not empty it: an empty requirement or
   // acknowledgement list reads as "nothing outstanding" and lets a submission
@@ -91,7 +97,26 @@ async function buildCandidate(
     { count },
     { data: profile },
     { data: decision },
+    { data: assignmentRows },
+    { data: roster },
   ] = results;
+  const nameOf = new Map(
+    ((roster ?? []) as Array<{ user_id: string; email: string; display_name: string | null }>).map(
+      (m) => [m.user_id, memberName({ email: m.email, displayName: m.display_name })],
+    ),
+  );
+  const assigned = new Map(
+    (
+      (assignmentRows ?? []) as Array<{
+        requirement_id: string;
+        owner_id: string | null;
+        due_on: string | null;
+      }>
+    ).map((a) => [
+      a.requirement_id,
+      { owner: a.owner_id ? (nameOf.get(a.owner_id) ?? null) : null, dueOn: a.due_on },
+    ]),
+  );
   const goGate = draftingGate(
     fromRow(decision as DecisionRow | null),
     !!(profile as { requires_go_decision?: boolean } | null)?.requires_go_decision,
@@ -135,6 +160,7 @@ async function buildCandidate(
           wordLimit: r.word_limit,
           wordCount: written.get(r.id)?.word_count ?? null,
           draftedBy: written.get(r.id)?.drafted_by ?? null,
+          ...assigned.get(r.id),
         })),
       conditions: reqs
         .filter((r) => r.kind !== "section")
@@ -142,6 +168,7 @@ async function buildCandidate(
           label: r.label,
           isCritical: r.is_critical,
           acknowledged: acknowledged.has(r.id),
+          ...assigned.get(r.id),
         })),
       humanReviewed,
       alreadySubmitted: (count ?? 0) > 0,

@@ -3,6 +3,7 @@ import { supabase } from "@/lib/supabase";
 import { errorMessage } from "@/lib/error-message";
 import { draftingGate, fromRow, type Decision, type DraftingGate } from "@/lib/go-decision";
 import { parseMoney } from "@/lib/parse-money";
+import { unsignedChecks } from "@/lib/assignments";
 
 type BriefRow = {
   role: "lead" | "funded_partner" | "other" | null;
@@ -25,6 +26,12 @@ type BriefRow = {
   decided_by: string | null;
   decision_reason: string | null;
   decided_at: string | null;
+  partner_contact: string | null;
+  pitch_approved_by: string | null;
+  cash_match_verified_by: string | null;
+  cash_match_verified_on: string | null;
+  capacity_verified_by: string | null;
+  capacity_verified_on: string | null;
   updated_at: string | null;
   /** The signed-in account that recorded the decision, set by the database. */
   recorder: { email: string } | null;
@@ -34,7 +41,8 @@ const COLUMNS =
   "role, role_other, intake, application_structure, strategic_angle, mandatory_components, " +
   "request_amount, net_revenue, match_required, in_kind_cap, cash_match_confirmed, risks, " +
   "recommendation, recommendation_reason, condition, decision, condition_met, decided_by, " +
-  "decision_reason, decided_at, updated_at, recorder:consultants!opportunity_decisions_decided_by_user_fkey(email)";
+  "decision_reason, decided_at, partner_contact, pitch_approved_by, cash_match_verified_by, " +
+  "cash_match_verified_on, capacity_verified_by, capacity_verified_on, updated_at, recorder:consultants!opportunity_decisions_decided_by_user_fkey(email)";
 
 const CONFLICT =
   "Not saved — someone else saved this brief since you opened it. Copy anything you need, then reload to see their version.";
@@ -68,6 +76,12 @@ const EMPTY_BRIEF: BriefRow = {
   decided_by: null,
   decision_reason: null,
   decided_at: null,
+  partner_contact: null,
+  pitch_approved_by: null,
+  cash_match_verified_by: null,
+  cash_match_verified_on: null,
+  capacity_verified_by: null,
+  capacity_verified_on: null,
   updated_at: null,
   recorder: null,
 };
@@ -208,6 +222,19 @@ export function OpportunityBrief({
       return;
     }
 
+    // A date with no name says a check happened without saying who stands
+    // behind it, which is the one thing the SOP's Stage 2 record is for.
+    const unsigned = unsignedChecks({
+      "cash match": [text("cashMatchVerifiedBy"), text("cashMatchVerifiedOn")],
+      capacity: [text("capacityVerifiedBy"), text("capacityVerifiedOn")],
+    });
+    if (unsigned.length > 0) {
+      setFailure(
+        `Not saved — the ${unsigned.join(" and ")} check has a date but no name. Write who verified it.`,
+      );
+      return;
+    }
+
     setSaving(true);
     setMessage(null);
     setFailure(null);
@@ -238,6 +265,12 @@ export function OpportunityBrief({
             : decision === row?.decision && row?.decided_at
               ? row.decided_at
               : new Date().toISOString(),
+        partner_contact: text("partnerContact"),
+        pitch_approved_by: text("pitchApprovedBy"),
+        cash_match_verified_by: text("cashMatchVerifiedBy"),
+        cash_match_verified_on: text("cashMatchVerifiedOn"),
+        capacity_verified_by: text("capacityVerifiedBy"),
+        capacity_verified_on: text("capacityVerifiedOn"),
         updated_at: new Date().toISOString(),
       };
       // Only over the version this page loaded. Two people saving one brief
@@ -383,6 +416,35 @@ export function OpportunityBrief({
             label="Whoever controls the budget has confirmed any cash match can be covered"
             value={r?.cash_match_confirmed}
           />
+          <div className="bg-[var(--color-accent-soft)] px-4 py-3 sm:col-span-2">
+            <p className="text-xs font-semibold uppercase tracking-wide">
+              Stage 2 — who checked what
+            </p>
+          </div>
+          <Text name="partnerContact" label="Partner contact" value={r.partner_contact} />
+          <Text name="pitchApprovedBy" label="Pitch approved by" value={r.pitch_approved_by} />
+          <Text
+            name="cashMatchVerifiedBy"
+            label="Cash match verified by"
+            value={r.cash_match_verified_by}
+          />
+          <Text
+            name="cashMatchVerifiedOn"
+            label="Cash match verified on"
+            type="date"
+            value={r.cash_match_verified_on}
+          />
+          <Text
+            name="capacityVerifiedBy"
+            label="Capacity verified by"
+            value={r.capacity_verified_by}
+          />
+          <Text
+            name="capacityVerifiedOn"
+            label="Capacity verified on"
+            type="date"
+            value={r.capacity_verified_on}
+          />
           <Area
             name="risks"
             label="Risks and unknowns"
@@ -484,13 +546,24 @@ function Label({ name, label }: { name: string; label: string }) {
   );
 }
 
-function Text({ name, label, value }: { name: string; label: string; value: unknown }) {
+function Text({
+  name,
+  label,
+  value,
+  type = "text",
+}: {
+  name: string;
+  label: string;
+  value: unknown;
+  type?: "text" | "date";
+}) {
   return (
     <div className="bg-[var(--color-surface)] px-4 py-3">
       <Label name={name} label={label} />
       <input
         id={`brief-${name}`}
         name={name}
+        type={type}
         defaultValue={value == null ? "" : String(value)}
         className={inputClass}
       />
